@@ -24,12 +24,20 @@ instance WithPos Refine where
     pos = refinePos
     atPos r p = r{refinePos = p}
 
+data Field = Field { fieldPos  :: Pos 
+                   , fieldName :: String 
+                   , fieldType :: Type
+                   }
+
+instance WithPos Field where
+    pos = fieldPos
+    atPos f p = f{fieldPos = p}
 
 data Role = Role { rolePos       :: Pos
                  , roleName      :: String
-                 , roleKey       :: [(String, Type)]
+                 , roleKey       :: [Field]
                  , roleKeyRange  :: Expr
-                 , roleContainer :: Maybe Expr
+                 , roleContains  :: [Expr]
                  , roleBody      :: Statement
                  }
 
@@ -40,7 +48,7 @@ instance WithPos Role where
 
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
-                         , funcArgs :: [(String, Type)]
+                         , funcArgs :: [Field]
                          , funcType :: Type
                          }
 
@@ -52,7 +60,7 @@ instance WithPos Function where
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
           | TUInt     {typePos :: Pos, typeWidth :: Int}
-          | TStruct   {typePos :: Pos, typeFields :: [(String,Type)]}
+          | TStruct   {typePos :: Pos, typeFields :: [Field]}
           | TUser     {typePos :: Pos, typeName :: String}
 
 instance WithPos Type where

@@ -11,10 +11,11 @@ import Syntax
 import Pos
 
 
-reservedOpNames = ["!", "|", "=", ":=", "%", "+", "@"]
+reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
 reservedNames = ["and",
                  "bool",
                  "case",
+                 "contains",
                  "default",
                  "endrefine",
                  "false",
@@ -37,7 +38,7 @@ lexer = T.makeTokenParser (emptyDef {T.commentStart      = "(*"
                                     ,T.identLetter       = alphaNum <|> char '_'
                                     ,T.reservedOpNames   = reservedOpNames
                                     ,T.reservedNames     = reservedNames
-                                    ,T.opLetter          = oneOf ":%*+./=|@"
+                                    ,T.opLetter          = oneOf ":%*+./=|"
                                     ,T.caseSensitive     = True})
 
 
@@ -112,10 +113,10 @@ role = withPos $ Role nopos <$  reserved "role"
                             <*> identifier 
                             <*> (parens $ commaSep arg) 
                             <*> (option (EBool nopos True) (brackets $ expr))
-                            <*> (optionMaybe $ reservedOp "@" *> expr)
+                            <*> (commaSep $ reserved "contains" *> expr)
                             <*> (reservedOp "=" *> stat)
 
-arg = (\t n -> (n,t)) <$> typeSpec <*> identifier
+arg = withPos $ (flip $ Field nopos) <$> typeSpec <*> identifier
 
 typeSpec = withPos $ 
             uintType 
