@@ -23,6 +23,7 @@ reservedNames = ["and",
                  "function",
                  "not",
                  "or",
+                 "pkt",
                  "refine",
                  "role",
                  "struct",
@@ -140,13 +141,15 @@ term' = withPos $
      <|> eapply
      <|> eint
      <|> ebool
+     <|> epacket
      <|> eterm
      <|> econd
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
-eterm = EVar nopos <$> identifier
+epacket = EPacket nopos <$ reserved "pkt"
+eterm = EKey nopos <$> identifier
 econd = (fmap uncurry (ECond nopos <$ reserved "case"))
                <*> (braces $ (,) <$> (many $ (,) <$> expr <* colon <*> expr <* semi) 
                                  <*> (reserved "default" *> colon *> expr <* semi))

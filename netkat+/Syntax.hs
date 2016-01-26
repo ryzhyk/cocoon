@@ -1,5 +1,6 @@
 module Syntax( Spec(..)
              , Refine(..)
+             , Field(..)
              , Role(..)
              , Function(..)
              , Type(..)
@@ -10,6 +11,7 @@ module Syntax( Spec(..)
              , Statement(..)) where
 
 import Pos
+import Name
 
 data Spec = Spec [Refine]
 
@@ -33,9 +35,12 @@ instance WithPos Field where
     pos = fieldPos
     atPos f p = f{fieldPos = p}
 
+instance WithName Field where
+    name = fieldName
+
 data Role = Role { rolePos       :: Pos
                  , roleName      :: String
-                 , roleKey       :: [Field]
+                 , roleKeys      :: [Field]
                  , roleKeyRange  :: Expr
                  , roleContains  :: [Expr]
                  , roleBody      :: Statement
@@ -45,6 +50,8 @@ instance WithPos Role where
     pos = rolePos
     atPos r p = r{rolePos = p}
 
+instance WithName Role where
+    name = roleName
 
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
@@ -56,6 +63,8 @@ instance WithPos Function where
     pos = funcPos
     atPos f p = f{funcPos = p}
 
+instance WithName Function where
+    name = funcName
 
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
@@ -76,6 +85,9 @@ instance WithPos TypeDef where
     pos = tdefPos
     atPos t p = t{tdefPos = p}
 
+instance WithName TypeDef where
+    name = tdefName
+
 data BOp = Eq
          | And
          | Or
@@ -84,7 +96,8 @@ data BOp = Eq
 
 data UOp = Not
 
-data Expr = EVar      {exprPos :: Pos, exprVar :: String}
+data Expr = EKey      {exprPos :: Pos, exprKey :: String}
+          | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
           | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}

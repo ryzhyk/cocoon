@@ -1,6 +1,11 @@
-module Util(..) where
+{-# LANGUAGE FlexibleContexts #-}
+
+module Util where
 
 import Data.Graph.Inductive
+import Control.Monad.Except
+import Data.List
+import Data.Maybe
 
 import Pos
 import Name 
@@ -32,3 +37,14 @@ grCycle g = case mapMaybe nodeCycle (nodes g) of
     nodeCycle n = listToMaybe $ map (\s -> map (\id -> (id, fromJust $ lab g id)) (n:(esp s n g))) $ 
                                 filter (\s -> elem n (reachable s g)) $ suc g n
 
+--Logarithm to base 2. Equivalent to floor(log2(x))
+log2 :: Integer -> Int
+log2 0 = 0
+log2 1 = 0
+log2 n 
+    | n>1 = 1 + log2 (n `div` 2)
+    | otherwise = error "log2: negative argument"
+
+-- The number of bits required to encode range [0..i]
+bitWidth :: (Integral a) => a -> Int
+bitWidth i = 1 + log2 (fromIntegral i)
