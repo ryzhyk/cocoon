@@ -21,12 +21,15 @@ assert b p m =
        else err p m
 
 -- Check for duplicate declarations
-uniqNames :: (MonadError String me, WithPos a, WithName a) => (String -> String) -> [a] -> me ()
-uniqNames msgfunc xs = do
-    case filter ((>1) . length) $ groupBy (\x1 x2 -> name x1 == name x2) $ 
-                                  sortBy (\x1 x2 -> compare (name x1) (name x2)) xs of
+uniq :: (MonadError String me, WithPos a, Ord b) => (a -> b) -> (a -> String) -> [a] -> me ()
+uniq ford msgfunc xs = do
+    case filter ((>1) . length) $ groupBy (\x1 x2 -> compare (ford x1) (ford x2) == EQ)  
+                                $ sortBy (\x1 x2 -> compare (ford x1) (ford x2)) xs of
          []        -> return ()
-         g@(x:_):_ -> err (pos x) $ msgfunc (sname x) ++ " at the following locations:\n  " ++ (intercalate "\n  " $ map spos g)
+         g@(x:_):_ -> err (pos x) $ msgfunc x ++ " at the following locations:\n  " ++ (intercalate "\n  " $ map spos g)
+
+uniqNames :: (MonadError String me, WithPos a, WithName a) => (String -> String) -> [a] -> me ()
+uniqNames msgfunc = uniq name (\x -> msgfunc (name x))
 
 -- Find a cycle in a graph
 grCycle :: Graph gr => gr a b -> Maybe [LNode a]

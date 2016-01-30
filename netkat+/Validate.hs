@@ -27,10 +27,11 @@ combine prev new = do
     prev' <- foldM (\r role -> do assert (isJust $ find ((==role) . roleName) (refineRoles r)) (pos new) 
                                          $ "Role " ++ role ++ " is undefined in this context"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
-    let types = refineTypes prev' ++ refineTypes new
-        funcs = refineFuncs prev' ++ refineFuncs new
-        roles = refineRoles prev' ++ refineRoles new 
-    return $ Refine nopos [] types funcs roles
+    let types = refineTypes prev'     ++ refineTypes new
+        funcs = refineFuncs prev'     ++ refineFuncs new
+        roles = refineRoles prev'     ++ refineRoles new
+        rlocs = refineLocations prev' ++ refineLocations new 
+    return $ Refine nopos [] types funcs roles rlocs
 
 
 -- construct dependency graph
@@ -40,18 +41,20 @@ typeGraph r = undefined
 -- Validate refinement with previous definitions inlined
 validate1 :: (MonadError String me) => Refine -> me ()
 validate1 r@Refine{..} = do
-    uniqNames (\n -> "Multiple definitions of type " ++ n)     refineTypes
+    uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assert (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
-    uniqNames (\n -> "Multiple definitions of role " ++ n)     refineRoles
+    uniq locRole (\r -> "Multiple container definitions for role " ++ locRole r) refineLocations
     mapM_ (typeValidate r . tdefType) refineTypes
-    -- check for cycles in the types graph - catch recursive type definitions
+    -- TODO: check for cycles in the types graph - catch recursive type definitions
     case grCycle (typeGraph r) of
          Nothing -> return ()
          Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
 
     mapM_ (funcValidate r) refineFuncs
     mapM_ (roleValidate r) refineRoles
+    mapM_ (rlocValidate r) refineLocations
+    -- TODO: check for cycles in the locations graph
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
@@ -72,8 +75,14 @@ roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r role roleKeyRange
-    mapM_ (exprValidate r role) roleContains
     statValidate r role roleBody
+    return ()
+
+rlocValidate :: (MonadError String me) => Refine -> RoleLocation -> me ()
+rlocValidate r rloc@RoleLocation{..} = do
+    role <- checkRole (pos rloc) r locRole
+    exprValidate r role locExpr
+    assert (isLocation r role locExpr) (pos locExpr) "Not a valid location"
     return ()
 
 exprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()

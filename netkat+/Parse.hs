@@ -15,12 +15,12 @@ reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
 reservedNames = ["and",
                  "bool",
                  "case",
-                 "contains",
                  "default",
                  "endrefine",
                  "false",
                  "filter",
                  "function",
+                 "container",
                  "not",
                  "or",
                  "pkt",
@@ -76,9 +76,10 @@ removeTabs = do s <- getInput
 withPos x = (\s x e -> atPos x (s,e)) <$> getPosition <*> x <*> getPosition
 
 
-data SpecItem = SpType       TypeDef
-              | SpFunc       Function
-              | SpRole       Role
+data SpecItem = SpType         TypeDef
+              | SpFunc         Function
+              | SpRole         Role
+              | SpRoleLocation RoleLocation
 
 
 grammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
@@ -86,7 +87,7 @@ grammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs roles 
+mkRefine targets items = Refine nopos targets types funcs roles locs
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
@@ -96,15 +97,19 @@ mkRefine targets items = Refine nopos targets types funcs roles
           roles = mapMaybe (\i -> case i of 
                                        SpRole r -> Just r
                                        _        -> Nothing) items
+          locs  = mapMaybe (\i -> case i of 
+                                       SpRoleLocation l -> Just l
+                                       _                -> Nothing) items
 
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep identifier)
                             <*> (many decl)
                             <*  reserved "endrefine"
 
-decl =  (SpType <$> typeDef)
-    <|> (SpFunc <$> func)
-    <|> (SpRole <$> role)
+decl =  (SpType         <$> typeDef)
+    <|> (SpFunc         <$> func)
+    <|> (SpRole         <$> role)
+    <|> (SpRoleLocation <$> rloc)
 
 typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
 
@@ -114,8 +119,10 @@ role = withPos $ Role nopos <$  reserved "role"
                             <*> identifier 
                             <*> (parens $ commaSep arg) 
                             <*> (option (EBool nopos True) (brackets $ expr))
-                            <*> (commaSep $ reserved "contains" *> expr)
                             <*> (reservedOp "=" *> stat)
+
+
+rloc = withPos $ RoleLocation nopos <$ reserved "container" <*> (parens $ identifier) <* reservedOp "=" <*> expr
 
 arg = withPos $ (flip $ Field nopos) <$> typeSpec <*> identifier
 

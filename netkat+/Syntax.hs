@@ -2,6 +2,7 @@ module Syntax( Spec(..)
              , Refine(..)
              , Field(..)
              , Role(..)
+             , RoleLocation(..)
              , Function(..)
              , Type(..)
              , TypeDef(..)
@@ -15,11 +16,12 @@ import Name
 
 data Spec = Spec [Refine]
 
-data Refine = Refine { refinePos    :: Pos
-                     , refineTarget :: [String]
-                     , refineTypes  :: [TypeDef]
-                     , refineFuncs  :: [Function]
-                     , refineRoles  :: [Role]
+data Refine = Refine { refinePos       :: Pos
+                     , refineTarget    :: [String]
+                     , refineTypes     :: [TypeDef]
+                     , refineFuncs     :: [Function]
+                     , refineRoles     :: [Role]
+                     , refineLocations :: [RoleLocation]
                      }
 
 instance WithPos Refine where
@@ -42,7 +44,6 @@ data Role = Role { rolePos       :: Pos
                  , roleName      :: String
                  , roleKeys      :: [Field]
                  , roleKeyRange  :: Expr
-                 , roleContains  :: [Expr]
                  , roleBody      :: Statement
                  }
 
@@ -52,6 +53,15 @@ instance WithPos Role where
 
 instance WithName Role where
     name = roleName
+
+data RoleLocation = RoleLocation { locPos  :: Pos
+                                 , locRole :: String
+                                 , locExpr :: Expr
+                                 }
+
+instance WithPos RoleLocation where
+    pos = locPos
+    atPos r p = r{locPos = p}
 
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
