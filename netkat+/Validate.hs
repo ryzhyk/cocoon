@@ -148,17 +148,19 @@ exprValidate r role (EStruct p n as) = do
 exprValidate r role (EBinOp p op left right) = do
     exprValidate r role left
     exprValidate r role right
-    case op of
-         Eq   -> matchType r role left right
-         And  -> do assertR r (isBool r role left)  (pos left)  $ "Not a boolean expression"
-                    assertR r (isBool r role right) (pos right) $ "Not a boolean expression"
-         Or   -> do assertR r (isBool r role left)  (pos left)  $ "Not a boolean expression"
-                    assertR r (isBool r role right) (pos right) $ "Not a boolean expression"
-         Plus -> do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
-                    assertR r (isUInt r role right) (pos right) $ "Not an integer expression"
-                    matchType r role left right
-         Mod  -> do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
-                    assertR r (isUInt r role right) (pos right) $ "Not an integer expression"
+    if' (elem op [Eq]) (matchType r role left right)
+     $ if' (elem op [Lt, Lte, Gt, Gte, Plus]) (
+          do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
+             assertR r (isUInt r role right) (pos right) $ "Not an integer expression"
+             matchType r role left right)
+     $ if' (elem op [And, Or]) (
+          do assertR r (isBool r role left)  (pos left)  $ "Not a boolean expression"
+             assertR r (isBool r role right) (pos right) $ "Not a boolean expression")
+     $ if' (elem op [Mod]) (
+          do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
+             assertR r (isUInt r role right) (pos right) $ "Not an integer expression") 
+     $ undefined
+
 exprValidate r role (EUnOp p op e) = do
     exprValidate r role e
     case op of

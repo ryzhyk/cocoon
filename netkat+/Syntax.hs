@@ -140,6 +140,10 @@ instance WithName TypeDef where
     name = tdefName
 
 data BOp = Eq
+         | Lt
+         | Gt
+         | Lte
+         | Gte
          | And
          | Or
          | Plus

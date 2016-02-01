@@ -179,11 +179,16 @@ estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep1 expr)
 
 etable = [[postf $ choice [postField]]
          ,[pref  $ choice [prefix "not" Not]]
-         ,[binary "=" Eq AssocLeft]
-         ,[binary "and" And AssocLeft]
-         ,[binary "or" Or AssocLeft]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft]
+         ,[binary "="  Eq  AssocLeft,          
+           binary "<"  Lt  AssocNone, 
+           binary "<=" Lte AssocNone, 
+           binary ">"  Gt  AssocNone, 
+           binary ">=" Gte AssocNone]
+         ,[binary "and" And AssocLeft]
+         ,[binary "or" Or AssocLeft]
+
          ]
 
 pref  p = Prefix  . chainl1 p $ return       (.)

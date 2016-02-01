@@ -10,6 +10,9 @@ import Data.Maybe
 import Pos
 import Name 
 
+if' :: Bool -> a -> a -> a
+if' True  x _ = x
+if' False _ y = y
 
 err :: (MonadError String me) => Pos -> String -> me a
 err p e = throwError $ spos p ++ ": " ++ e

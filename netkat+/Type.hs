@@ -36,6 +36,10 @@ instance WithType Expr where
                                      where tdef = getType r n
     typ r role (EBinOp _ op e1 e2) = case op of
                                           Eq   -> TBool nopos
+                                          Lt   -> TBool nopos
+                                          Gt   -> TBool nopos
+                                          Lte  -> TBool nopos
+                                          Gte  -> TBool nopos
                                           And  -> TBool nopos
                                           Or   -> TBool nopos
                                           Plus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
