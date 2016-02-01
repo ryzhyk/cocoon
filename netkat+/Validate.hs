@@ -49,9 +49,9 @@ validate1 r@Refine{..} = do
     uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
     mapM_ (typeValidate r . tdefType) refineTypes
     -- TODO: check for cycles in the types graph - catch recursive type definitions
-    case grCycle (typeGraph r) of
-         Nothing -> return ()
-         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
+--    case grCycle (typeGraph r) of
+--         Nothing -> return ()
+--         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
 
     mapM_ (funcValidate r) refineFuncs
     mapM_ (roleValidate r) refineRoles
