@@ -1,5 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Syntax( Spec(..)
              , Refine(..)
+             , errR, assertR
              , Field(..)
              , Role(..)
              , RoleLocation(..)
@@ -14,6 +17,7 @@ module Syntax( Spec(..)
              , statSendsTo) where
 
 import Data.List
+import Control.Monad.Except
 
 import Pos
 import Name
@@ -37,6 +41,15 @@ data Field = Field { fieldPos  :: Pos
                    , fieldName :: String 
                    , fieldType :: Type
                    }
+
+errR :: (MonadError String me) => Refine -> Pos -> String -> me a
+errR r p e = throwError $ spos p ++ ": " ++ e ++ " (when processing refinement at " ++ (spos $ pos r) ++ ")"
+
+assertR :: (MonadError String me) => Refine -> Bool -> Pos -> String -> me ()
+assertR r b p m = 
+    if b 
+       then return ()
+       else errR r p m
 
 instance Eq Field where
     (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2

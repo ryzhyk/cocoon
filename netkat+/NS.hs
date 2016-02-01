@@ -22,7 +22,7 @@ lookupType Refine{..} n = find ((==n) . name) refineTypes
 
 checkType :: (MonadError String me) => Pos -> Refine -> String -> me TypeDef
 checkType p r n = case lookupType r n of
-                       Nothing -> err p $ "Unknown type: " ++ n
+                       Nothing -> errR r p $ "Unknown type: " ++ n
                        Just t  -> return t
 
 getType :: Refine -> String -> TypeDef
@@ -34,7 +34,7 @@ lookupFunc Refine{..} n = find ((==n) . name) refineFuncs
 
 checkFunc :: (MonadError String me) => Pos -> Refine -> String -> me Function
 checkFunc p r n = case lookupFunc r n of
-                       Nothing -> err p $ "Unknown function: " ++ n
+                       Nothing -> errR r p $ "Unknown function: " ++ n
                        Just f  -> return f
 
 getFunc :: Refine -> String -> Function
@@ -46,7 +46,7 @@ lookupRole Refine{..} n = find ((==n) . name) refineRoles
 
 checkRole :: (MonadError String me) => Pos -> Refine -> String -> me Role
 checkRole p r n = case lookupRole r n of
-                       Nothing -> err p $ "Unknown role: " ++ n
+                       Nothing -> errR r p $ "Unknown role: " ++ n
                        Just rl -> return rl
 
 getRole :: Refine -> String -> Role

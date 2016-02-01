@@ -67,7 +67,7 @@ isLocation r role a = case typ' r role a of
                            _           -> False
 
 matchType :: (MonadError String me, WithType a, WithPos a, WithType b) => Refine -> Role -> a -> b -> me ()
-matchType r role x y = assert (matchType' r role x y) (pos x) "Incompatible type"
+matchType r role x y = assertR r (matchType' r role x y) (pos x) "Incompatible type"
 
 matchType' :: (WithType a, WithType b) => Refine -> Role -> a -> b -> Bool
 matchType' r role x y = 
