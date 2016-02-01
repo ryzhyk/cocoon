@@ -31,7 +31,8 @@ combine prev new = do
         funcs = refineFuncs prev'     ++ refineFuncs new
         roles = refineRoles prev'     ++ refineRoles new
         rlocs = refineLocations prev' ++ refineLocations new 
-    return $ Refine nopos [] types funcs roles rlocs
+        sws   = refineSwitches prev'  ++ refineSwitches new 
+    return $ Refine nopos [] types funcs roles rlocs sws
 
 
 -- construct dependency graph
@@ -45,6 +46,7 @@ validate1 r@Refine{..} = do
     assert (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniq locRole (\r -> "Multiple container definitions for role " ++ locRole r) refineLocations
+    uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
     mapM_ (typeValidate r . tdefType) refineTypes
     -- TODO: check for cycles in the types graph - catch recursive type definitions
     case grCycle (typeGraph r) of
@@ -55,6 +57,7 @@ validate1 r@Refine{..} = do
     mapM_ (roleValidate r) refineRoles
     mapM_ (rlocValidate r) refineLocations
     -- TODO: check for cycles in the locations graph
+    mapM_ (switchValidate r) refineSwitches
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
@@ -84,6 +87,31 @@ rlocValidate r rloc@RoleLocation{..} = do
     exprValidate r role locExpr
     assert (isLocation r role locExpr) (pos locExpr) "Not a valid location"
     return ()
+
+switchValidate :: (MonadError String me) => Refine -> Switch -> me ()
+switchValidate r sw@Switch{..} = do
+    swRole <- checkRole (pos sw) r swName
+    -- each role occurs at most once in the port list
+    uniq' (\_ -> (pos sw)) id (++ " is mentioned twice in the port list") $ concatMap (\(i,o) -> [i,o]) swPorts
+    -- for each port 
+    mapM_ (\(p1,p2) -> do r1 <- checkRole (pos sw) r p1
+                          r2 <- checkRole (pos sw) r p2
+                          assert (roleKeys r1 == roleKeys r2) (pos sw)
+                                 $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical parameter lists"
+                          assert (roleKeyRange r1 == roleKeyRange r2) (pos sw)
+                                 $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical key ranges"
+                          let validateR rl = do assert (length (roleKeys rl) > 0 && isUInt r rl (last $ roleKeys rl)) (pos sw) 
+                                                       $ "Port " ++ name rl ++ " must be indexed with an integer key"
+                                                assert ((init $ roleKeys rl) == roleKeys swRole) (pos sw) 
+                                                       $ "Port " ++ name rl ++ " must be indexed with the same keys as switch " ++ swName ++ " and one extra integer key" 
+                          validateR r1
+                          validateR r2
+                          -- input ports can only send to output ports
+                          assert (all (\rl -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r1)) (pos sw)
+                                 $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the switch's outbound ports"
+                          assert (not $ any (\rl -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r2)) (pos sw)
+                                 $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports")
+          swPorts
 
 exprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()
 exprValidate r role (EKey p k) = do 

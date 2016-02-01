@@ -80,6 +80,7 @@ data SpecItem = SpType         TypeDef
               | SpFunc         Function
               | SpRole         Role
               | SpRoleLocation RoleLocation
+              | SpSwitch       Switch
 
 
 grammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
@@ -87,7 +88,7 @@ grammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs roles locs
+mkRefine targets items = Refine nopos targets types funcs roles locs sws
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
@@ -100,6 +101,9 @@ mkRefine targets items = Refine nopos targets types funcs roles locs
           locs  = mapMaybe (\i -> case i of 
                                        SpRoleLocation l -> Just l
                                        _                -> Nothing) items
+          sws   = mapMaybe (\i -> case i of 
+                                       SpSwitch s -> Just s
+                                       _          -> Nothing) items
 
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep identifier)
@@ -110,6 +114,8 @@ decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
     <|> (SpRoleLocation <$> rloc)
+    <|> (SpSwitch       <$> switch)
+
 
 typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
 
@@ -123,6 +129,10 @@ role = withPos $ Role nopos <$  reserved "role"
 
 
 rloc = withPos $ RoleLocation nopos <$ reserved "container" <*> (parens $ identifier) <* reservedOp "=" <*> expr
+
+switch = withPos $ Switch nopos <$  reserved "switch" 
+                                <*> identifier 
+                                <*> (parens $ commaSep $ parens $ (,) <$> identifier <* comma <*> identifier)
 
 arg = withPos $ (flip $ Field nopos) <$> typeSpec <*> identifier
 

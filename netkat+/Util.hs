@@ -22,11 +22,14 @@ assert b p m =
 
 -- Check for duplicate declarations
 uniq :: (MonadError String me, WithPos a, Ord b) => (a -> b) -> (a -> String) -> [a] -> me ()
-uniq ford msgfunc xs = do
+uniq = uniq' pos
+
+uniq' :: (MonadError String me, Ord b) => (a -> Pos) -> (a -> b) -> (a -> String) -> [a] -> me ()
+uniq' fpos ford msgfunc xs = do
     case filter ((>1) . length) $ groupBy (\x1 x2 -> compare (ford x1) (ford x2) == EQ)  
                                 $ sortBy (\x1 x2 -> compare (ford x1) (ford x2)) xs of
          []        -> return ()
-         g@(x:_):_ -> err (pos x) $ msgfunc x ++ " at the following locations:\n  " ++ (intercalate "\n  " $ map spos g)
+         g@(x:_):_ -> err (fpos x) $ msgfunc x ++ " at the following locations:\n  " ++ (intercalate "\n  " $ map (spos . fpos) g)
 
 uniqNames :: (MonadError String me, WithPos a, WithName a) => (String -> String) -> [a] -> me ()
 uniqNames msgfunc = uniq name (\x -> msgfunc (name x))
