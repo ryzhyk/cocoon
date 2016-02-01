@@ -16,7 +16,6 @@ reservedNames = ["and",
                  "bool",
                  "case",
                  "default",
-                 "endrefine",
                  "false",
                  "filter",
                  "function",
@@ -109,8 +108,7 @@ mkRefine targets items = Refine nopos targets types funcs roles locs sws
 
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep identifier)
-                            <*> (many decl)
-                            <*  reserved "endrefine"
+                            <*> (braces $ many decl)
 
 decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> func)
