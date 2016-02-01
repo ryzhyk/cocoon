@@ -1,0 +1,10 @@
+typedef struct {
+    uint<8> ip3,
+    uint<8> ip2,
+    uint<8> ip1,
+    uint<8> ip0
+} IP4
+
+typedef struct {
+    IP4 dst
+} Packet

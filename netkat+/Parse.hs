@@ -1,4 +1,4 @@
-module Frontend.Parse (grammar) where
+module Parse (nkplusGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
 import Text.Parsec hiding ((<|>))
@@ -84,7 +84,7 @@ data SpecItem = SpType         TypeDef
               | SpSwitch       Switch
 
 
-grammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
+nkplusGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
 
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
