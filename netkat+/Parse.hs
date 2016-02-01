@@ -27,6 +27,7 @@ reservedNames = ["and",
                  "refine",
                  "role",
                  "struct",
+                 "switch",
                  "true",
                  "typedef",
                  "uint"]
