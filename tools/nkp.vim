@@ -19,7 +19,7 @@ syn match  nkpDelimiter         ":="
 syn match  nkpDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword nkpStatement        and bool case default endrefine filter function container not or pkt refine role struct
+syn keyword nkpStatement        and bool case default endrefine filter function container not or pkt refine role struct switch
 
 syn keyword nkpTodo             contained TODO FIXME XXX
 
@@ -27,7 +27,7 @@ syn keyword nkpTodo             contained TODO FIXME XXX
 "syn keyword nkpRepeat
 
 "Conditionals
-syn keyword nkpConditional      switch
+syn keyword nkpConditional      case
 
 "Constants
 syn keyword nkpConstant         true false pkt
