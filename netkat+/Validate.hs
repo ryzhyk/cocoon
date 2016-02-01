@@ -42,6 +42,7 @@ typeGraph r = undefined
 -- Validate refinement with previous definitions inlined
 validate1 :: (MonadError String me) => Refine -> me ()
 validate1 r@Refine{..} = do
+    uniqNames (\n -> "Multiple definitions of role " ++ n) refineRoles
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
