@@ -26,6 +26,7 @@ reservedNames = ["and",
                  "pkt",
                  "refine",
                  "role",
+                 "send",
                  "struct",
                  "switch",
                  "true",
@@ -157,6 +158,7 @@ term    = parens expr <|> term'
 term' = withPos $
          estruct
      <|> eapply
+     <|> eloc
      <|> eint
      <|> ebool
      <|> epacket
@@ -165,6 +167,8 @@ term' = withPos $
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
+eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
+    where isloc = try $ lookAhead $ identifier *> symbol "["
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
 eterm = EKey nopos <$> identifier
@@ -207,8 +211,8 @@ stest = STest nopos <$ reserved "filter" <*> expr
 ssend = SSend nopos <$ reserved "send" <*> expr
 sset  = SSet  nopos <$> expr <*> (reservedOp ":=" *> expr)
 
-stable = [[sbinary "|" SPar AssocRight]
-         ,[sbinary ";" SSeq AssocRight]
+stable = [ [sbinary ";" SSeq AssocRight]
+         , [sbinary "|" SPar AssocRight]
          ]
 
 sbinary n fun = Infix $ (\l r -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
