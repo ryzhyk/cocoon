@@ -133,8 +133,8 @@ exprValidate r role (EField p s f) = do
 exprValidate r role (ELocation p rname as) = do
     role' <- checkRole p r rname
     assertR r ((length $ roleKeys role') == length as) p "Number of keys does not match role declaration"
-    mapM_ (\(formal,actual) -> do exprValidate r role' actual
-                                  matchType r role' formal actual) 
+    mapM_ (\(formal,actual) -> do exprValidate r role actual
+                                  matchType r role formal actual) 
           $ zip (roleKeys role') as
 
 exprValidate r role (EStruct p n as) = do
