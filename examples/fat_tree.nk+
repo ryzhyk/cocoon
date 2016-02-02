@@ -8,3 +8,70 @@ typedef struct {
 typedef struct {
     IP4 dst
 } Packet
+
+function netmask(): uint<8>
+function k(): uint<8>
+
+role Node(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
+    (filter addr = pkt.dst) | (filter not (addr = pkt.dst) ; send Node[pkt.dst])
+
+refine Node {
+
+    role Fabric() =
+        send Node[pkt.dst]
+        
+    role Node(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
+        (filter addr = pkt.dst) | (filter not (addr = pkt.dst) ; send Fabric[])
+}
+
+refine Fabric, Node {
+    role Core() = 
+        send Pod[pkt.dst.ip2]
+
+    role Pod(uint<8> subnet)[subnet < k() + k()] = 
+          (filter pkt.dst.ip2 = subnet); send Core[]
+        | (filter not (pkt.dst.ip2 = subnet); send Node[pkt.dst])
+
+    role Node(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
+        (filter addr = pkt.dst) | (filter not (addr = pkt.dst) ; send Pod[pkt.dst.ip2])
+}
+
+refine Core, Pod, Node {
+    role Core() = 
+        send PodUpper[pkt.dst.ip2]
+
+    role PodUpper(uint<8> subnet) [subnet < k() + k()] = 
+          (filter pkt.dst.ip2 = subnet); send PodLower[subnet,pkt.dst.ip3]
+        | (filter not (pkt.dst.ip2 = subnet); send Core[])
+
+    role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
+          (filter pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet); send Node[pkt.dst]
+        | (filter not (pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet); send PodUpper[subnet])
+
+    role Node(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
+        (filter addr = pkt.dst) | (filter not (addr = pkt.dst) ; send PodLower[pkt.dst.ip2, pkt.dst.ip1])
+}
+
+refine Core, PodUpper, PodLower {
+    role Core(uint<8> hash)[hash < k()] = 
+        send PodUpper[pkt.dst.ip2, hash]
+
+    role PodUpper(uint<8> subnet, uint<8> hash) [subnet < k() + k() and hash < k()] = 
+          (filter pkt.dst.ip2 = subnet); send PodLower[subnet,pkt.dst.ip3]
+        | (filter not (pkt.dst.ip2 = subnet); send Core[hash])
+
+    role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
+          (filter pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet); send Node[pkt.dst]
+        | (filter not (pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet); send PodUpper[subnet,(subnet+pkt.dst.ip0)%k()])
+}
+
+refine Core, PodUpper {
+    role Core(uint<8> hash, uint<8> hash2)[hash < k() and hash2 < k()] = 
+        send PodUpper[pkt.dst.ip2, hash]
+
+    role PodUpper(uint<8> subnet, uint<8> hash) [subnet < k() + k() and hash < k()] = 
+          (filter pkt.dst.ip2 = subnet); send PodLower[subnet,pkt.dst.ip3]
+        | (filter not (pkt.dst.ip2 = subnet); send Core[hash, (hash + pkt.dst.ip0)%k()])
+}
+
+
