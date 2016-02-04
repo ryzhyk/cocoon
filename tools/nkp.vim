@@ -27,7 +27,7 @@ syn keyword nkpTodo             contained TODO FIXME XXX
 "syn keyword nkpRepeat
 
 "Conditionals
-syn keyword nkpConditional      case
+syn keyword nkpConditional      case if then else
 
 "Constants
 syn keyword nkpConstant         true false pkt

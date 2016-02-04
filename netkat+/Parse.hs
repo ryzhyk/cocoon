@@ -15,11 +15,13 @@ reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
 reservedNames = ["and",
                  "bool",
                  "case",
+                 "container",
                  "default",
+                 "else",
                  "false",
                  "filter",
                  "function",
-                 "container",
+                 "if",
                  "not",
                  "or",
                  "pkt",
@@ -28,6 +30,7 @@ reservedNames = ["and",
                  "send",
                  "struct",
                  "switch",
+                 "then",
                  "true",
                  "typedef",
                  "uint"]
@@ -207,12 +210,14 @@ stat' = parens stat <|> simpleStat
 
 simpleStat = withPos $
               stest
+          <|> site
           <|> ssend
           <|> sset
 
 stest = STest nopos <$ reserved "filter" <*> expr
 ssend = SSend nopos <$ reserved "send" <*> expr
 sset  = SSet  nopos <$> expr <*> (reservedOp ":=" *> expr)
+site  = SITE  nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (reserved "else" *> stat)
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]

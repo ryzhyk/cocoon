@@ -207,6 +207,13 @@ statValidate r role (SPar p h t) = do
     sends2 <- statValidate r role t
     return $ sends1 || sends2
 
+statValidate r role (SITE p c t e) = do
+    exprValidate r role c
+    assertR r (isBool r role c) (pos c) "Condition must be a boolean expression"
+    sends1 <- statValidate r role t
+    sends2 <- statValidate r role e
+    return $ sends1 || sends2
+
 statValidate r role (STest p c) = do
     exprValidate r role c
     assertR r (isBool r role c) (pos c) "Filter must be a boolean expression"

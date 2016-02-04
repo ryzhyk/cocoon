@@ -185,6 +185,7 @@ instance WithPos Expr where
 
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
+               | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Statement}
                | STest {statPos :: Pos, statCond :: Expr}
                | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
                | SSend {statPos :: Pos, statDst :: Expr}
@@ -194,11 +195,12 @@ statSendsTo :: Statement -> [Expr]
 statSendsTo st = nub $ statSendsTo' st
 
 statSendsTo' :: Statement -> [Expr]
-statSendsTo' (SSeq  _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (SPar  _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (STest _ _)     = []
-statSendsTo' (SSet  _ _ _)   = []
-statSendsTo' (SSend _ loc)   = [loc]
+statSendsTo' (SSeq  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SPar  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (STest _ _)       = []
+statSendsTo' (SSet  _ _ _)     = []
+statSendsTo' (SSend _ loc)     = [loc]
 
 instance WithPos Statement where
     pos = statPos
