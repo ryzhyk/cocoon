@@ -177,6 +177,7 @@ instance Eq Expr where
     (==) (EBinOp    _ op1 l1 r1) (EBinOp    _ op2 l2 r2) = (op1 == op2) && (l1 == l2) && (r1 == r2)
     (==) (EUnOp     _ op1 e1)    (EUnOp     _ op2 e2)    = (op1 == op2) && (e1 == e2)
     (==) (ECond     _ cs1 d1)    (ECond     _ cs2 d2)    = (cs1 == cs2) && (d1 == d2)
+    (==) _                       _                       = False
 
 instance WithPos Expr where
     pos = exprPos
@@ -189,15 +190,15 @@ data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Stat
                | SSend {statPos :: Pos, statDst :: Expr}
 
 
-statSendsTo :: Statement -> [String]
+statSendsTo :: Statement -> [Expr]
 statSendsTo st = nub $ statSendsTo' st
 
-statSendsTo' :: Statement -> [String]
-statSendsTo' (SSeq  _ s1 s2)              = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (SPar  _ s1 s2)              = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (STest _ _)                  = []
-statSendsTo' (SSet  _ _ _)                = []
-statSendsTo' (SSend _ (ELocation _ rl _)) = [rl]
+statSendsTo' :: Statement -> [Expr]
+statSendsTo' (SSeq  _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SPar  _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (STest _ _)     = []
+statSendsTo' (SSet  _ _ _)   = []
+statSendsTo' (SSend _ loc)   = [loc]
 
 instance WithPos Statement where
     pos = statPos

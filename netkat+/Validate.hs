@@ -107,10 +107,12 @@ switchValidate r sw@Switch{..} = do
                                                        $ "Port " ++ name rl ++ " must be indexed with the same keys as switch " ++ swName ++ " and one extra integer key" 
                           validateR r1
                           validateR r2
-                          -- input ports can only send to output ports
-                          assertR r (all (\rl -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r1)) (pos sw)
+                          -- input ports can only send to output ports of the same switch 
+                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd swPorts)) && 
+                                                                    (all (\(key, arg) -> arg == (EKey nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
+                                         $ statSendsTo (roleBody r1)) (pos sw)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the switch's outbound ports"
-                          assertR r (not $ any (\rl -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r2)) (pos sw)
+                          assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r2)) (pos sw)
                                  $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports")
           swPorts
 
