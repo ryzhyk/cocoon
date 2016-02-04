@@ -122,13 +122,17 @@ refine PodLower, PodUpperLOut, Node {
         send Node[IP4{pkt.dst.ip3,subnet, subsubnet, port}]
 
     role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
-          send PodLowerUIn[subnet, port, hash]
+        send PodLowerUIn[subnet, port, hash]
 
     role Node(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
         (filter addr = pkt.dst) | (filter not (addr = pkt.dst) ; send PodLowerLIn[pkt.dst.ip2, pkt.dst.ip1, pkt.dst.ip0])
 }
 
 refine {
+
+    role CoreSwitch(uint<8> hash, uint<8> hash2)[hash < k() and hash2 < k()] = (filter false)
+    switch CoreSwitch( (CoreIn, CoreOut) )
+
     role PodUpperSwitch(uint<8> subnet, uint<8> hash)[subnet < k() + k() and hash < k()] = (filter false)
     switch PodUpperSwitch( (PodUpperUIn, PodUpperUOut), (PodUpperLIn, PodUpperLOut))
 
