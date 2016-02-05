@@ -11,6 +11,7 @@ import Data.Bits
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
+import Debug.Trace
 
 import Util
 import PP
@@ -32,9 +33,9 @@ data P4Statement = P4SSeq   P4Statement P4Statement
                  | P4SApply String
                  | P4SDrop
 
-isSeq :: P4Statement -> Bool
-isSeq (P4SSeq _ _) = True
-isSeq _            = False
+isITE :: P4Statement -> Bool
+isITE (P4SITE _ _ _) = True
+isITE _              = False
 
 -- Function map: stores values of constant functions
 type FMap = M.Map String Expr
@@ -52,11 +53,11 @@ instance PP P4Statement where
     pp (P4SSeq s1 s2) = (pp s1 <> semi) $$ pp s2
     pp (P4SITE c t e) = pp "if" <+> (parens $ printExpr c) <+> lbrace 
                         $$
-                        pp t
+                        (nest' $ pp t)
                         $$
-                        maybe empty (\st -> (rbrace <+> pp "else" <+> (if' (isSeq st) lbrace empty)) 
-                                            $$ (pp st <> semi)
-                                            $$ (if' (isSeq st) rbrace empty)) e
+                        maybe empty (\st -> (rbrace <+> pp "else" <+> (if' (isITE st) empty lbrace)) 
+                                            $$ (nest' $ pp st <> semi)
+                                            $$ (if' (isITE st) empty rbrace)) e
     pp (P4SApply n)   = pp "apply" <> (parens $ pp n)
     pp (P4SDrop)      = pp "drop"
 
@@ -108,7 +109,7 @@ genP4Switch r switch fmap kmap pmap =
     let (controlstat, P4State _ tables commands) = runState (mkSwitch kmap switch) (P4State 0 [] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
-                  pp controlstat
+                  (nest' $ pp controlstat)
                   $$
                   rbrace
     in (pp "#include <parse.p4>" $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
@@ -116,7 +117,7 @@ genP4Switch r switch fmap kmap pmap =
 mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Switch -> State P4State P4Statement
 mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
-    let portranges = map (\(port,_) -> ?pmap M.! port) $ swPorts switch
+    let portranges = map (\(port,_) -> trace ("port: " ++ port) $ ?pmap M.! port) $ swPorts switch
     stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
                                 let (first, _) = ?pmap M.! port in
                                 let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos first)) kmap in 
