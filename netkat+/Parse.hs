@@ -122,7 +122,7 @@ decl =  (SpType         <$> typeDef)
 
 typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
 
-func = withPos $ Function nopos <$ reserved "function" <*> identifier <*> (parens $ commaSep arg) <*> (colon *> typeSpec)
+func = withPos $ Function nopos <$ reserved "function" <*> identifier <*> (parens $ commaSep arg) <*> (colon *> typeSpecSimple)
 
 role = withPos $ Role nopos <$  reserved "role" 
                             <*> identifier 
@@ -137,7 +137,7 @@ switch = withPos $ Switch nopos <$  reserved "switch"
                                 <*> identifier 
                                 <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
-arg = withPos $ (flip $ Field nopos) <$> typeSpec <*> identifier
+arg = withPos $ (flip $ Field nopos) <$> typeSpecSimple <*> identifier
 
 typeSpec = withPos $ 
             uintType 
@@ -145,6 +145,10 @@ typeSpec = withPos $
         <|> userType 
         <|> structType 
         
+typeSpecSimple = withPos $ 
+                  uintType 
+              <|> boolType 
+              <|> userType 
 
 uintType   = TUInt   nopos <$ reserved "uint" <*> (fromIntegral <$> angles decimal)
 boolType   = TBool   nopos <$ reserved "bool"
