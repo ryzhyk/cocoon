@@ -4,6 +4,7 @@ module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
+          lookupSwitch, checkSwich, getSwitch,
           packetTypeName) where
 
 import Data.List
@@ -63,3 +64,14 @@ checkKey p r n = case lookupKey r n of
 
 getKey :: Role -> String -> Field
 getKey r n = fromJust $ lookupKey r n
+
+lookupSwitch :: Refine -> String -> Maybe Switch
+lookupSwitch Refine{..} n = find ((==n) . name) refineSwitch
+
+checkSwich :: (MonadError String me) => Pos -> Refine -> String -> me Switch
+checkSwich p r n = case lookupSwitch r n of
+                       Nothing -> errR r p $ "Unknown switch: " ++ n
+                       Just sw -> return sw
+
+getSwitch :: Refine -> String -> Switch
+getSwitch r n = fromJust $ lookupSwitch r n
