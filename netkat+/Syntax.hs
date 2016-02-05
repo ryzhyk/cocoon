@@ -21,6 +21,7 @@ import Control.Monad.Except
 
 import Pos
 import Name
+import Ops
 
 data Spec = Spec [Refine]
 
@@ -138,21 +139,6 @@ instance WithPos TypeDef where
 
 instance WithName TypeDef where
     name = tdefName
-
-data BOp = Eq
-         | Lt
-         | Gt
-         | Lte
-         | Gte
-         | And
-         | Or
-         | Plus
-         | Minus
-         | Mod
-         deriving (Eq)
-
-data UOp = Not
-           deriving (Eq)
 
 data Expr = EKey      {exprPos :: Pos, exprKey :: String}
           | EPacket   {exprPos :: Pos}
