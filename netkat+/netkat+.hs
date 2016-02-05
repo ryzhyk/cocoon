@@ -4,6 +4,7 @@ import Control.Monad
 
 import Parse
 import Validate
+import P4
 
 main = do
     args <- getArgs

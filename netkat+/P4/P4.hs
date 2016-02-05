@@ -17,7 +17,41 @@ data P4Statement = P4SSeq   P4Statement P4Statement
                  | P4SApply String
                  | P4SDrop
 
+isSeq :: P4State -> Bool
+isSeq (P4SSeq _ _) = True
+isSeq _            = False
+
+egressSpec  = EField nopos (EKey nopos "standard_metadata") "egress_spec"
+ingressPort = EField nopos (EKey nopos "standard_metadata") "ingress_port"
+
+instance PP P4Statement where
+    pp (P4SSeq s1 s2) = (pp s1 <> semi) $$ pp s2
+    pp (P4SITE c t e) = pp "if" <+> (parens $ printExpr c) <+> lbrace 
+                        $$
+                        pp t
+                        $$
+                        maybe empty (\st -> (rbrace <+> pp "else" <+> (if' (isSeq st) lbrace empty)) 
+                                            $$ (pp st <> semi)
+                                            $$ (if' (isSeq st) rbrace empty)) e
+    pp (P4SApply n)   = pp "apply" <> (parens $ pp n)
+    pp (P4Drop)       = pp "drop"
+
 data P4Action = P4AModify Expr Expr
+
+instance PP P4Action where
+    pp (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs)
+
+-- We don't use a separate type for P4 exprressions for now, 
+-- just represent them as Expr
+printExpr :: Expr -> Doc
+printExpr (EKey _ k)        = pp k
+printExpr (EPacket _)       = pp "pkt"
+printExpr (EField _ e f)    = pp e <> char '.' <> pp f
+printExpr (EBool _ True)    = "true"
+printExpr (EBool _ False)   = "false"
+printExpr (EInt _ v)        = pp $ show v
+printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> pp op <+> (printExpr r)
+printExpr (EUnOp _ op e)    = parens $ pp op <+> printExpr e
 
 incTableCnt :: State P4State Int
 incTableCnt = do
@@ -35,7 +69,7 @@ getP4Switch r switch fstore kstore pstore =
     let (P4State _ tables command, controlstat) = runState (mkSwitch switch) (P4State 0 [] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
-                  controlstat
+                  pp controlstat
                   $$
                   rbrace
     in (pp "#include <parse.p4>" $$ pp "" $$ tables $$ pp "" $$ controlstat, vcat commands)
@@ -48,7 +82,7 @@ mkSwitch switch = do
              $ swPorts switch
     let groups = filter (not . null . snd) $ zip stats portnums
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', pnums) -> let conds = map (\p -> EBinOp nopos Eq (EField nopos metadata "ingress_port") (EInt nopos p)) pnums
+    return $ foldl' (\st (st', pnums) -> let conds = map (\p -> EBinOp nopos Eq ingressPort (EInt nopos p)) pnums
                                              cond = foldl' (\c c' -> EBinOp nopos Or c' c) (head conds) (tail conds)
                                          in P4SITE cond st' st) 
                     (fst $ head groups) (tail groups)
@@ -93,7 +127,7 @@ mkSingleActionTable n a = do
     let actname = "a_" ++ n
         table = (pp "action" <+> pp actname <> parens empty <+> lbrace)
                 $$
-                nest' $ mkAction a
+                nest' $ pp a
                 $$
                 rbrace
                 $$
@@ -106,9 +140,6 @@ mkSingleActionTable n a = do
     modify (\p4 -> p4{ p4Tables = p4Table p4 ++ [table]
                      , p4Commands = p4Commands p4 ++ [command]})
  
-
-mkAction :: P4Action -> Doc
-mkAction (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs)
 
 -- Partially evaluate expression
 evalExpr  :: (?r::Refine, ?role::Role, ?fstore::Store, ?kstore::Store, ?pstore::Store) => Expr -> P4Expr
