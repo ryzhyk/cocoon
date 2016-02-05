@@ -1,10 +1,24 @@
+{-# LANGUAGE ImplicitParams #-}
+
 -- Convert NetKAT+ spec to P4
 
-module P4() where
+module P4.P4() where
 
 import Control.Monad.State
+import Text.PrettyPrint
+import Data.Bits
+import Data.List
+import Data.Maybe
+import qualified Data.Map as M
 
+import Util
 import PP
+import Syntax
+import Pos
+import Type
+import NS
+import Name
+
 
 -- State maintained during compilation
 data P4State = P4State { p4TableCnt :: Int   -- table counter
@@ -13,13 +27,22 @@ data P4State = P4State { p4TableCnt :: Int   -- table counter
                        }
 
 data P4Statement = P4SSeq   P4Statement P4Statement
-                 | P4SITE   Expr P4SITE (Maybe P4Statement)
+                 | P4SITE   Expr P4Statement (Maybe P4Statement)
                  | P4SApply String
                  | P4SDrop
 
-isSeq :: P4State -> Bool
+isSeq :: P4Statement -> Bool
 isSeq (P4SSeq _ _) = True
 isSeq _            = False
+
+-- Function map: stores values of constant functions
+type FMap = M.Map String Expr
+
+-- Key map: maps keys into their values
+type KMap = M.Map String Expr
+
+-- Port map: stores physical port range for each input and output port of the switch
+type PMap = M.Map String (Integer,Integer)
 
 egressSpec  = EField nopos (EKey nopos "standard_metadata") "egress_spec"
 ingressPort = EField nopos (EKey nopos "standard_metadata") "ingress_port"
@@ -34,7 +57,7 @@ instance PP P4Statement where
                                             $$ (pp st <> semi)
                                             $$ (if' (isSeq st) rbrace empty)) e
     pp (P4SApply n)   = pp "apply" <> (parens $ pp n)
-    pp (P4Drop)       = pp "drop"
+    pp (P4SDrop)      = pp "drop"
 
 data P4Action = P4AModify Expr Expr
 
@@ -46,48 +69,67 @@ instance PP P4Action where
 printExpr :: Expr -> Doc
 printExpr (EKey _ k)        = pp k
 printExpr (EPacket _)       = pp "pkt"
-printExpr (EField _ e f)    = pp e <> char '.' <> pp f
-printExpr (EBool _ True)    = "true"
-printExpr (EBool _ False)   = "false"
+printExpr (EField _ e f)    = printExpr e <> char '.' <> pp f
+printExpr (EBool _ True)    = pp "true"
+printExpr (EBool _ False)   = pp "false"
 printExpr (EInt _ v)        = pp $ show v
-printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> pp op <+> (printExpr r)
-printExpr (EUnOp _ op e)    = parens $ pp op <+> printExpr e
+printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
+printExpr (EUnOp _ op e)    = parens $ printUOp op <+> printExpr e
+
+printBOp :: BOp -> Doc
+printBOp Eq    = pp "=="
+printBOp Lt    = pp "<"
+printBOp Gt    = pp ">"
+printBOp Lte   = pp "<="
+printBOp Gte   = pp ">="
+printBOp And   = pp "and"
+printBOp Or    = pp "or"
+printBOp Plus  = pp "+"
+printBOp Minus = pp "-"
+printBOp Mod   = pp "%"
+
+printUOp :: UOp -> Doc
+printUOp Not   = pp "not"
 
 incTableCnt :: State P4State Int
 incTableCnt = do
     n <- gets p4TableCnt
     modify (\s -> s{p4TableCnt = n + 1})
+    return n
 
 --  Generate P4 switch. Returns to strings: one containing the P4 description
 --  of the switch, and one containing runtime commands to initialize switch tables.
-genP4Switch :: Refine -> Switch -> Store -> Store -> Store -> (Doc, Doc)
-getP4Switch r switch fstore kstore pstore = 
+genP4Switch :: Refine -> Switch -> FMap -> KMap -> PMap -> (Doc, Doc)
+genP4Switch r switch fmap kmap pmap = 
     let ?r = r in
-    let ?fstore = fstore in
-    let ?kstore = kstore in
-    let ?pstore = pstore in
-    let (P4State _ tables command, controlstat) = runState (mkSwitch switch) (P4State 0 [] []) 
+    let ?fmap = fmap in
+    let ?pmap = pmap in
+    let (controlstat, P4State _ tables commands) = runState (mkSwitch kmap switch) (P4State 0 [] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
                   pp controlstat
                   $$
                   rbrace
-    in (pp "#include <parse.p4>" $$ pp "" $$ tables $$ pp "" $$ controlstat, vcat commands)
+    in (pp "#include <parse.p4>" $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
 
-mkSwitch :: (?r::Refine, ?fstore::Store, ?kstore::Store, ?pstore::Store) => Switch -> State P4State P4Statements
-mkSwitch switch = do
+mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Switch -> State P4State P4Statement
+mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
-    let portnums = map (\(port,_) -> sort $ M.keys (?pstore M.! port)) $ swPorts switch
-    stats <- mapM (\(port,_) -> let ?role = getRole r port in mkStatement (roleBody ?role))
+    let portranges = map (\(port,_) -> ?pmap M.! port) $ swPorts switch
+    stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
+                                let (first, _) = ?pmap M.! port in
+                                let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos first)) kmap in 
+                                mkStatement (roleBody ?role))
              $ swPorts switch
-    let groups = filter (not . null . snd) $ zip stats portnums
+    let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', pnums) -> let conds = map (\p -> EBinOp nopos Eq ingressPort (EInt nopos p)) pnums
-                                             cond = foldl' (\c c' -> EBinOp nopos Or c' c) (head conds) (tail conds)
-                                         in P4SITE cond st' st) 
+    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos first)
+                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos last)
+                                                     cond = EBinOp nopos And bound1 bound2
+                                                 in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
 
-mkStatement :: (?r::Refine, ?role::Role, ?fstore::Store, ?kstore::Store, ?pstore::Store) => Statement -> State P4State P4Statement
+mkStatement :: (?r::Refine, ?role::Role, ?fmap::FMap, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
 mkStatement (SSeq  _ s1 s2) = do 
     s1' <- mkStatement s1
     s2' <- mkStatement s2
@@ -103,7 +145,7 @@ mkStatement (SITE  _ c t e) = do
 
 mkStatement (STest _ e)     = do
     let e' = evalExpr e
-    return $ P4SITE (P4EUnOp Not e') P4SDrop Nothing
+    return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
 
 mkStatement (SSet  _ lhs rhs) = do
     tableid <- incTableCnt
@@ -114,12 +156,11 @@ mkStatement (SSet  _ lhs rhs) = do
     return $ P4SApply tablename
 
 mkStatement (SSend _ (ELocation _ n ks)) = do
-    let dstgroup = getRole ?r n
-        (EInt _ portnum) = evalExpr (last ks)
-        egress = getPortNumber n portnum
+    let (base, _) = ?pmap M.! n
+        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos base) (last ks) 
     tableid <- incTableCnt
     let tablename = "send" ++ show tableid
-    mkSingleActionTable tablename (P4AModify egressSpec (EInt nopos egress))
+    mkSingleActionTable tablename (P4AModify egressSpec portnum)
     return $ P4SApply tablename
 
 mkSingleActionTable :: String -> P4Action -> State P4State ()
@@ -127,28 +168,28 @@ mkSingleActionTable n a = do
     let actname = "a_" ++ n
         table = (pp "action" <+> pp actname <> parens empty <+> lbrace)
                 $$
-                nest' $ pp a
+                (nest' $ pp a)
                 $$
                 rbrace
                 $$
-                (pp "table" <+> n <+> lbrace) 
+                (pp "table" <+> pp n <+> lbrace) 
                 $$
-                (nest' $ pp "actions" <+> (braces $ pp actname)
+                (nest' $ pp "actions" <+> (braces $ pp actname))
                 $$
                 rbrace
         command = pp "table_set_default" <+> pp n <+> pp actname
-    modify (\p4 -> p4{ p4Tables = p4Table p4 ++ [table]
+    modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
                      , p4Commands = p4Commands p4 ++ [command]})
  
 
 -- Partially evaluate expression
-evalExpr  :: (?r::Refine, ?role::Role, ?fstore::Store, ?kstore::Store, ?pstore::Store) => Expr -> P4Expr
-evalExpr (EKey _ k)                    = storeGetVal ?kstore k
-evalExpr (EApply _ f [])               = evalExpr $ storeGetVal ?fstore f
+evalExpr  :: (?r::Refine, ?role::Role, ?fmap::FMap, ?kmap::KMap, ?pmap::PMap) => Expr -> Expr
+evalExpr (EKey _ k)                    = ?kmap M.! k
+evalExpr (EApply _ f [])               = ?fmap M.! f
 evalExpr e@(EField _ s f)        = 
     case evalExpr s of
          EStruct _ _ fs -> let (TStruct _ sfs) = typ' ?r ?role s
-                               fidx = findIndex ((== f) . name) sfs
+                               fidx = fromJust $ findIndex ((== f) . name) sfs
                            in fs !! fidx
          s'             -> EField nopos s' f
 evalExpr (ELocation _ r ks)            = ELocation nopos r $ map evalExpr ks
@@ -164,21 +205,22 @@ evalExpr (EBinOp _ op lhs rhs)         =
                                              Eq  -> EBool nopos (v1 == v2)
                                              And -> EBool nopos (v1 && v2)
                                              Or  -> EBool nopos (v1 || v2)
-            (EInt _ v1, EInt v2)     -> case op of
-                                             Eq   -> EBool nopos (v1 == v2)
-                                             Lt   -> EBool nopos (v1 < v2)
-                                             Gt   -> EBool nopos (v1 > v2)
-                                             Lte  -> EBool nopos (v1 <= v2)
-                                             Gte  -> EBool nopos (v1 >= v2)
-                                             Plus -> EInt  nopos ((v1 + v2) % (1 `shiftL` w))
-                                             Mod  -> EInt  nopos (v1 % v2)
-            _                        -> EBinOp op lhs' rhs'
+            (EInt _ v1, EInt _ v2)   -> case op of
+                                             Eq    -> EBool nopos (v1 == v2)
+                                             Lt    -> EBool nopos (v1 < v2)
+                                             Gt    -> EBool nopos (v1 > v2)
+                                             Lte   -> EBool nopos (v1 <= v2)
+                                             Gte   -> EBool nopos (v1 >= v2)
+                                             Plus  -> EInt  nopos ((v1 + v2) `mod` (1 `shiftL` w))
+                                             Minus -> EInt  nopos ((v1 - v2) `mod` (1 `shiftL` w))
+                                             Mod   -> EInt  nopos (v1 `mod` v2)
+            _                        -> EBinOp nopos op lhs' rhs'
 evalExpr (EUnOp _ op e)                = 
     let e' = evalExpr e
     in case e' of
            (EBool _ v) -> case op of
                                Not -> EBool nopos (not v)
-           _           -> EBool nopos e'
+           _           -> EUnOp nopos op e'
 evalExpr (ECond _ cs d)                = 
     let cs' = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
         cs'' = filter ((/= EBool nopos False) . fst) cs'
@@ -187,5 +229,5 @@ evalExpr (ECond _ cs d)                =
           then d'
           else if (fst $ head cs'') == (EBool nopos True)
                   then snd $ head cs''
-                  else ECond nipos cs'' d'
+                  else ECond nopos cs'' d'
 evalExpr e                             = e

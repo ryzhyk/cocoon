@@ -147,6 +147,7 @@ data BOp = Eq
          | And
          | Or
          | Plus
+         | Minus
          | Mod
          deriving (Eq)
 
