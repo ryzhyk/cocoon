@@ -16,10 +16,11 @@ import Name
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
-validate :: (MonadError String me) => Spec -> me ()
+validate :: (MonadError String me) => Spec -> me [Refine]
 validate (Spec (r:rs)) = do
-    final <- foldM (\prev new -> do {validate1 prev; combine prev new}) r rs
-    validate1 final
+    combined <- liftM reverse $ foldM (\(p:rs) new -> liftM (:p:rs) (combine p new)) [r] rs
+    mapM_ validate1 combined
+    return combined
 
 -- Apply definitions in new on top of prev.
 combine :: (MonadError String me) => Refine -> Refine -> me Refine

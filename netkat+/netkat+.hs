@@ -15,7 +15,7 @@ main = do
     spec <- case parse nkplusGrammar fname fdata of
                  Left  e    -> fail $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
-    case validate spec of
-         Left e  -> fail $ "Validation error: " ++ e
-         Right _ -> return ()
+    refines <- case validate spec of
+                    Left e   -> fail $ "Validation error: " ++ e
+                    Right rs -> return rs
     putStrLn "Validation successful"

@@ -2,7 +2,8 @@
 
 -- Convert NetKAT+ spec to P4
 
-module P4.P4() where
+module P4.P4( FMap, KMap, PMap
+            , genP4Switch) where
 
 import Control.Monad.State
 import Text.PrettyPrint
