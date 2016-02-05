@@ -135,7 +135,7 @@ rloc = withPos $ RoleLocation nopos <$ reserved "container" <*> (parens $ identi
 
 switch = withPos $ Switch nopos <$  reserved "switch" 
                                 <*> identifier 
-                                <*> (parens $ commaSep $ parens $ (,) <$> identifier <* comma <*> identifier)
+                                <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
 arg = withPos $ (flip $ Field nopos) <$> typeSpec <*> identifier
 
