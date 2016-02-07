@@ -13,6 +13,7 @@ module Syntax( Spec(..)
              , BOp(..)
              , UOp(..)
              , Expr(..)
+             , conj
              , Statement(..)
              , statSendsTo) where
 
@@ -169,6 +170,11 @@ instance Eq Expr where
 instance WithPos Expr where
     pos = exprPos
     atPos e p = e{exprPos = p}
+
+conj :: [Expr] -> Expr
+conj []     = EBool nopos True
+conj [e]    = e
+conj (e:es) = EBinOp nopos And e (conj es)
 
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}

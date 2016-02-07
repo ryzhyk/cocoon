@@ -71,3 +71,14 @@ data SMTSolver = SMTSolver {
     smtGetCore        :: SMTQuery -> Maybe (Maybe [Int]),
     smtGetModelOrCore :: SMTQuery -> Maybe (Either [Int] Assignment)
 }
+
+
+allSolutions :: SMTSolver -> SMTQuery -> String -> [Expr]
+allSolutions solver q var = 
+    -- Find one solution; block it, call solveFor recursively to find more
+    case smtGetModel solver q of
+         Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
+         Just Nothing      -> []
+         Just (Just model) -> let val = model M.! var 
+                                  q'  = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)} 
+                              in val:(allSolutions solver q' var)
