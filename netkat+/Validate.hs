@@ -50,6 +50,8 @@ validate1 r@Refine{..} = do
     uniq locRole (\r -> "Multiple container definitions for role " ++ locRole r) refineLocations
     uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
     mapM_ (typeValidate r . tdefType) refineTypes
+    -- each role occurs at most once as a port
+    uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . swPorts) refineSwitches
     -- TODO: check for cycles in the types graph - catch recursive type definitions
 --    case grCycle (typeGraph r) of
 --         Nothing -> return ()
@@ -93,8 +95,6 @@ rlocValidate r rloc@RoleLocation{..} = do
 switchValidate :: (MonadError String me) => Refine -> Switch -> me ()
 switchValidate r sw@Switch{..} = do
     swRole <- checkRole (pos sw) r swName
-    -- each role occurs at most once in the port list
-    uniq' (\_ -> (pos sw)) id (++ " is mentioned twice in the port list") $ concatMap (\(i,o) -> [i,o]) swPorts
     -- for each port 
     mapM_ (\(p1,p2) -> do r1 <- checkRole (pos sw) r p1
                           r2 <- checkRole (pos sw) r p2
