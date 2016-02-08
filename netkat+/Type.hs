@@ -1,8 +1,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Type(typ',
-            isBool, isUInt, isLocation,
-            matchType) where
+module Type( typ', typ''
+           , isBool, isUInt, isLocation
+           , matchType) where
 
 import Data.Maybe
 import Data.List
@@ -49,11 +49,19 @@ instance WithType Expr where
     typ _ _    (EUnOp _ Not _)    = TBool nopos
     typ r role (ECond _ _ d)      = typ r role d
 
-
+-- Unwrap typedef's down to actual type definition
 typ' :: (WithType a) => Refine -> Role -> a -> Type
 typ' r role x = case typ r role x of
                      TUser _ n -> typ' r role $ tdefType $ getType r n
                      t         -> t
+
+-- Similar to typ', but does not unwrap the last typedef if it is a struct
+typ'' :: (WithType a) => Refine -> Role -> a -> Type
+typ'' r role x = case typ r role x of
+                      t'@(TUser _ n) -> case tdefType $ getType r n of
+                                             TStruct _ _ -> t'
+                                             t           -> typ'' r role t
+                      t         -> t
 
 isBool :: (WithType a) => Refine -> Role -> a -> Bool
 isBool r role a = case typ' r role a of

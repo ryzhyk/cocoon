@@ -5,14 +5,18 @@
 module Topology () where
 
 import qualified Data.Map as M
+import Data.Maybe
 
 import Eval
 import Syntax
 import Name
 import NS
 import Pos
+import Type
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.SMTLib2   as SMT
+
+pktVar = "pkt"
 
 -- Multidimensional array of switch instances.  Each dimension corresponds to a 
 -- key.  Innermost elements enumerate ports of an instance.
@@ -39,9 +43,9 @@ mkSwitchInstMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> [Field] -> In
 mkSwitchInstMap' sw kmap []     = InstanceMap $ Right $ mkSwitchPortMap sw kmap
 mkSwitchInstMap' sw kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkSwitchInstMap' sw (M.insert (name f) e kmap) fs)) $ solveFor swrole fConstr (name f)
     -- Equation to compute possible values of f from:
-    where fConstr = EBinOp nopos And (roleKeyRange swrole)  keyVals
+    where fConstr = (roleKeyRange swrole):keyVals
           swrole = getRole ?r $ swName sw
-          keyVals = conj $ map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
+          keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
 mkSwitchPortMap :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> PortMap
 mkSwitchPortMap sw kmap = map (\ports -> (ports, mkSwitchPortMap' sw kmap ports)) $ swPorts sw
@@ -50,11 +54,11 @@ mkSwitchPortMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> (String, Stri
 mkSwitchPortMap' sw kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
                                      $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
-    where pConstr = EBinOp nopos And (roleKeyRange inrole) keyVals
+    where pConstr = (roleKeyRange inrole):keyVals
           inrole = getRole ?r i
           outrole = getRole ?r o
           portKey = name $ last $ roleKeys inrole
-          keyVals = conj $ map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
+          keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
 -- Compute remote port role is connected to.  Role must be an output port of a switch.
 mkLink :: (?r::Refine, ?fmap::FMap) => Role -> KMap -> Maybe InstanceDescr
@@ -83,12 +87,42 @@ evalPortStatement (STest _ cond) = STest nopos $ evalExpr cond
                -- | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
 
 -- Solve equation e for variable var; returns all satisfying assignments.
-solveFor :: (?r::Refine, ?fmap::FMap) => Role -> Expr -> String -> [Expr]
-solveFor role e var = map exprFromSMT $ SMT.allSolutions solver (expr2SMTQuery role e) var
+solveFor :: (?r::Refine, ?fmap::FMap) => Role -> [Expr] -> String -> [Expr]
+solveFor role es var = map exprFromSMT $ SMT.allSolutions solver (exprs2SMTQuery role es) var
     where solver = SMT.newSMTLib2Solver SMT.z3Config
 
-expr2SMTQuery :: (?r::Refine) => Role -> Expr -> SMT.SMTQuery
-expr2SMTQuery = undefined
+exprs2SMTQuery :: (?r::Refine, ?fmap::FMap) => Role -> [Expr] -> SMT.SMTQuery
+exprs2SMTQuery role es = let ?role = role in
+                         let es' = map expr2SMT es
+                             smtvs = (SMT.Var pktVar (typ2SMT $ typ'' ?r role $ TUser nopos packetTypeName)) : 
+                                     (map (\k -> SMT.Var (name k) (typ2SMT $ typ'' ?r role k)) $ roleKeys role)
+                             structs = mapMaybe (\d -> case tdefType d of
+                                                            TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r ?role f)) fs
+                                                            _            -> Nothing) 
+                                                $ refineTypes ?r
+                         in SMT.SMTQuery structs smtvs es'
 
+typ2SMT :: (?r::Refine) => Type -> SMT.Type
+typ2SMT (TBool _)     = SMT.TBool
+typ2SMT (TUInt _ w)   = SMT.TUInt w
+typ2SMT (TUser _ n)   = SMT.TStruct n
+typ2SMT (TLocation _) = SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+
+expr2SMT :: (?r::Refine, ?fmap::FMap, ?role::Role) => Expr -> SMT.Expr
+expr2SMT (EKey _ k)          = SMT.EVar k
+expr2SMT (EPacket _)         = SMT.EVar pktVar
+expr2SMT (EApply _ f [])     = expr2SMT $ ?fmap M.! f
+expr2SMT (EField _ s f)      = SMT.EField (expr2SMT s) f
+expr2SMT (EBool _ b)         = SMT.EBool b
+expr2SMT e@(EInt _ i)        = let TUInt _ w = typ' ?r ?role e
+                                in SMT.EInt w i
+expr2SMT (EStruct _ s fs)    = SMT.EStruct s $ map expr2SMT fs
+expr2SMT (EBinOp _ op e1 e2) = SMT.EBinOp op (expr2SMT e1) (expr2SMT e2)
+expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)
+expr2SMT (ECond _ cs d)      = SMT.ECond (map (\(c,v) -> (expr2SMT c, expr2SMT v)) cs) (expr2SMT d)
+
+-- Convert constant SMT expression to Expr
 exprFromSMT :: SMT.Expr -> Expr
-exprFromSMT = undefined
+exprFromSMT (SMT.EBool b)      = EBool nopos b
+exprFromSMT (SMT.EInt _ i)     = EInt nopos i
+exprFromSMT (SMT.EStruct n fs) = EStruct nopos n $ map exprFromSMT fs
