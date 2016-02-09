@@ -2,7 +2,7 @@
 
 -- Convert NetKAT+ spec to P4
 
-module P4.P4( PMap
+module P4.P4( genP4Switches
             , genP4Switch) where
 
 import Control.Monad.State
@@ -21,7 +21,7 @@ import Type
 import NS
 import Name
 import Eval
-
+import Topology
 
 -- State maintained during compilation
 data P4State = P4State { p4TableCnt :: Int   -- table counter
@@ -93,6 +93,14 @@ incTableCnt = do
     n <- gets p4TableCnt
     modify (\s -> s{p4TableCnt = n + 1})
     return n
+
+-- Generate all P4 switches in the topology
+genP4Switches :: Refine -> FMap -> Topology -> [(InstanceDescr, (Doc, Doc))]
+genP4Switches r fmap topology = 
+    concatMap (\(switch, imap) -> map (\(descr, links) -> let kmap = M.fromList $ zip (map name $ roleKeys $ getRole r $ name switch) $ idescKeys descr
+                                                              pmap = M.fromList $ concatMap (\((i,o),range,_) -> [(i,range),(o,range)]) links
+                                                          in (descr, genP4Switch r switch fmap kmap pmap)) $ instMapFlatten switch imap) 
+              $ filter ((== NodeSwitch) . nodeType . fst) topology
 
 --  Generate P4 switch. Returns to strings: one containing the P4 description
 --  of the switch, and one containing runtime commands to initialize switch tables.

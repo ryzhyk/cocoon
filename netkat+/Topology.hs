@@ -6,9 +6,11 @@ module Topology ( Topology
                 , InstanceDescr(..)
                 , PortInstDescr(..)
                 , InstanceMap(..)
+                , instMapFlatten
                 , PortLinks
                 , nodeFromPort
-                , phyPortNum) where
+                , phyPortNum
+                , generateTopology) where
 
 import qualified Data.Map as M
 import Data.Maybe
@@ -31,17 +33,21 @@ pktVar = "pkt"
 -- key.  Innermost elements enumerate ports of an instance.
 newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortLinks)
 
+instMapFlatten :: Node -> InstanceMap -> [(InstanceDescr, PortLinks)]
+instMapFlatten node (InstanceMap (Left insts))  = concatMap (\(k, imap) -> map (\(InstanceDescr n keys, links) -> (InstanceDescr n (k:keys), links)) $ instMapFlatten node imap) insts
+instMapFlatten node (InstanceMap (Right links)) = [(InstanceDescr (name node) [], links)]
+
 -- ((input_port_name, output_port_name), (first_physical_portnum, last_physical_portnum), (logical_out_port_index -> remote_port))
 type PortLinks = [((String, String), (Int, Int), [(Int, Maybe PortInstDescr)])]
 
 -- Role instance descriptor
-data InstanceDescr = InstanceDescr String [Expr] deriving Eq
-data PortInstDescr = PortInstDescr String [Expr] deriving Eq
+data InstanceDescr = InstanceDescr {idescNode::String, idescKeys::[Expr]} deriving Eq
+data PortInstDescr = PortInstDescr {pdescPort::String, pdescKeys::[Expr]} deriving Eq
 
-type Topology = [(String, InstanceMap)]
+type Topology = [(Node, InstanceMap)]
 
 getInstPortMap :: Topology -> InstanceDescr -> PortLinks
-getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (fromJust $ lookup ndname t) keys
+getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (snd $ fromJust $ find ((==ndname) . name . fst) t) keys
 
 getInstPortMap' :: InstanceMap -> [Expr] -> PortLinks
 getInstPortMap' (InstanceMap (Left mp))     (k:ks) = getInstPortMap' (fromJust $ lookup k mp) ks
@@ -59,7 +65,7 @@ nodeFromPort r t (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
 generateTopology :: Refine -> FMap -> Topology
 generateTopology r fmap = let ?r = r in 
                           let ?fmap = fmap in
-                          map (\s -> (name s, mkNodeInstMap s)) $ refineNodes r
+                          map (\n -> (n, mkNodeInstMap n)) $ refineNodes r
 
 mkNodeInstMap :: (?r::Refine, ?fmap::FMap) => Node -> InstanceMap
 mkNodeInstMap nd = mkNodeInstMap' nd M.empty (roleKeys $ getRole ?r (name nd))
