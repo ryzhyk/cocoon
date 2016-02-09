@@ -39,7 +39,7 @@ isITE (P4SITE _ _ _) = True
 isITE _              = False
 
 -- Port map: stores physical port range for each input and output port of the switch
-type PMap = M.Map String (Integer,Integer)
+type PMap = M.Map String (Int,Int)
 
 egressSpec  = EField nopos (EKey nopos "standard_metadata") "egress_spec"
 ingressPort = EField nopos (EKey nopos "standard_metadata") "ingress_port"
@@ -112,16 +112,16 @@ genP4Switch r switch fmap kmap pmap =
 mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Switch -> State P4State P4Statement
 mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
-    let portranges = map (\(port,_) -> trace ("port: " ++ port) $ ?pmap M.! port) $ swPorts switch
+    let portranges = map (\(port,_) -> ?pmap M.! port) $ swPorts switch
     stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
                                 let (first, _) = ?pmap M.! port in
-                                let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos first)) kmap in 
+                                let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos $ fromIntegral first)) kmap in 
                                 mkStatement (roleBody ?role))
              $ swPorts switch
     let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos first)
-                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos last)
+    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos $ fromIntegral first)
+                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos $ fromIntegral last)
                                                      cond = EBinOp nopos And bound1 bound2
                                                  in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
@@ -154,7 +154,7 @@ mkStatement (SSet  _ lhs rhs) = do
 
 mkStatement (SSend _ (ELocation _ n ks)) = do
     let (base, _) = ?pmap M.! n
-        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos base) (last ks) 
+        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos $ fromIntegral base) (last ks) 
     tableid <- incTableCnt
     let tablename = "send" ++ show tableid
     mkSingleActionTable tablename (P4AModify egressSpec portnum)

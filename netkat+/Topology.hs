@@ -6,6 +6,7 @@ module Topology () where
 
 import qualified Data.Map as M
 import Data.Maybe
+import Control.Monad.State
 
 import Eval
 import Syntax
@@ -22,9 +23,8 @@ pktVar = "pkt"
 -- key.  Innermost elements enumerate ports of an instance.
 newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortMap)
 
--- Input-output port pair; a list of port indices and remote ports they are 
--- connected to.
-type PortMap = [((String, String), [(Int, Maybe InstanceDescr)])]
+-- ((input_port_name, output_port_name), (first_physical_portnum, last_physical_portnum), (logical_out_port_index -> remote_port))
+type PortMap = [((String, String), (Int, Int), [(Int, Maybe InstanceDescr)])]
 
 -- Role instance descriptor
 data InstanceDescr = InstanceDescr String [Expr] 
@@ -48,7 +48,12 @@ mkSwitchInstMap' sw kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkSwitchIn
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
 mkSwitchPortMap :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> PortMap
-mkSwitchPortMap sw kmap = map (\ports -> (ports, mkSwitchPortMap' sw kmap ports)) $ swPorts sw
+mkSwitchPortMap sw kmap = evalState (mapM (\ports -> do let links = mkSwitchPortMap' sw kmap ports 
+                                                            lastport = maximum $ map fst links
+                                                        base <- get
+                                                        put $ base + lastport + 1
+                                                        return (ports, (base, base+lastport), links)) $ swPorts sw)
+                                    0
 
 mkSwitchPortMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
 mkSwitchPortMap' sw kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
