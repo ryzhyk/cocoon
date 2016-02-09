@@ -21,10 +21,10 @@ pktVar = "pkt"
 
 -- Multidimensional array of switch instances.  Each dimension corresponds to a 
 -- key.  Innermost elements enumerate ports of an instance.
-newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortMap)
+newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortLinks)
 
 -- ((input_port_name, output_port_name), (first_physical_portnum, last_physical_portnum), (logical_out_port_index -> remote_port))
-type PortMap = [((String, String), (Int, Int), [(Int, Maybe InstanceDescr)])]
+type PortLinks = [((String, String), (Int, Int), [(Int, Maybe InstanceDescr)])]
 
 -- Role instance descriptor
 data InstanceDescr = InstanceDescr String [Expr] 
@@ -40,23 +40,23 @@ mkSwitchInstMap :: (?r::Refine, ?fmap::FMap) => Switch -> InstanceMap
 mkSwitchInstMap sw = mkSwitchInstMap' sw M.empty (roleKeys $ getRole ?r (swName sw))
 
 mkSwitchInstMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> [Field] -> InstanceMap
-mkSwitchInstMap' sw kmap []     = InstanceMap $ Right $ mkSwitchPortMap sw kmap
+mkSwitchInstMap' sw kmap []     = InstanceMap $ Right $ mkSwitchPortLinks sw kmap
 mkSwitchInstMap' sw kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkSwitchInstMap' sw (M.insert (name f) e kmap) fs)) $ solveFor swrole fConstr (name f)
     -- Equation to compute possible values of f from:
     where fConstr = (roleKeyRange swrole):keyVals
           swrole = getRole ?r $ swName sw
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
-mkSwitchPortMap :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> PortMap
-mkSwitchPortMap sw kmap = evalState (mapM (\ports -> do let links = mkSwitchPortMap' sw kmap ports 
-                                                            lastport = maximum $ map fst links
-                                                        base <- get
-                                                        put $ base + lastport + 1
-                                                        return (ports, (base, base+lastport), links)) $ swPorts sw)
-                                    0
+mkSwitchPortLinks :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> PortLinks
+mkSwitchPortLinks sw kmap = evalState (mapM (\ports -> do let links = mkSwitchPortLinks' sw kmap ports 
+                                                              lastport = maximum $ map fst links
+                                                          base <- get
+                                                          put $ base + lastport + 1
+                                                          return (ports, (base, base+lastport), links)) $ swPorts sw)
+                                      0
 
-mkSwitchPortMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
-mkSwitchPortMap' sw kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
+mkSwitchPortLinks' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
+mkSwitchPortLinks' sw kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
                                      $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
     where pConstr = (roleKeyRange inrole):keyVals
