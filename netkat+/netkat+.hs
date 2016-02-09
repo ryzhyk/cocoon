@@ -13,6 +13,7 @@ import Pos
 import NS
 import Name
 import Topology
+import MiniNet.MiniNet
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.SMTLib2   as SMT
 

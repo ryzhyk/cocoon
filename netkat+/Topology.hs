@@ -2,10 +2,18 @@
 
 -- Managing physical network topology induced by a NetKAT+ spec
 
-module Topology () where
+module Topology ( Topology
+                , InstanceDescr(..)
+                , PortInstDescr(..)
+                , InstanceMap(..)
+                , PortLinks
+                , nodeFromPort
+                , phyPortNum) where
 
 import qualified Data.Map as M
 import Data.Maybe
+import Data.List
+import Data.Tuple.Select
 import Control.Monad.State
 
 import Eval
@@ -24,12 +32,29 @@ pktVar = "pkt"
 newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortLinks)
 
 -- ((input_port_name, output_port_name), (first_physical_portnum, last_physical_portnum), (logical_out_port_index -> remote_port))
-type PortLinks = [((String, String), (Int, Int), [(Int, Maybe InstanceDescr)])]
+type PortLinks = [((String, String), (Int, Int), [(Int, Maybe PortInstDescr)])]
 
 -- Role instance descriptor
-data InstanceDescr = InstanceDescr String [Expr] 
+data InstanceDescr = InstanceDescr String [Expr] deriving Eq
+data PortInstDescr = PortInstDescr String [Expr] deriving Eq
 
 type Topology = [(String, InstanceMap)]
+
+getInstPortMap :: Topology -> InstanceDescr -> PortLinks
+getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (fromJust $ lookup ndname t) keys
+
+getInstPortMap' :: InstanceMap -> [Expr] -> PortLinks
+getInstPortMap' (InstanceMap (Left mp))     (k:ks) = getInstPortMap' (fromJust $ lookup k mp) ks
+getInstPortMap' (InstanceMap (Right links)) []     = links
+
+phyPortNum :: Topology -> InstanceDescr -> String -> Int -> Int
+phyPortNum t inst pname pnum = base + pnum
+    where plinks = getInstPortMap t inst
+          (_, (base, _), _) = fromJust $ find ((\(i,o) -> i == pname || o == pname) . sel1) plinks
+
+nodeFromPort :: Refine -> Topology -> PortInstDescr -> InstanceDescr
+nodeFromPort r t (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
+    where noderole = name $ fromJust $ find (isJust . find (\(i,o) -> i == pname || o == pname) . nodePorts) $ refineNodes r
 
 generateTopology :: Refine -> FMap -> Topology
 generateTopology r fmap = let ?r = r in 
@@ -55,7 +80,7 @@ mkNodePortLinks nd kmap = evalState (mapM (\ports -> do let links = mkNodePortLi
                                                         return (ports, (base, base+lastport), links)) $ nodePorts nd)
                                     0
 
-mkNodePortLinks' :: (?r::Refine, ?fmap::FMap) => KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
+mkNodePortLinks' :: (?r::Refine, ?fmap::FMap) => KMap -> (String, String) -> [(Int, Maybe PortInstDescr)]
 mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
                                   $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
@@ -66,11 +91,11 @@ mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
 -- Compute remote port role is connected to.  Role must be an output port of a switch.
-mkLink :: (?r::Refine, ?fmap::FMap) => Role -> KMap -> Maybe InstanceDescr
+mkLink :: (?r::Refine, ?fmap::FMap) => Role -> KMap -> Maybe PortInstDescr
 mkLink role kmap = let ?kmap = kmap in 
                    let ?role = role in
                    case evalPortStatement (roleBody role) of
-                        SSend _ (ELocation _ n ks) -> Just $ InstanceDescr n ks
+                        SSend _ (ELocation _ n ks) -> Just $ PortInstDescr n ks
                         STest _ (EBool _ False)    -> Nothing
                         _                          -> error $ "mkLink: output port " ++ name role ++ " does not evaluate to a constant"
 

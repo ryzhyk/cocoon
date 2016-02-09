@@ -80,6 +80,7 @@ instance WithName Role where
 
 data NodeType = NodeSwitch
               | NodeHost
+              deriving Eq
 
 data Node = Node { nodePos   :: Pos
                  , nodeType  :: NodeType
