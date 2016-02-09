@@ -21,6 +21,7 @@ reservedNames = ["and",
                  "false",
                  "filter",
                  "function",
+                 "host",
                  "if",
                  "not",
                  "or",
@@ -84,7 +85,7 @@ data SpecItem = SpType         TypeDef
               | SpFunc         Function
               | SpRole         Role
               | SpRoleLocation RoleLocation
-              | SpSwitch       Switch
+              | SpNode         Node
 
 
 nkplusGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
@@ -92,7 +93,7 @@ nkplusGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs roles locs sws
+mkRefine targets items = Refine nopos targets types funcs roles locs nodes
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
@@ -105,9 +106,9 @@ mkRefine targets items = Refine nopos targets types funcs roles locs sws
           locs  = mapMaybe (\i -> case i of 
                                        SpRoleLocation l -> Just l
                                        _                -> Nothing) items
-          sws   = mapMaybe (\i -> case i of 
-                                       SpSwitch s -> Just s
-                                       _          -> Nothing) items
+          nodes = mapMaybe (\i -> case i of 
+                                       SpNode n -> Just n
+                                       _        -> Nothing) items
 
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep identifier)
@@ -117,7 +118,7 @@ decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
     <|> (SpRoleLocation <$> rloc)
-    <|> (SpSwitch       <$> switch)
+    <|> (SpNode         <$> node)
 
 
 typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
@@ -133,9 +134,9 @@ role = withPos $ Role nopos <$  reserved "role"
 
 rloc = withPos $ RoleLocation nopos <$ reserved "container" <*> (parens $ identifier) <* reservedOp "=" <*> expr
 
-switch = withPos $ Switch nopos <$  reserved "switch" 
-                                <*> identifier 
-                                <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
+node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost <$ reserved "host"))
+                            <*> identifier 
+                            <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
 arg = withPos $ (flip $ Field nopos) <$> typeSpecSimple <*> identifier
 

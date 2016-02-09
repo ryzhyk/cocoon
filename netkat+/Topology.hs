@@ -34,30 +34,30 @@ type Topology = [(String, InstanceMap)]
 generateTopology :: Refine -> FMap -> Topology
 generateTopology r fmap = let ?r = r in 
                           let ?fmap = fmap in
-                          map (\s -> (name s, mkSwitchInstMap s)) $ refineSwitches r
+                          map (\s -> (name s, mkNodeInstMap s)) $ refineNodes r
 
-mkSwitchInstMap :: (?r::Refine, ?fmap::FMap) => Switch -> InstanceMap
-mkSwitchInstMap sw = mkSwitchInstMap' sw M.empty (roleKeys $ getRole ?r (swName sw))
+mkNodeInstMap :: (?r::Refine, ?fmap::FMap) => Node -> InstanceMap
+mkNodeInstMap nd = mkNodeInstMap' nd M.empty (roleKeys $ getRole ?r (name nd))
 
-mkSwitchInstMap' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> [Field] -> InstanceMap
-mkSwitchInstMap' sw kmap []     = InstanceMap $ Right $ mkSwitchPortLinks sw kmap
-mkSwitchInstMap' sw kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkSwitchInstMap' sw (M.insert (name f) e kmap) fs)) $ solveFor swrole fConstr (name f)
+mkNodeInstMap' :: (?r::Refine, ?fmap::FMap) => Node -> KMap -> [Field] -> InstanceMap
+mkNodeInstMap' nd kmap []     = InstanceMap $ Right $ mkNodePortLinks nd kmap
+mkNodeInstMap' nd kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkNodeInstMap' nd (M.insert (name f) e kmap) fs)) $ solveFor ndrole fConstr (name f)
     -- Equation to compute possible values of f from:
-    where fConstr = (roleKeyRange swrole):keyVals
-          swrole = getRole ?r $ swName sw
+    where fConstr = (roleKeyRange ndrole):keyVals
+          ndrole = getRole ?r $ nodeName nd
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
 
-mkSwitchPortLinks :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> PortLinks
-mkSwitchPortLinks sw kmap = evalState (mapM (\ports -> do let links = mkSwitchPortLinks' sw kmap ports 
-                                                              lastport = maximum $ map fst links
-                                                          base <- get
-                                                          put $ base + lastport + 1
-                                                          return (ports, (base, base+lastport), links)) $ swPorts sw)
-                                      0
+mkNodePortLinks :: (?r::Refine, ?fmap::FMap) => Node -> KMap -> PortLinks
+mkNodePortLinks nd kmap = evalState (mapM (\ports -> do let links = mkNodePortLinks' kmap ports 
+                                                            lastport = maximum $ map fst links
+                                                        base <- get
+                                                        put $ base + lastport + 1
+                                                        return (ports, (base, base+lastport), links)) $ nodePorts nd)
+                                    0
 
-mkSwitchPortLinks' :: (?r::Refine, ?fmap::FMap) => Switch -> KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
-mkSwitchPortLinks' sw kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
-                                     $ solveFor inrole pConstr portKey 
+mkNodePortLinks' :: (?r::Refine, ?fmap::FMap) => KMap -> (String, String) -> [(Int, Maybe InstanceDescr)]
+mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
+                                  $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
     where pConstr = (roleKeyRange inrole):keyVals
           inrole = getRole ?r i

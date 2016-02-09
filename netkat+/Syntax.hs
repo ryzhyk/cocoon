@@ -6,7 +6,8 @@ module Syntax( Spec(..)
              , Field(..)
              , Role(..)
              , RoleLocation(..)
-             , Switch(..)
+             , NodeType(..)
+             , Node(..)
              , Function(..)
              , Type(..)
              , TypeDef(..)
@@ -32,7 +33,7 @@ data Refine = Refine { refinePos       :: Pos
                      , refineFuncs     :: [Function]
                      , refineRoles     :: [Role]
                      , refineLocations :: [RoleLocation]
-                     , refineSwitches  :: [Switch]
+                     , refineNodes     :: [Node]
                      }
 
 instance WithPos Refine where
@@ -77,17 +78,21 @@ instance WithPos Role where
 instance WithName Role where
     name = roleName
 
-data Switch = Switch { swPos   :: Pos
-                     , swName  :: String
-                     , swPorts :: [(String, String)]
-                     }
+data NodeType = NodeSwitch
+              | NodeHost
 
-instance WithPos Switch where
-    pos = swPos
-    atPos s p = s{swPos = p}
+data Node = Node { nodePos   :: Pos
+                 , nodeType  :: NodeType
+                 , nodeName  :: String
+                 , nodePorts :: [(String, String)]
+                 }
 
-instance WithName Switch where
-    name = swName
+instance WithPos Node where
+    pos = nodePos
+    atPos s p = s{nodePos = p}
+
+instance WithName Node where
+    name = nodeName
 
 data RoleLocation = RoleLocation { locPos  :: Pos
                                  , locRole :: String

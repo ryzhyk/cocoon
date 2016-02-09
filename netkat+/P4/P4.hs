@@ -96,7 +96,7 @@ incTableCnt = do
 
 --  Generate P4 switch. Returns to strings: one containing the P4 description
 --  of the switch, and one containing runtime commands to initialize switch tables.
-genP4Switch :: Refine -> Switch -> FMap -> KMap -> PMap -> (Doc, Doc)
+genP4Switch :: Refine -> Node -> FMap -> KMap -> PMap -> (Doc, Doc)
 genP4Switch r switch fmap kmap pmap = 
     let ?r = r in
     let ?fmap = fmap in
@@ -109,15 +109,15 @@ genP4Switch r switch fmap kmap pmap =
                   rbrace
     in (pp "#include <parse.p4>" $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
 
-mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Switch -> State P4State P4Statement
+mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
 mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
-    let portranges = map (\(port,_) -> ?pmap M.! port) $ swPorts switch
+    let portranges = map (\(port,_) -> ?pmap M.! port) $ nodePorts switch
     stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
                                 let (first, _) = ?pmap M.! port in
                                 let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos $ fromIntegral first)) kmap in 
                                 mkStatement (roleBody ?role))
-             $ swPorts switch
+             $ nodePorts switch
     let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
     return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos $ fromIntegral first)

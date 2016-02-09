@@ -32,8 +32,8 @@ combine prev new = do
         funcs = refineFuncs prev'     ++ refineFuncs new
         roles = refineRoles prev'     ++ refineRoles new
         rlocs = refineLocations prev' ++ refineLocations new 
-        sws   = refineSwitches prev'  ++ refineSwitches new 
-    return $ Refine (pos new) [] types funcs roles rlocs sws
+        nodes = refineNodes prev'     ++ refineNodes new 
+    return $ Refine (pos new) [] types funcs roles rlocs nodes
 
 
 -- construct dependency graph
@@ -48,10 +48,10 @@ validate1 r@Refine{..} = do
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniq locRole (\r -> "Multiple container definitions for role " ++ locRole r) refineLocations
-    uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
+    uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
     mapM_ (typeValidate r . tdefType) refineTypes
     -- each role occurs at most once as a port
-    uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . swPorts) refineSwitches
+    uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . nodePorts) refineNodes
     -- TODO: check for cycles in the types graph - catch recursive type definitions
 --    case grCycle (typeGraph r) of
 --         Nothing -> return ()
@@ -61,7 +61,7 @@ validate1 r@Refine{..} = do
     mapM_ (roleValidate r) refineRoles
     mapM_ (rlocValidate r) refineLocations
     -- TODO: check for cycles in the locations graph
-    mapM_ (switchValidate r) refineSwitches
+    mapM_ (nodeValidate r) refineNodes
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
@@ -92,30 +92,30 @@ rlocValidate r rloc@RoleLocation{..} = do
     assertR r (isLocation r role locExpr) (pos locExpr) "Not a valid location"
     return ()
 
-switchValidate :: (MonadError String me) => Refine -> Switch -> me ()
-switchValidate r sw@Switch{..} = do
-    swRole <- checkRole (pos sw) r swName
+nodeValidate :: (MonadError String me) => Refine -> Node -> me ()
+nodeValidate r nd@Node{..} = do
+    nodeRole <- checkRole (pos nd) r nodeName
     -- for each port 
-    mapM_ (\(p1,p2) -> do r1 <- checkRole (pos sw) r p1
-                          r2 <- checkRole (pos sw) r p2
-                          assertR r (roleKeys r1 == roleKeys r2) (pos sw) 
+    mapM_ (\(p1,p2) -> do r1 <- checkRole (pos nd) r p1
+                          r2 <- checkRole (pos nd) r p2
+                          assertR r (roleKeys r1 == roleKeys r2) (pos nd) 
                                   $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical parameter lists"
-                          assertR r (roleKeyRange r1 == roleKeyRange r2) (pos sw)
+                          assertR r (roleKeyRange r1 == roleKeyRange r2) (pos nd)
                                   $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical key ranges"
-                          let validateR rl = do assertR r (length (roleKeys rl) > 0 && isUInt r rl (last $ roleKeys rl)) (pos sw) 
+                          let validateR rl = do assertR r (length (roleKeys rl) > 0 && isUInt r rl (last $ roleKeys rl)) (pos nd) 
                                                         $ "Port " ++ name rl ++ " must be indexed with an integer key"
-                                                assertR r ((init $ roleKeys rl) == roleKeys swRole) (pos sw) 
-                                                       $ "Port " ++ name rl ++ " must be indexed with the same keys as switch " ++ swName ++ " and one extra integer key" 
+                                                assertR r ((init $ roleKeys rl) == roleKeys nodeRole) (pos nd) 
+                                                       $ "Port " ++ name rl ++ " must be indexed with the same keys as node " ++ nodeName ++ " and one extra integer key" 
                           validateR r1
                           validateR r2
-                          -- input ports can only send to output ports of the same switch 
-                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd swPorts)) && 
+                          -- input ports can only send to output ports of the same node
+                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) && 
                                                                     (all (\(key, arg) -> arg == (EKey nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
-                                         $ statSendsTo (roleBody r1)) (pos sw)
-                                 $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the switch's outbound ports"
-                          assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd swPorts)) $ statSendsTo (roleBody r2)) (pos sw)
+                                         $ statSendsTo (roleBody r1)) (pos nd)
+                                 $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
+                          assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd nodePorts)) $ statSendsTo (roleBody r2)) (pos nd)
                                  $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports")
-          swPorts
+          nodePorts
 
 exprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()
 exprValidate r role (EKey p k) = do 
