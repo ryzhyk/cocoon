@@ -15,6 +15,7 @@ import Text.Parsec.Language
 import qualified Text.Parsec.Token    as T
 import Control.Applicative hiding (many)
 import Numeric
+import Debug.Trace
 
 import Util
 import SMT.SMTSolver
@@ -157,8 +158,9 @@ parseExpr t           (ExpApply "ite" [i,th,el]) = if' cond (parseExpr t th) (pa
 parseExpr (TStruct s) (ExpApply n as) | isPrefixOf "mk-" n =
     if length fs /= length as
        then error "parseExpr: incorrect number of fields in a struct"
-       else EStruct n (map (\((f,t), e) -> parseExpr t e) $ zip fs as)
-    where Struct _ fs = fromJust $ find ((==n) . structName) $ smtStructs ?q
+       else EStruct n' (map (\((f,t), e) -> parseExpr t e) $ zip fs as)
+    where n' = drop (length "mk-") n
+          Struct _ fs = fromJust $ find ((==n') . structName) $ smtStructs ?q
 
 --parseExpr (ExpIdent i) = case lookupEnumerator i of
 --         Just _  -> SVal $ EnumVal i
