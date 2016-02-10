@@ -31,7 +31,7 @@ instance WithType Expr where
                                      in fieldType $ fromJust $ find ((== f) . name) fs
     typ _ _    (ELocation _ _ _)   = TLocation nopos
     typ _ _    (EBool _ _)         = TBool nopos
-    typ _ _    (EInt _ v)          = TUInt nopos (bitWidth v)
+    typ _ _    (EInt _ w _)        = TUInt nopos w
     typ r _    (EStruct _ n _)     = TUser (pos tdef) (name tdef)
                                      where tdef = getType r n
     typ r role (EBinOp _ op e1 e2) = case op of

@@ -40,7 +40,7 @@ main = do
     let final = last combined
     putStrLn "Validation successful"
 
-    let fmap = M.fromList [("k", EInt nopos 2), ("netmask", EInt nopos 10)]
+    let fmap = M.fromList [("k", EInt nopos 8 2), ("netmask", EInt nopos 8 10)]
         topology = generateTopology final fmap
         (mntopology, instmap) = generateMininetTopology final topology
         p4switches = genP4Switches final fmap topology

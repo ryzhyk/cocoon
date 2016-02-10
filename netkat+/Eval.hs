@@ -39,20 +39,20 @@ evalExpr (EBinOp _ op lhs rhs)         =
         TUInt _ w2 = typ' ?r ?role rhs'
         w = max w1 w2
     in case (lhs', rhs') of
-            (EBool _ v1, EBool _ v2) -> case op of
-                                             Eq  -> EBool nopos (v1 == v2)
-                                             And -> EBool nopos (v1 && v2)
-                                             Or  -> EBool nopos (v1 || v2)
-            (EInt _ v1, EInt _ v2)   -> case op of
-                                             Eq    -> EBool nopos (v1 == v2)
-                                             Lt    -> EBool nopos (v1 < v2)
-                                             Gt    -> EBool nopos (v1 > v2)
-                                             Lte   -> EBool nopos (v1 <= v2)
-                                             Gte   -> EBool nopos (v1 >= v2)
-                                             Plus  -> EInt  nopos ((v1 + v2) `mod` (1 `shiftL` w))
-                                             Minus -> EInt  nopos ((v1 - v2) `mod` (1 `shiftL` w))
-                                             Mod   -> EInt  nopos (v1 `mod` v2)
-            _                        -> EBinOp nopos op lhs' rhs'
+            (EBool _ v1, EBool _ v2)   -> case op of
+                                               Eq  -> EBool nopos (v1 == v2)
+                                               And -> EBool nopos (v1 && v2)
+                                               Or  -> EBool nopos (v1 || v2)
+            (EInt _ _ v1, EInt _ _ v2) -> case op of
+                                               Eq    -> EBool nopos (v1 == v2)
+                                               Lt    -> EBool nopos (v1 < v2)
+                                               Gt    -> EBool nopos (v1 > v2)
+                                               Lte   -> EBool nopos (v1 <= v2)
+                                               Gte   -> EBool nopos (v1 >= v2)
+                                               Plus  -> EInt  nopos w ((v1 + v2) `mod` (1 `shiftL` w))
+                                               Minus -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
+                                               Mod   -> EInt  nopos w1 (v1 `mod` v2)
+            _                          -> EBinOp nopos op lhs' rhs'
 evalExpr (EUnOp _ op e)                = 
     let e' = evalExpr e
     in case e' of

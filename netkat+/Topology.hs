@@ -87,7 +87,7 @@ mkNodePortLinks nd kmap = evalState (mapM (\ports -> do let links = mkNodePortLi
                                     0
 
 mkNodePortLinks' :: (?r::Refine, ?fmap::FMap) => KMap -> (String, String) -> [(Int, Maybe PortInstDescr)]
-mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
+mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
                                   $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
     where pConstr = (roleKeyRange inrole):keyVals
@@ -150,8 +150,7 @@ expr2SMT (EPacket _)         = SMT.EVar pktVar
 expr2SMT (EApply _ f [])     = expr2SMT $ ?fmap M.! f
 expr2SMT (EField _ s f)      = SMT.EField (expr2SMT s) f
 expr2SMT (EBool _ b)         = SMT.EBool b
-expr2SMT e@(EInt _ i)        = let TUInt _ w = typ' ?r ?role e
-                                in SMT.EInt w i
+expr2SMT e@(EInt _ w i)      = SMT.EInt w i
 expr2SMT (EStruct _ s fs)    = SMT.EStruct s $ map expr2SMT fs
 expr2SMT (EBinOp _ op e1 e2) = SMT.EBinOp op (expr2SMT e1) (expr2SMT e2)
 expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)
@@ -160,5 +159,5 @@ expr2SMT (ECond _ cs d)      = SMT.ECond (map (\(c,v) -> (expr2SMT c, expr2SMT v
 -- Convert constant SMT expression to Expr
 exprFromSMT :: SMT.Expr -> Expr
 exprFromSMT (SMT.EBool b)      = EBool nopos b
-exprFromSMT (SMT.EInt _ i)     = EInt nopos i
+exprFromSMT (SMT.EInt w i)     = EInt nopos w i
 exprFromSMT (SMT.EStruct n fs) = EStruct nopos n $ map exprFromSMT fs

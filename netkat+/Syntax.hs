@@ -153,7 +153,7 @@ data Expr = EKey      {exprPos :: Pos, exprKey :: String}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
           | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}
           | EBool     {exprPos :: Pos, exprBVal :: Bool}
-          | EInt      {exprPos :: Pos, exprIVal :: Integer}
+          | EInt      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
           | EStruct   {exprPos :: Pos, exprStructName :: String, exprFields :: [Expr]}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
@@ -166,7 +166,7 @@ instance Eq Expr where
     (==) (EField    _ s1 f1)     (EField    _ s2 f2)     = (s1 == s2) && (f1 == f2)
     (==) (ELocation _ r1 as1)    (ELocation _ r2 as2)    = (r1 == r2) && (as1 == as2)
     (==) (EBool     _ v1)        (EBool     _ v2)        = v1 == v2
-    (==) (EInt      _ v1)        (EInt      _ v2)        = v1 == v2
+    (==) (EInt      _ w1 v1)     (EInt      _ w2 v2)     = w1 == w2 && v1 == v2
     (==) (EStruct   _ s1 fs1)    (EStruct   _ s2 fs2)    = (s1 == s2) && (fs1 == fs2)
     (==) (EBinOp    _ op1 l1 r1) (EBinOp    _ op2 l2 r2) = (op1 == op2) && (l1 == l2) && (r1 == r2)
     (==) (EUnOp     _ op1 e1)    (EUnOp     _ op2 e2)    = (op1 == op2) && (e1 == e2)

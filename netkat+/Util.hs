@@ -81,4 +81,10 @@ readBin s = foldl' (\acc c -> (acc `shiftL` 1) +
                                    '0' -> 0
                                    '1' -> 1) 0 s
 
+-- Determine the most significant set bit of a non-negative number 
+-- (returns 0 if not bits are set)
+msb :: (Bits b, Num b) => b -> Int
+msb 0 = 0
+msb 1 = 0
+msb n = 1 + (msb $ n `shiftR` 1)
 

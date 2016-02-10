@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Parse (nkplusGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
@@ -6,10 +8,11 @@ import Text.Parsec.Expr
 import Text.Parsec.Language
 import qualified Text.Parsec.Token as T
 import Data.Maybe
+import Numeric
 
 import Syntax
 import Pos
-
+import Util
 
 reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
 reservedNames = ["and",
@@ -181,9 +184,38 @@ eterm = EKey nopos <$> identifier
 econd = (fmap uncurry (ECond nopos <$ reserved "case"))
                <*> (braces $ (,) <$> (many $ (,) <$> expr <* colon <*> expr <* semi) 
                                  <*> (reserved "default" *> colon *> expr <* semi))
-eint  = EInt nopos <$> (fromIntegral <$> decimal)
+--eint  = EInt nopos <$> (fromIntegral <$> decimal)
+eint  = lexeme eint'
 estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep1 expr)
     where isstruct = try $ lookAhead $ identifier *> symbol "{"
+
+eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
+                                                   v <- sradval
+                                                   mkLit w v)
+
+width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
+sradval =  ((try $ string "'b") *> parseBin)
+       <|> ((try $ string "'o") *> parseOct)
+       <|> ((try $ string "'d") *> parseDec)
+       <|> ((try $ string "'h") *> parseHex)
+       <|> parseDec
+parseBin :: Stream s m Char => ParsecT s u m Integer
+parseBin = readBin <$> (many1 $ (char '0') <|> (char '1'))
+parseOct :: Stream s m Char => ParsecT s u m Integer
+parseOct = (fst . head . readOct) <$> many1 octDigit
+parseDec :: Stream s m Char => ParsecT s u m Integer
+parseDec = (fst . head . readDec) <$> many1 digit
+parseSDec = (\m v -> m * v)
+            <$> (option 1 ((-1) <$ reservedOp "-"))
+            <*> ((fst . head . readDec) <$> many1 digit)
+parseHex :: Stream s m Char => ParsecT s u m Integer
+parseHex = (fst . head . readHex) <$> many1 hexDigit
+
+mkLit :: Maybe Int -> Integer -> ParsecT s u m Expr
+mkLit Nothing  v                       = return $ EInt nopos (msb v + 1) v
+mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width >0"
+                 | msb v < w           = return $ EInt nopos w v
+                 | otherwise           = fail "Value exceeds specified width"
 
 etable = [[postf $ choice [postField]]
          ,[pref  $ choice [prefix "not" Not]]

@@ -61,7 +61,7 @@ data P4Action = P4AModify Expr Expr
 instance PP P4Action where
     pp (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs)
 
--- We don't use a separate type for P4 exprressions for now, 
+-- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
 printExpr :: Expr -> Doc
 printExpr (EKey _ k)        = pp k
@@ -69,7 +69,7 @@ printExpr (EPacket _)       = pp "pkt"
 printExpr (EField _ e f)    = printExpr e <> char '.' <> pp f
 printExpr (EBool _ True)    = pp "true"
 printExpr (EBool _ False)   = pp "false"
-printExpr (EInt _ v)        = pp $ show v
+printExpr (EInt _ _ v)      = pp $ show v
 printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)    = parens $ printUOp op <+> printExpr e
 
@@ -122,14 +122,16 @@ mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
     let portranges = map (\(port,_) -> ?pmap M.! port) $ nodePorts switch
     stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
-                                let (first, _) = ?pmap M.! port in
-                                let ?kmap = M.insert (name $ last $ roleKeys ?role) (EBinOp nopos Minus ingressPort (EInt nopos $ fromIntegral first)) kmap in 
+                                let (first, _) = ?pmap M.! port 
+                                    pkey = last $ roleKeys ?role in
+                                let -- P4 ingress port numbers are 32-bit
+                                    ?kmap = M.insert (name pkey) (EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)) kmap in 
                                 mkStatement (roleBody ?role))
              $ nodePorts switch
     let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos $ fromIntegral first)
-                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos $ fromIntegral last)
+    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos 32 $ fromIntegral first)
+                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos 32 $ fromIntegral last)
                                                      cond = EBinOp nopos And bound1 bound2
                                                  in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
@@ -162,7 +164,7 @@ mkStatement (SSet  _ lhs rhs) = do
 
 mkStatement (SSend _ (ELocation _ n ks)) = do
     let (base, _) = ?pmap M.! n
-        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos $ fromIntegral base) (last ks) 
+        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
     tableid <- incTableCnt
     let tablename = "send" ++ show tableid
     mkSingleActionTable tablename (P4AModify egressSpec portnum)
