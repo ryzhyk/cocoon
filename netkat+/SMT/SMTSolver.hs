@@ -5,6 +5,7 @@ module SMT.SMTSolver where
 import qualified Data.Map as M
 import Data.Maybe
 import Data.List
+import GHC.Exts
 
 import Ops
 import Name
@@ -74,11 +75,20 @@ data SMTSolver = SMTSolver {
 
 
 allSolutions :: SMTSolver -> SMTQuery -> String -> [Expr]
-allSolutions solver q var = 
+allSolutions solver q var = sortWith solToArray $ allSolutions' solver q var
+
+allSolutions' :: SMTSolver -> SMTQuery -> String -> [Expr]
+allSolutions' solver q var = 
     -- Find one solution; block it, call solveFor recursively to find more
     case smtGetModel solver q of
          Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
          Just Nothing      -> []
          Just (Just model) -> let val = model M.! var 
                                   q'  = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)} 
-                              in val:(allSolutions solver q' var)
+                              in val:(allSolutions' solver q' var)
+
+solToArray :: Expr -> [Integer]
+solToArray (EBool True)   = [1]
+solToArray (EBool False)  = [0]
+solToArray (EInt _ i)     = [i]
+solToArray (EStruct _ es) = concatMap solToArray es
