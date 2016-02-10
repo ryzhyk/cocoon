@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Syntax( Spec(..)
+module Syntax( pktVar
+             , Spec(..)
              , Refine(..)
              , errR, assertR
              , Field(..)
@@ -20,10 +21,14 @@ module Syntax( Spec(..)
 
 import Data.List
 import Control.Monad.Except
+import Text.PrettyPrint
 
 import Pos
 import Name
 import Ops
+import PP
+
+pktVar = "pkt"
 
 data Spec = Spec [Refine]
 
@@ -176,6 +181,23 @@ instance Eq Expr where
 instance WithPos Expr where
     pos = exprPos
     atPos e p = e{exprPos = p}
+
+instance PP Expr where
+    pp (EKey _ k)          = pp k
+    pp (EPacket _)         = pp pktVar
+    pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EField _ s f)      = pp s <> char '.' <> pp f
+    pp (ELocation _ r as)  = pp r <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EBool _ True)      = pp "true"
+    pp (EBool _ False)     = pp "false"
+    pp (EInt _ w v)        = pp w <> pp "'d" <> pp v
+    pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
+    pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
+    pp (EUnOp _ op e)      = parens $ pp op  <> pp e
+    pp (ECond _ cs d)      = pp "case" <+> (braces $ hsep $ (map (\(c,v) -> pp c <> colon <+> pp v) cs) ++ [pp "default" <> colon <+> pp d])
+
+instance Show Expr where
+    show = render . pp
 
 conj :: [Expr] -> Expr
 conj []     = EBool nopos True

@@ -27,7 +27,6 @@ import Type
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.SMTLib2   as SMT
 
-pktVar = "pkt"
 
 -- Multidimensional array of switch instances.  Each dimension corresponds to a 
 -- key.  Innermost elements enumerate ports of an instance.
@@ -41,8 +40,8 @@ instMapFlatten node (InstanceMap (Right links)) = [(InstanceDescr (name node) []
 type PortLinks = [((String, String), (Int, Int), [(Int, Maybe PortInstDescr)])]
 
 -- Role instance descriptor
-data InstanceDescr = InstanceDescr {idescNode::String, idescKeys::[Expr]} deriving Eq
-data PortInstDescr = PortInstDescr {pdescPort::String, pdescKeys::[Expr]} deriving Eq
+data InstanceDescr = InstanceDescr {idescNode::String, idescKeys::[Expr]} deriving (Eq, Show)
+data PortInstDescr = PortInstDescr {pdescPort::String, pdescKeys::[Expr]} deriving (Eq, Show)
 
 type Topology = [(Node, InstanceMap)]
 
