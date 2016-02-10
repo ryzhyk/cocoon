@@ -5,6 +5,7 @@ module MiniNet.MiniNet (generateMininetTopology) where
 import Text.JSON
 import Data.Maybe
 import Control.Monad.State
+import Debug.Trace
 
 import Topology
 import Util
@@ -13,8 +14,8 @@ import Eval
 import NS
 import Name
 
-hstep = 80
-vstep = 80
+hstep = 100
+vstep = 100
 
 type Switches = [JSValue]
 type Hosts    = [JSValue]
@@ -33,8 +34,9 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
                   concatMap (\(n, imap) -> concatMap (\(descr, plinks) -> renderLinks nmap descr plinks) $ instMapFlatten n imap) topology
           attrs = [ ("controllers", JSArray [])
                   , ("hosts"      , JSArray hs)
-                  , ("sws"        , JSArray sws)
+                  , ("switches"   , JSArray sws)
                   , ("links"      , JSArray links)
+                  , ("version"    , JSRational False 2)
                   ]
           
 renderNodes :: Refine -> Int -> (Node, InstanceMap) -> Int -> State (Switches, Hosts, NodeMap) ()
@@ -53,10 +55,10 @@ renderNode voffset node ((descr, links), hoffset) = do
                , ("hostname"   , JSString $ toJSString ndname) 
                , ("nodeNum"    , JSRational False $ fromIntegral number)
                , ("switchType" , JSString $ toJSString "bmv2")]
-        attrs = [ ("number", JSRational False $ fromIntegral number)
+        attrs = [ ("number", JSString $ toJSString $ show number)
                 , ("opts"  , JSObject $ toJSObject opts)
-                , ("x"     , JSRational False $ fromIntegral $ hoffset * hstep)
-                , ("y"     , JSRational False $ fromIntegral $ voffset * vstep)]
+                , ("x"     , JSString $ toJSString $ show $ (hoffset + 1) * hstep)
+                , ("y"     , JSString $ toJSString $ show $ (voffset + 1) * vstep)]
         n = JSObject $ toJSObject attrs 
         nmap' = (descr, ndname):nmap
     put $ if' (nodeType node == NodeSwitch) ((n:sws), hs, nmap') (sws, (n:hs), nmap')
