@@ -12,15 +12,15 @@ typedef struct {
 function netmask(): uint<8>
 function k(): uint<8>
 
-role NodeIn(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = (filter false)
-role NodeOut(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = send NodeIn[pkt.dst]
+role NodeIn(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = (filter false)
+role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = send NodeIn[pkt.dst, 8'd0]
 
 refine NodeOut {
 
     role Fabric() =
-        send NodeIn[pkt.dst]
+        send NodeIn[pkt.dst, 8'd0]
         
-    role NodeOut(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k()] = 
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip3 < k() and port = 8'd0] = 
         send Fabric[]
 }
 
@@ -30,9 +30,9 @@ refine Fabric, NodeOut {
 
     role Pod(uint<8> subnet)[subnet < k() + k()] = 
         if not (pkt.dst.ip2 = subnet) then send Core[]
-        else send NodeIn[pkt.dst]
+        else send NodeIn[pkt.dst, 8'd0]
 
-    role NodeOut(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = 
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
         send Pod[pkt.dst.ip2]
 }
 
@@ -45,10 +45,10 @@ refine Core, Pod, NodeOut {
         else send Core[]
 
     role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
-        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst]
+        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst, 8'd0]
         else send PodUpper[subnet]
 
-    role NodeOut(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = 
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
         send PodLower[pkt.dst.ip2, pkt.dst.ip1]
 }
 
@@ -61,7 +61,7 @@ refine Core, PodUpper, PodLower {
         else send Core[hash]
 
     role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
-        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst]
+        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst, 8'd0]
         else send PodUpper[subnet,(subnet+pkt.dst.ip0)%k()]
 }
 
@@ -92,7 +92,7 @@ refine PodUpper, Core, PodLower {
         send PodUpperUIn[pkt.dst.ip2, hash, hash2]
 
     role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
-        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst]
+        if pkt.dst.ip2 = subnet and pkt.dst.ip1 = subsubnet then send NodeIn[pkt.dst,8'd0]
         else send PodUpperLIn[subnet,(subnet+pkt.dst.ip0)%k(),subsubnet]
 }
 
@@ -119,12 +119,12 @@ refine PodLower, PodUpperLOut, NodeOut {
         else send PodLowerUOut[subnet,subsubnet,(subnet+pkt.dst.ip0)%k()]
 
     role PodLowerLOut(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
-        send NodeIn[IP4{pkt.dst.ip3,subnet, subsubnet, port}]
+        send NodeIn[IP4{pkt.dst.ip3,subnet, subsubnet, port}, 8'd0]
 
     role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
         send PodLowerUIn[subnet, port, hash]
 
-    role NodeOut(IP4 addr)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = 
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
         send PodLowerLIn[pkt.dst.ip2, pkt.dst.ip1, pkt.dst.ip0]
 }
 
@@ -138,4 +138,7 @@ refine {
 
     role PodLowerSwitch(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = (filter false)
     switch PodLowerSwitch( (PodLowerUIn, PodLowerUOut), (PodLowerLIn, PodLowerLOut))
+
+    role NodeHost(IP4 addr) [addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = (filter false)
+    host NodeHost((NodeIn, NodeOut))
 }
