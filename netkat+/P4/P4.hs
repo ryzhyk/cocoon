@@ -22,6 +22,7 @@ import NS
 import Name
 import Eval
 import Topology
+import P4.Header
 
 -- State maintained during compilation
 data P4State = P4State { p4TableCnt :: Int   -- table counter
@@ -115,7 +116,7 @@ genP4Switch r switch fmap kmap pmap =
                   (nest' $ pp controlstat)
                   $$
                   rbrace
-    in (pp "#include <parse.p4>" $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
+    in (pp p4HeaderDecls $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
 
 mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
 mkSwitch kmap switch = do
