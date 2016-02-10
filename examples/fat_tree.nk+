@@ -119,13 +119,13 @@ refine PodLower, PodUpperLOut, NodeOut {
         else send PodLowerUOut[subnet,subsubnet,(subnet+pkt.dst.ip0)%k()]
 
     role PodLowerLOut(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
-        send NodeIn[IP4{pkt.dst.ip3,subnet, subsubnet, port}, 8'd0]
+        send NodeIn[IP4{netmask(),subnet, subsubnet, port}, 8'd0]
 
     role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
         send PodLowerUIn[subnet, port, hash]
 
     role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
-        send PodLowerLIn[pkt.dst.ip2, pkt.dst.ip1, pkt.dst.ip0]
+        send PodLowerLIn[addr.ip2, addr.ip1, addr.ip0]
 }
 
 refine {
