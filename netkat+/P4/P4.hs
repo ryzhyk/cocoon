@@ -46,21 +46,21 @@ egressSpec  = EField nopos (EKey nopos "standard_metadata") "egress_spec"
 ingressPort = EField nopos (EKey nopos "standard_metadata") "ingress_port"
 
 instance PP P4Statement where
-    pp (P4SSeq s1 s2) = (pp s1 <> semi) $$ pp s2
+    pp (P4SSeq s1 s2) = pp s1 $$ pp s2
     pp (P4SITE c t e) = pp "if" <+> (parens $ printExpr c) <+> lbrace 
                         $$
                         (nest' $ pp t)
                         $$
-                        maybe empty (\st -> (rbrace <+> pp "else" <+> (if' (isITE st) empty lbrace)) 
-                                            $$ (nest' $ pp st <> semi)
-                                            $$ (if' (isITE st) empty rbrace)) e
-    pp (P4SApply n)   = pp "apply" <> (parens $ pp n)
-    pp (P4SDrop)      = pp "drop"
+                        maybe rbrace (\st -> (rbrace <+> pp "else" <+> (if' (isITE st) empty lbrace)) 
+                                             $$ (nest' $ pp st)
+                                             $$ (if' (isITE st) empty rbrace)) e
+    pp (P4SApply n)   = pp "apply" <> (parens $ pp n) <> semi
+    pp (P4SDrop)      = pp "drop" <> semi
 
 data P4Action = P4AModify Expr Expr
 
 instance PP P4Action where
-    pp (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs)
+    pp (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi
 
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
@@ -182,7 +182,7 @@ mkSingleActionTable n a = do
                 $$
                 (pp "table" <+> pp n <+> lbrace) 
                 $$
-                (nest' $ pp "actions" <+> (braces $ pp actname))
+                (nest' $ pp "actions" <+> (braces $ pp actname <> semi))
                 $$
                 rbrace
         command = pp "table_set_default" <+> pp n <+> pp actname
