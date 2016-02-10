@@ -114,8 +114,36 @@ nodeValidate r nd@Node{..} = do
                                          $ statSendsTo (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
                           assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd nodePorts)) $ statSendsTo (roleBody r2)) (pos nd)
-                                 $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports")
+                                 $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports"
+                          checkLinkSt $ roleBody r2)
           nodePorts
+
+checkLinkSt :: (MonadError String me) => Statement -> me ()
+checkLinkSt (SSeq _ s1 s2) = do checkLinkSt s1
+                                checkLinkSt s2
+checkLinkSt (SPar p _  _)  = err p "Parallel composition not allowed in output port body" 
+checkLinkSt (SITE _ c t e) = do checkLinkExpr c
+                                checkLinkSt t
+                                checkLinkSt e
+checkLinkSt (STest _ e)    = checkLinkExpr e
+checkLinkSt (SSet p _ _)   = err p "Output port may not modify packets"
+checkLinkSt (SSend _ e)    = checkLinkExpr e
+
+checkLinkExpr :: (MonadError String me) => Expr -> me ()
+checkLinkExpr (EKey    _ _)       = return ()
+checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
+checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
+checkLinkExpr (EField _ s _)      = checkLinkExpr s
+checkLinkExpr (ELocation _ r es)  = mapM_ checkLinkExpr es
+checkLinkExpr (EBool _ _)         = return ()
+checkLinkExpr (EInt _ _ _)        = return ()
+checkLinkExpr (EStruct _ _ fs)    = mapM_ checkLinkExpr fs
+checkLinkExpr (EBinOp _ _ e1 e2)  = do checkLinkExpr e1
+                                       checkLinkExpr e2
+checkLinkExpr (EUnOp _ _ e)       = checkLinkExpr e
+checkLinkExpr (ECond _ cs d)      = do mapM (\(c,v) -> do checkLinkExpr c
+                                                          checkLinkExpr v) cs
+                                       checkLinkExpr d
 
 exprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()
 exprValidate r role (EKey p k) = do 
