@@ -57,7 +57,8 @@ renderNode voffset node ((descr, links), hoffset) = do
         opts = [ ("controllers", JSArray [])
                , ("hostname"   , JSString $ toJSString ndname) 
                , ("nodeNum"    , JSRational False $ fromIntegral number)
-               , ("switchType" , JSString $ toJSString "bmv2")]
+               , ("switchType" , JSString $ toJSString "bmv2")] ++
+               if' (nodeType node == NodeHost) [("ip4", JSString $ toJSString $ formatIP (head $ idescKeys descr))] []
         attrs = [ ("number", JSString $ toJSString $ show number)
                 , ("opts"  , JSObject $ toJSObject opts)
                 , ("x"     , JSString $ toJSString $ show $ (hoffset + 1) * hstep)
@@ -65,6 +66,9 @@ renderNode voffset node ((descr, links), hoffset) = do
         n = JSObject $ toJSObject attrs 
         nmap' = (descr, ndname):nmap
     put $ if' (nodeType node == NodeSwitch) ((n:sws), hs, nmap') (sws, (n:hs), nmap')
+
+formatIP :: Expr -> String
+formatIP (EStruct _ _ fs) = intercalate "." $ map (show . exprIVal) fs
 
 instLinks :: (?t::Topology,?r::Refine) => (InstanceDescr, PortLinks) -> [(PortInstDescr, PortInstDescr)]
 instLinks (node, plinks) = 

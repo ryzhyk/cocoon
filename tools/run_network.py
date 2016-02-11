@@ -98,11 +98,15 @@ def main():
 
     # configure hosts
     for n in loadedTopology['hosts']:
-        h = net.get(n['opts']['hostname'])
+        hostname = n['opts']['hostname']
+        h = net.get(hostname)
+        ip = n['opts']['ip4']
         for off in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload eth0 %s off" % off
             print cmd
             h.cmd(cmd)
+        print hostname + ": set IP address " + ip
+        h.cmd("ifconfig eth0 " + ip)
         print "disable ipv6"
         h.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
         h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
