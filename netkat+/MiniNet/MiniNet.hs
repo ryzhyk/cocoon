@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE ImplicitParams, TupleSections #-}
 
 module MiniNet.MiniNet (generateMininetTopology) where
 
@@ -6,6 +6,7 @@ import Text.JSON
 import Data.Maybe
 import Control.Monad.State
 import Debug.Trace
+import Data.List
 
 import Topology
 import Util
@@ -31,7 +32,8 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
           -- render links
           links = let ?r = r in
                   let ?t = topology in
-                  concatMap (\(n, imap) -> concatMap (\(descr, plinks) -> renderLinks nmap descr plinks) $ instMapFlatten n imap) topology
+                  mapMaybe (renderLink nmap)
+                  $ concatMap (\(n, imap) -> concatMap instLinks $ instMapFlatten n imap) topology
           attrs = [ ("controllers", JSArray [])
                   , ("hosts"      , JSArray hs)
                   , ("switches"   , JSArray sws)
@@ -39,6 +41,7 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
                   , ("version"    , JSRational False 2)
                   ]
           
+
 renderNodes :: Refine -> Int -> (Node, InstanceMap) -> Int -> State (Switches, Hosts, NodeMap) ()
 renderNodes r w (n, imap) voffset = do 
     let nodes = instMapFlatten n imap
@@ -63,17 +66,24 @@ renderNode voffset node ((descr, links), hoffset) = do
         nmap' = (descr, ndname):nmap
     put $ if' (nodeType node == NodeSwitch) ((n:sws), hs, nmap') (sws, (n:hs), nmap')
 
-renderLinks :: (?t::Topology,?r::Refine) => NodeMap -> InstanceDescr -> PortLinks -> Links
-renderLinks nmap node plinks = 
-    concatMap (\((_,o), (base,_), links) -> mapMaybe (renderLink nmap node base) links) plinks
+instLinks :: (?t::Topology,?r::Refine) => (InstanceDescr, PortLinks) -> [(PortInstDescr, PortInstDescr)]
+instLinks (node, plinks) = 
+    concatMap (\((_,o), _, links) -> let prole = getRole ?r o in 
+                                     mapMaybe (\(pnum, mpdescr) -> fmap (portFromNode ?r node o pnum,) mpdescr) links) 
+              plinks
 
-renderLink :: (?t::Topology,?r::Refine) => NodeMap -> InstanceDescr -> Int -> (Int, Maybe PortInstDescr) -> Maybe JSValue
-renderLink nmap srcnode srcprtbase (srcportnum, Just dstportinst@(PortInstDescr dstpname dstkeys)) = Just $ JSObject $ toJSObject attrs
-    where dstnode = nodeFromPort ?r ?t dstportinst
-          dstpnum = phyPortNum ?t dstnode dstpname (fromInteger $ exprIVal $ last dstkeys)
-          attrs = [ ("src"     , JSString $ toJSString $ fromJust $ lookup srcnode nmap)
-                  , ("srcport" , JSRational False $ fromIntegral $ srcportnum + srcprtbase)
-                  , ("dest"    , JSString $ toJSString $ fromJust $ lookup dstnode nmap)
+renderLink :: (?t::Topology,?r::Refine) => NodeMap -> (PortInstDescr, PortInstDescr) -> Maybe JSValue
+renderLink nmap (srcport, dstport) = if (srcndname, srcpnum) < (dstndname,dstpnum)
+                                        then Just $ JSObject $ toJSObject attrs
+                                        else Nothing
+    where dstnode = nodeFromPort ?r ?t dstport
+          srcnode = nodeFromPort ?r ?t srcport
+          srcndname = fromJust $ lookup srcnode nmap
+          dstndname = fromJust $ lookup dstnode nmap
+          dstpnum = phyPortNum ?t dstnode (pdescPort dstport) (fromInteger $ exprIVal $ last $ pdescKeys dstport)
+          srcpnum = phyPortNum ?t srcnode (pdescPort srcport) (fromInteger $ exprIVal $ last $ pdescKeys srcport)
+          attrs = [ ("src"     , JSString $ toJSString srcndname)
+                  , ("srcport" , JSRational False $ fromIntegral $ srcpnum)
+                  , ("dest"    , JSString $ toJSString dstndname)
                   , ("destport", JSRational False $ fromIntegral dstpnum)
                   , ("opts"    , JSObject $ toJSObject ([]::[(String, JSValue)]))]
-renderLink _ _ _ _ = Nothing

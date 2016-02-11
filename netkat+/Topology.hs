@@ -9,6 +9,7 @@ module Topology ( Topology
                 , instMapFlatten
                 , PortLinks
                 , nodeFromPort
+                , portFromNode
                 , phyPortNum
                 , generateTopology) where
 
@@ -60,6 +61,11 @@ phyPortNum t inst pname pnum = base + pnum
 nodeFromPort :: Refine -> Topology -> PortInstDescr -> InstanceDescr
 nodeFromPort r t (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
     where noderole = name $ fromJust $ find (isJust . find (\(i,o) -> i == pname || o == pname) . nodePorts) $ refineNodes r
+
+portFromNode :: Refine -> InstanceDescr -> String -> Int -> PortInstDescr
+portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt nopos w $ fromIntegral pnum])
+    where prole = getRole r pname
+          TUInt _ w = typ' r prole $ last $ roleKeys prole
 
 generateTopology :: Refine -> FMap -> Topology
 generateTopology r fmap = let ?r = r in 
