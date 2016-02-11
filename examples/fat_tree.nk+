@@ -66,7 +66,7 @@ refine Core, PodUpper, PodLower {
 
     role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
         if pkt.dstip2 = subnet and pkt.dstip1 = subsubnet then send NodeIn[IP4{pkt.dstip3, pkt.dstip2, pkt.dstip1, pkt.dstip0}, 8'd0]
-        else send PodUpper[subnet,(subnet+pkt.dstip0)%k()]
+        else send PodUpper[subnet,(*(subnet+pkt.dstip0)%k()*)pkt.dstip0]
 }
 
 refine Core, PodUpper {
@@ -75,7 +75,7 @@ refine Core, PodUpper {
 
     role PodUpper(uint<8> subnet, uint<8> hash) [subnet < k() + k() and hash < k()] = 
         if pkt.dstip2 = subnet then send PodLower[subnet,pkt.dstip1]
-        else send Core[hash, (hash + pkt.dstip0)%k()]
+        else send Core[hash, (*(hash + pkt.dstip0)%k()*) pkt.dstip0]
 }
 
 refine PodUpper, Core, PodLower {
@@ -87,7 +87,7 @@ refine PodUpper, Core, PodLower {
 
     role PodUpperLIn(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
         if pkt.dstip2 = subnet then send PodUpperLOut[subnet, hash, pkt.dstip1]
-        else send PodUpperUOut[subnet, hash, (hash + pkt.dstip0)%k()]
+        else send PodUpperUOut[subnet, hash, (*(hash + pkt.dstip0)%k()*) pkt.dstip0]
 
     role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
         send PodLower[subnet, port]
@@ -97,7 +97,7 @@ refine PodUpper, Core, PodLower {
 
     role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
         if pkt.dstip2 = subnet and pkt.dstip1 = subsubnet then send NodeIn[IP4{pkt.dstip3, pkt.dstip2, pkt.dstip1, pkt.dstip0},8'd0]
-        else send PodUpperLIn[subnet,(subnet+pkt.dstip0)%k(),subsubnet]
+        else send PodUpperLIn[subnet,(*(subnet+pkt.dstip0)%k()*)pkt.dstip0,subsubnet]
 }
 
 refine Core, PodUpperUOut {
@@ -120,7 +120,7 @@ refine PodLower, PodUpperLOut, NodeOut {
 
     role PodLowerLIn(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
         if pkt.dstip2 = subnet and pkt.dstip1 = subsubnet then send PodLowerLOut[subnet, subsubnet, pkt.dstip0]
-        else send PodLowerUOut[subnet,subsubnet,(subnet+pkt.dstip0)%k()]
+        else send PodLowerUOut[subnet,subsubnet,(*(subnet+pkt.dstip0)%k()*)pkt.dstip0]
 
     role PodLowerLOut(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
         send NodeIn[IP4{netmask(),subnet, subsubnet, port}, 8'd0]
