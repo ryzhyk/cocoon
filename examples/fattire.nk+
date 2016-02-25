@@ -1,0 +1,162 @@
+typedef struct {
+    uint<8> state; (* encodes regular expression's automaton *)
+    uint<8> node;  (* encodes position in the tree *)
+} Packet
+
+role GW() = pkt.state := 1; send IDS[]
+role IDS() = if pkt.state = 1 then pkt.state := 2; send A[]
+role A() = (filter false)
+
+refine GW, IDS, A {
+    role GW() = 
+        pkt.state := 1;
+        if *
+            then pkt.node := 1; send S1[]
+            else pkt.node := 2; send S2[]
+
+    role S1() = 
+        if pkt.node = 1
+            then {if *
+                      then pkt.node := 3; send IDS[]
+                      else pkt.node := 2; send S2[]
+            } 
+            else pkt.node := 8; send A[]
+
+    role S2() = 
+        if pkt.node = 2
+            then pkt.node := 4; send IDS[]
+            else if pkt.node = 6
+                    then {if *
+                              then node := 9; send A[]
+                              else node := 5; send S1[]
+                    }
+                    else pkt.node := 10; send A[]
+ 
+    role IDS() = 
+        pkt.state := 2;
+        if pkt.node = 3
+            then if *   
+                     then pkt.node := 6; send S2[]
+                     else pkt.node := 5; send S1[]
+            else pkt.node := 7; send S2[]            
+}
+
+refine GW, IDS, A, S1, S2 {
+
+    typedef Struct {
+        Location l1,
+        Location l2
+    } Link
+
+    function brokenLink(): Link
+    function linkUp(Location): bool
+
+    assert linkUp(l) = not l = brokenLink().l1 && not l = brokenLink().l2
+    assert linkUp(GWOut[0])  = linkUp(S1Out[0]) &&
+           linkUp(GWOut[0])  = linkUp(S2Out[0]) &&
+           linkUp(IDSOut[0]) = linkUp(S1Out[1]) &&
+           linkUp(IDSOut[1]) = linkUp(S2Out[1]) &&
+           linkUp(S1Out[2])  = linkUp(S2Out[2]) &&
+           linkUp(S1Out[3])  = linkUp(AOut[0]) &&
+           linkUp(S2Out[3])  = linkUp(AOut[1])
+
+    role GW() = 
+        pkt.state := 1;
+        if linkUp(GWOut0[])
+            then pkt.node := 1; send GWOut0[]
+            else pkt.node := 2; send GWOut1[]
+
+    role GWOut0(uint<8> port) = 
+        if (port = 0) && linkUp(GWOut0[])
+           then send S1In[0]
+        else if linkUp(GWOut1[])
+           then send S2In[0]
+
+    role GWIn(uint<8> port) = filter false
+
+    role S1In(uint8<port>) = 
+    if port = 0 then {
+        if pkt.node = 1
+            then {if linkUp(S1Out[1])
+                      then pkt.node := 3; send S1Out[1]
+                      else pkt.node := 2; send S1Out[2]
+            } 
+    } else if port = 1 || port = 2 then {
+        pkt.node := 8; send S1Out[3]
+
+    role S1Out(uint<8> port) = 
+        if port = 0 then {
+            if linkUp(S1Out[0]) then send GWIn[0]
+        } else if port = 1 then {
+            if linkUp(S1Out[1]) then send IDSIn[0]
+        } else if port = 2 then {
+            if linkUp(S1Out[2]) then send S2In[2]
+        } else if port = 3 then {
+            if linkUp(S1Out[3]) then send AIn[0]
+        }
+
+    role S2In(uint<8> port) = 
+        if port = 0 then {
+            pkt.node := 4; send S2Out[1]
+        } else if port = 1 then { 
+            if pkt.node = 6
+                then {if linkUp(S2Out[3])
+                         then node := 9; send S2Out[3]
+                         else node := 5; send S2Out[2]
+                }
+                else pkt.node := 10; send S2Out[3]
+        } else if port = 2 then {
+            pkt.node := 4; send S2Out[1] 
+        }
+
+    role S2Out(uint<8> port) = 
+        if port = 0 then {
+            if linkUp(S2Out[0]) then send GWIn[1]
+        } else if port = 1 then {
+            if linkUp(S2Out[1]) then send IDSIn[1]
+        } else if port = 2 then {
+            if linkUp(S2Out[2]) then send S1In[2]
+        } else if port = 3 then {
+            if linkUp(S2Out[3]) then send AIn[1]
+        }
+
+    role IDSIn(uint<8> port) = 
+        if port = 0 then {
+            pkt.state := 2;
+            then if linkUp(IDSOut[1])   
+                         then pkt.node := 6; send IDSOut[1]
+                         else pkt.node := 5; send IDSOut[0]
+        } else if port = 1 {
+            pkt.node := 7; send IDSOut[1]            
+        }
+
+    role IDSOut(uint<8> port) = 
+        if port = 0 then {
+            if linkUp(IDSOut[0]) then send S1In[1]
+        } else if port = 1 then {
+            if linkUp(IDSOut[1]) then send S2In[1]
+        }
+
+    role AIn(uint<8> port) = filter false
+    role AOut(uint<8> port) = 
+        if port = 0 then {
+            if linkUp(AOut[0]) send S1In[3]
+        } else if port = 1 then {
+            if linkUp(AOut[1]) send S2In[3]
+        }
+
+    role S1Switch()[] = filter false
+    switch S1Switch( (S1In, S1Out) )
+
+    role S2Switch()[] = filter false
+    switch S2Switch( (S2In, S2Out))
+
+    host GW((GWIn, GWOut))
+
+    role IDSHost() = filter false
+    host IDSHost((IDSIn, IDSOut))
+
+    role AHost() = filter false
+    host AHost((AIn, AOut))
+}
+
