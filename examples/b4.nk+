@@ -1,0 +1,91 @@
+typedef struct {
+    uint<8> ip3,
+    uint<8> ip2,
+    uint<8> ip1,
+    uint<8> ip0
+} IP4
+
+typedef struct {
+    IP4 dstip,
+    uint<16> tag
+
+    (* encapsulated packet dst IP *)
+    IP4 edstip
+} Packet
+
+role Host
+
+
+(* true: host with the given IP exists *)
+function hostExists(IP4): bool
+
+role HostOut(IP4 addr)[exists(addr)] = 
+    if exists(pkt.dstip) then
+        send HostIn(addr)
+
+role HostIn(IP4) = filter false
+
+
+refine HostOut {
+
+    typedef uint<16> SiteId;
+    
+    function hostSite(IP4): SiteId
+    function siteExists(SiteId): bool
+
+    assume exists(addr) => siteExists(hostSite(addr))
+
+    role HostOut(IP4 addr)[exists(addr)] = send LocalFabric[hostSite(addr)]
+    
+    role LocalFabric(SiteId site)[siteExists(site)] = 
+        if hostExists(pkt.dstip) && hostSite(pkt.dstip) = site then 
+            send HostIn[pkt.dstip]
+        else
+            send GlobalFabricIn[site]
+
+    role GlobalFabricIn(SiteId site)[siteExists(site)] = 
+        if hostExists(pkt.dstip) then
+            send GlobalFabricOut[hostSite(pkt.dstip)]
+
+    role GlobalFabricOut(SiteId site)[siteExists(site)] = send LocalFabric(site)
+
+}
+
+refine GlobalFabricIn {
+
+    typedef struct {
+        SiteId site,
+        uint<8> port
+    } WANPort
+
+    function wanLink(WANPort): WANPort
+
+    typedef uint<32> TunnelId
+
+    (* TODO: define domains of functions *)
+    function tunnel(SiteId, SiteId, uint<16>): TunnelId
+
+    assume destination(tunnel(s1, s2, tag)) = s2
+
+    function nexthop(TunnelID, SiteId): uint<8>
+
+    assume (tid = tunnel(src, dst, tag) && 
+            next = wanLink(WANPort{src, nexthop(tid, src)}).site) => 
+           (next = dst || wanLink(WANPort{next, nexthop(tid, next)} = dst))
+
+    role GlobalFabricIn(SiteId site)[siteExists(site)] = 
+        pkt.edstip := pkt.dstip;
+        pkt.dstip  := tunnel(site, hostSite(pkt.edstip))
+        send WANPortOut[site, nexthop(tunnel(site, hostSite(pkt.edstip)),site)]
+
+   role WANPortOut(SiteId site, uint<8> port) = 
+        send WANPortIn[wanLink(WANPort{site, port}).site, wanLink(WANPort{site, port}).port]
+
+   role WANPortIn(SiteId site, uint<8> port) = 
+        if destination(pkt.dstip) = site then {
+            pkt.dstip := pkt.edstip;
+            send GlobalFabricOut[site]
+        } else {
+            send WANPortOut[site, nexthop(pkt.dstip, site)]
+        }
+}
