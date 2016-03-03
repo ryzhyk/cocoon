@@ -29,12 +29,26 @@ combine prev new = do
                                           $ "Role " ++ role ++ " is undefined in this context"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
     let types   = refineTypes prev'   ++ refineTypes new
-        funcs   = refineFuncs prev'   ++ refineFuncs new
         roles   = refineRoles prev'   ++ refineRoles new
         assumes = refineAssumes prev' ++ refineAssumes new 
         nodes   = refineNodes prev'   ++ refineNodes new 
+    funcs <- mergeFuncs $ refineFuncs prev'  ++ refineFuncs new
     return $ Refine (pos new) [] types funcs roles assumes nodes
 
+mergeFuncs :: (MonadError String me) => [Function] -> me [Function]
+mergeFuncs []     = return []
+mergeFuncs (f:fs) = do
+    case find ((== name f) . name) fs of
+         Nothing -> liftM (f:) $ mergeFuncs fs
+         Just f' -> do checkFRefinement f f'
+                       mergeFuncs fs
+
+-- check that f' has the same signature and domain as f, and f does not have a body
+checkFRefinement :: (MonadError String me) => Function -> Function -> me ()
+checkFRefinement f f' = do
+    assert (funcArgs f == funcArgs f') (pos f') $ "Arguments of " ++ name f' ++ " do not match previous definition at " ++ spos f
+    assert (funcType f == funcType f') (pos f') $ "Type of " ++ name f' ++ " do not match previous definition at " ++ spos f
+    assert (isNothing $ funcDef f) (pos f') $ "Cannot re-define function " ++ name f' ++ " previously defined at " ++ spos f
 
 -- construct dependency graph
 typeGraph :: Refine -> G.Gr TypeDef ()
@@ -46,6 +60,7 @@ validate1 r@Refine{..} = do
     uniqNames (\n -> "Multiple definitions of role " ++ n) refineRoles
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
+    mergeFuncs refineFuncs
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
     mapM_ (typeValidate r . tdefType) refineTypes
@@ -71,10 +86,12 @@ typeValidate r (TUser   p n)  = do checkType p r n
 typeValidate _ _              = return ()
 
 funcValidate :: (MonadError String me) => Refine -> Function -> me ()
-funcValidate r Function{..} = do
+funcValidate r f@Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
+    exprValidate r (CtxFunc f) funcDom
+    maybe (return ()) (exprValidate r (CtxFunc f)) funcDef
 
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r role@Role{..} = do

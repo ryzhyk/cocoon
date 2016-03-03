@@ -126,7 +126,12 @@ decl =  (SpType         <$> typeDef)
 
 typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
 
-func = withPos $ Function nopos <$ reserved "function" <*> identifier <*> (parens $ commaSep arg) <*> (colon *> typeSpecSimple)
+func = withPos $ Function nopos <$  reserved "function" 
+                                <*> identifier 
+                                <*> (parens $ commaSep arg) 
+                                <*> (colon *> typeSpecSimple) 
+                                <*> (option (EBool nopos True) (reservedOp "|" *> expr))
+                                <*> (optionMaybe (reservedOp "=" *> expr))
 
 role = withPos $ Role nopos <$  reserved "role" 
                             <*> identifier 

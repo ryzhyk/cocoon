@@ -114,6 +114,8 @@ data Function = Function { funcPos  :: Pos
                          , funcName :: String
                          , funcArgs :: [Field]
                          , funcType :: Type
+                         , funcDom  :: Expr
+                         , funcDef  :: Maybe Expr
                          }
 
 instance WithPos Function where
@@ -205,8 +207,9 @@ conj []     = EBool nopos True
 conj [e]    = e
 conj (e:es) = EBinOp nopos And e (conj es)
 
-data ECtx = CtxRole Role
+data ECtx = CtxRole   Role
           | CtxAssume Assume
+          | CtxFunc   Function
           
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
