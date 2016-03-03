@@ -1,0 +1,267 @@
+typedef struct {
+    uint<8> ip3,
+    uint<8> ip2,
+    uint<8> ip1,
+    uint<8> ip0
+} IP4
+
+typedef struct {
+    IP4 dstip,
+    bool tunnel,
+    IP4 edstip,
+    uint<8> tag
+} Packet
+
+function netmask(): uint<8>
+function k(): uint<8>
+function nodeExists(IP4): bool
+
+function flowid(Packet): FlowId
+
+role NodeIn(IP4 addr, uint<8> port)[nodeExists(IP4) and port = 8'd0] = filter false
+role NodeOut(IP4 addr, uint<8> port)[nodeExists(IP4) and port = 8'd0] = 
+    if nodeExists(pkt.dstip) then
+        send NodeIn[pkt.dstip, 8'd0]
+    else if not pkt.dstip.ip3 = netmask() (* external traffic routed to middleboxes *)
+        send LightIPS[flowid(pkt)]
+
+function lightIPSCheck(Packet): bool
+role LightIPS(FlowId flow) = 
+    if lightIPSCheck(pkt) 
+        then send GW[]
+        else send HeavyIPS[flow]
+
+function heavyIPSCheck(Packet): bool
+role HeavyIPS(FlowId flow) = 
+    if heavyIPSCheck(pkt)
+        then send GW[]
+
+role GW() = filter false
+
+refine NodeOut, LightIPS, HeavyIPS, GW{
+    function serverExists(IP4): bool
+    function gwIP(IP4): bool
+    assume nodeExists(addr) => addr.ip3 = netmask()
+    assume serverExists(addr) => addr.ip3 = netmask()
+    assume serverExists(addr) => not nodeExists(addr) && not addr = gwIP()
+    assume nodeExists(addr) => not serverExists(addr) && not addr = gwIP()
+
+    function dstAddr(Packet): IP4
+
+    assert dstAddr(p) = case {
+        p.encap:                 p.dstip
+        p.dstip.ip3 = netmask(): p.dstip
+        p.tag = 0:               lightIPSHash(flowid(p)),
+        p.tag = 1:               gwIP(),
+        p.tag = 2:               heavyIPSHash(flowid(p))
+    }
+
+    (* Server that the flow ID hashes to *)
+    function lightIPSHash(FlowId): IP4
+    function heavyIPSHash(FlowId): IP4
+
+    function lightIPSHashNew(FlowId): IP4
+    function heavyIPSHashNew(FlowId): IP4
+
+    assume lightIPSHash(flowid) = addr => serverExists(addr)
+    assume heavyIPSHash(flowid) = addr => serverExists(addr)
+    assume lightIPSHashNew(flowid) = addr => serverExists(addr)
+    assume heavyIPSHashNew(flowid) = addr => serverExists(addr)
+
+    assume container(LightIPS[flowid]) = ServerIn[lightIPSHash(flowid)] || container(LightIPS[flowid]) = ServerIn[lightIPSHashNew(flowid)]
+    assume container(HeavyIPS[flowid]) = ServerIn[heavyIPSHash(flowid)] || container(HeavyIPS[flowid]) = ServerIn[heavyIPSHashNew(flowid)]
+    
+    function serverIP(Location): IP4
+    assume container(loc) = Server[ip] => serverIP(loc) = ip
+
+    role NodeOut(IP4 addr, uint<8> port) = {
+        pkt.tag := 0;
+        send Fabric[]
+
+    role Fabric() = send EdgeOut[dstAddr(pkt)]
+
+    role EdgeOut(IP4 addr) = 
+        if nodeExists(addr) then {
+            send NodeIn[addr,0]
+        } else if serverExists(addr) then {
+            send ServerIn[addr,0]
+        } else if addr = gwIP() then {
+             send GWIn[0]
+        }
+
+    role ServerIn(IP4 addr)[serverExists(addr)] = 
+        if (pkt.encap) then {
+           pkt.encap := false;
+           pkt.dstip := pkt.edstip
+        };
+        if pkt.tag = 0 then {
+            if (container(LightIPS[flowid(pkt)]) = ServerIn[addr])
+                send LightIP[flowid(pkt)]
+            else {
+                pkt.encap := true;
+                pkt.edstip := pkt.dstip;
+                pkt.dstip := lightIPSHashNew(flowid(pkt));
+                send ServerOut[addr]
+            }
+        } else if pkt.tag = 2 then {
+            if (container(HeavyIPS[flowid(pkt)]) = ServerIn[addr])
+                send HeavyIPS[flowid(pkt)]
+            else {
+                pkt.encap := true;
+                pkt.edstip := pkt.dstip;
+                pkt.dstip := heavyIPSHashNew(flowid(pkt));
+                send ServerOut[addr]
+            }
+        }
+
+    role ServerOut(IP4 addr)[serverExists(addr)] = send Fabric[]
+
+    role LightIPS(FlowId flow) = 
+        if lightIPSCheck(pkt) then {
+            pkt.tag := 1;
+            send ServerOut[serverIP(LightIPS[flow])]
+        } else {
+            pkt.tag := 2;
+            send ServerOut[serverIP(LightIPS[flow])]
+        }
+
+    role LightIPS(FlowId flow) = 
+        if heavyIPSCheck(pkt) then {
+            pkt.tag := 1;
+            send ServerOut[serverIP(HeavyIPS[flow])]
+        } 
+
+    role GWIn(uint<8> port) = filter false
+    role GWOut(uint<8> port) = send Fabric[]
+}
+
+refine Fabric, NodeOut {
+    role Core() = 
+        send Pod[dstAddr(pkt).ip2]
+
+    role Pod(uint<8> subnet)[subnet < k() + k()] = 
+        if not (dstAddr(pkt).ip2 = subnet) then send Core[]
+        else send NodeIn[IP4{dstAddr(pkt).ip3, dstAddr(pkt).ip2, dstAddr(pkt).ip1, dstAddr(pkt).ip0}, 8'd0]
+
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
+        send Pod[addr.ip2]
+
+    role LightIPSOut(uint<8> port) = send Pod[lightIPSIP().ip2]
+    role GWOut(uint<8> port) = send Pod[gwIP().ip2]
+    role HeavyIPSOut(uint<8> port) = send Pod[heavyIPSIP().ip2]
+}
+
+refine Core, Pod, NodeOut {
+    role Core() = 
+        send PodUpper[dstAddr(pkt).ip2]
+
+    role PodUpper(uint<8> subnet) [subnet < k() + k()] = 
+        if dstAddr(pkt).ip2 = subnet then send PodLower[subnet,dstAddr(pkt).ip1]
+        else send Core[]
+
+    role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
+        if dstAddr(pkt).ip2 = subnet and dstAddr(pkt).ip1 = subsubnet then send NodeIn[IP4{dstAddr(pkt).ip3, dstAddr(pkt).ip2, dstAddr(pkt).ip1, dstAddr(pkt).ip0}, 8'd0]
+        else send PodUpper[subnet]
+
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
+        send PodLower[addr.ip2, addr.ip1]
+
+    role LightIPSOut(uint<8> port) = send Pod[lightIPSIP().ip2, lightIPSIP().ip1]
+    role GWOut(uint<8> port) = send Pod[gwIP().ip2, gwIP().ip1]
+    role HeavyIPSOut(uint<8> port) = send Pod[heavyIPSIP().ip2, heavyIPSIP().ip1]
+}
+
+refine Core, PodUpper, PodLower {
+    role Core(uint<8> hash)[hash < k()] = 
+        send PodUpper[dstAddr(pkt).ip2, hash]
+
+    role PodUpper(uint<8> subnet, uint<8> hash) [subnet < k() + k() and hash < k()] = 
+        if dstAddr(pkt).ip2 = subnet then send PodLower[subnet,dstAddr(pkt).ip1]
+        else send Core[hash]
+
+    role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
+        if dstAddr(pkt).ip2 = subnet and dstAddr(pkt).ip1 = subsubnet then send NodeIn[IP4{dstAddr(pkt).ip3, dstAddr(pkt).ip2, dstAddr(pkt).ip1, dstAddr(pkt).ip0}, 8'd0]
+        else send PodUpper[subnet,(*(subnet+dstAddr(pkt).ip0)%k()*)dstAddr(pkt).ip0]
+}
+
+refine Core, PodUpper {
+    role Core(uint<8> hash, uint<8> hash2)[hash < k() and hash2 < k()] = 
+        send PodUpper[dstAddr(pkt).ip2, hash]
+
+    role PodUpper(uint<8> subnet, uint<8> hash) [subnet < k() + k() and hash < k()] = 
+        if dstAddr(pkt).ip2 = subnet then send PodLower[subnet,dstAddr(pkt).ip1]
+        else send Core[hash, (*(hash + dstAddr(pkt).ip0)%k()*) dstAddr(pkt).ip0]
+}
+
+refine PodUpper, Core, PodLower {
+    role PodUpperUIn(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+          send PodUpperLOut[subnet, hash, dstAddr(pkt).ip1]
+
+    role PodUpperUOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+          send Core[hash, port]
+
+    role PodUpperLIn(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+        if dstAddr(pkt).ip2 = subnet then send PodUpperLOut[subnet, hash, dstAddr(pkt).ip1]
+        else send PodUpperUOut[subnet, hash, (*(hash + dstAddr(pkt).ip0)%k()*) dstAddr(pkt).ip0]
+
+    role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+        send PodLower[subnet, port]
+
+    role Core(uint<8> hash, uint<8> hash2)[hash < k() and hash2 < k()] = 
+        send PodUpperUIn[dstAddr(pkt).ip2, hash, hash2]
+
+    role PodLower(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = 
+        if dstAddr(pkt).ip2 = subnet and dstAddr(pkt).ip1 = subsubnet then send NodeIn[IP4{dstAddr(pkt).ip3, dstAddr(pkt).ip2, dstAddr(pkt).ip1, dstAddr(pkt).ip0},8'd0]
+        else send PodUpperLIn[subnet,(*(subnet+dstAddr(pkt).ip0)%k()*)dstAddr(pkt).ip0,subsubnet]
+}
+
+refine Core, PodUpperUOut {
+    role CoreIn(uint<8> hash, uint<8> hash2, uint<8> port)[hash < k() and hash2 < k() and port < k() + k()] = 
+        send CoreOut[hash, hash2, dstAddr(pkt).ip2]
+
+    role CoreOut(uint<8> hash, uint<8> hash2, uint<8> port)[hash < k() and hash2 < k() and port < k() + k()] = 
+        send PodUpperUIn[port, hash, hash2]
+
+    role PodUpperUOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+        send CoreIn[hash, port, subnet]
+}
+
+refine PodLower, PodUpperLOut, NodeOut {
+    role PodLowerUIn(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
+        send PodLowerLOut[subnet, subsubnet, dstAddr(pkt).ip0]
+
+    role PodLowerUOut(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
+        send PodUpperLIn[subnet, port, subsubnet]
+
+    role PodLowerLIn(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
+        if dstAddr(pkt).ip2 = subnet and dstAddr(pkt).ip1 = subsubnet then send PodLowerLOut[subnet, subsubnet, dstAddr(pkt).ip0]
+        else send PodLowerUOut[subnet,subsubnet,(*(subnet+dstAddr(pkt).ip0)%k()*)dstAddr(pkt).ip0]
+
+    role PodLowerLOut(uint<8> subnet, uint<8> subsubnet, uint<8> port) [subnet < k() + k() and subsubnet < k() and port < k()] = 
+        send NodeIn[IP4{netmask(),subnet, subsubnet, port}, 8'd0]
+
+    role PodUpperLOut(uint<8> subnet, uint<8> hash, uint<8> port)[subnet < k() + k() and hash < k() and port < k()] = 
+        send PodLowerUIn[subnet, port, hash]
+
+    role NodeOut(IP4 addr, uint<8> port)[addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port = 8'd0] = 
+        send PodLowerLIn[addr.ip2, addr.ip1, addr.ip0]
+
+    role LightIPSOut(uint<8> port) = send Pod[lightIPSIP().ip2, lightIPSIP().ip1, lightIPSIP().ip0]
+    role GWOut(uint<8> port) = send Pod[gwIP().ip2, gwIP().ip1, gwIP().ip0]
+    role HeavyIPSOut(uint<8> port) = send Pod[heavyIPSIP().ip2, heavyIPSIP().ip1, heavyIPSIP().ip0]
+}
+
+refine {
+
+    role CoreSwitch(uint<8> hash, uint<8> hash2)[hash < k() and hash2 < k()] = (filter false)
+    switch CoreSwitch( (CoreIn, CoreOut) )
+
+    role PodUpperSwitch(uint<8> subnet, uint<8> hash)[subnet < k() + k() and hash < k()] = (filter false)
+    switch PodUpperSwitch( (PodUpperUIn, PodUpperUOut), (PodUpperLIn, PodUpperLOut))
+
+    role PodLowerSwitch(uint<8> subnet, uint<8> subsubnet) [subnet < k() + k() and subsubnet < k()] = (filter false)
+    switch PodLowerSwitch( (PodLowerUIn, PodLowerUOut), (PodLowerLIn, PodLowerLOut))
+
+    role NodeHost(IP4 addr) [addr.ip3 = netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()] = (filter false)
+    host NodeHost((NodeIn, NodeOut))
+}
