@@ -2,7 +2,7 @@
 
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
-          lookupKey, checkKey, getKey,
+          lookupVar, checkVar, getVar,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
           packetTypeName) where
@@ -54,16 +54,17 @@ getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
 
-lookupKey :: Role -> String -> Maybe Field
-lookupKey Role{..} n = find ((==n) . name) roleKeys
+lookupVar :: ECtx -> String -> Maybe Field
+lookupVar (CtxRole Role{..})     n = find ((==n) . name) roleKeys
+lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 
-checkKey :: (MonadError String me) => Pos -> Role -> String -> me Field
-checkKey p r n = case lookupKey r n of
-                      Nothing -> err p $ "Unknown key: " ++ n
-                      Just k  -> return k
+checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
+checkVar p c n = case lookupVar c n of
+                      Nothing -> err p $ "Unknown variable: " ++ n
+                      Just v  -> return v
 
-getKey :: Role -> String -> Field
-getKey r n = fromJust $ lookupKey r n
+getVar :: ECtx -> String -> Field
+getVar c n = fromJust $ lookupVar c n
 
 lookupNode :: Refine -> String -> Maybe Node
 lookupNode Refine{..} n = find ((==n) . name) refineNodes

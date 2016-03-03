@@ -42,8 +42,8 @@ isITE _              = False
 -- Port map: stores physical port range for each input and output port of the switch
 type PMap = M.Map String (Int,Int)
 
-egressSpec  = EField nopos (EKey nopos "standard_metadata") "egress_spec"
-ingressPort = EField nopos (EKey nopos "standard_metadata") "ingress_port"
+egressSpec  = EField nopos (EVar nopos "standard_metadata") "egress_spec"
+ingressPort = EField nopos (EVar nopos "standard_metadata") "ingress_port"
 
 instance PP P4Statement where
     pp (P4SSeq s1 s2) = pp s1 $$ pp s2
@@ -65,7 +65,7 @@ instance PP P4Action where
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
 printExpr :: Expr -> Doc
-printExpr (EKey _ k)        = pp k
+printExpr (EVar _ k)        = pp k
 printExpr (EPacket _)       = pp "pkt"
 printExpr (EField _ e f)    = printExpr e <> char '.' <> pp f
 printExpr (EBool _ True)    = pp "true"

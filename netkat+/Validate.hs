@@ -28,12 +28,12 @@ combine prev new = do
     prev' <- foldM (\r role -> do assertR r (isJust $ find ((==role) . roleName) (refineRoles r)) (pos new) 
                                           $ "Role " ++ role ++ " is undefined in this context"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
-    let types = refineTypes prev'     ++ refineTypes new
-        funcs = refineFuncs prev'     ++ refineFuncs new
-        roles = refineRoles prev'     ++ refineRoles new
-        rlocs = refineLocations prev' ++ refineLocations new 
-        nodes = refineNodes prev'     ++ refineNodes new 
-    return $ Refine (pos new) [] types funcs roles rlocs nodes
+    let types   = refineTypes prev'   ++ refineTypes new
+        funcs   = refineFuncs prev'   ++ refineFuncs new
+        roles   = refineRoles prev'   ++ refineRoles new
+        assumes = refineAssumes prev' ++ refineAssumes new 
+        nodes   = refineNodes prev'   ++ refineNodes new 
+    return $ Refine (pos new) [] types funcs roles assumes nodes
 
 
 -- construct dependency graph
@@ -47,7 +47,6 @@ validate1 r@Refine{..} = do
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
-    uniq locRole (\r -> "Multiple container definitions for role " ++ locRole r) refineLocations
     uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
     mapM_ (typeValidate r . tdefType) refineTypes
     -- each role occurs at most once as a port
@@ -59,7 +58,7 @@ validate1 r@Refine{..} = do
 
     mapM_ (funcValidate r) refineFuncs
     mapM_ (roleValidate r) refineRoles
-    mapM_ (rlocValidate r) refineLocations
+    mapM_ (assumeValidate r) refineAssumes
     -- TODO: check for cycles in the locations graph
     mapM_ (nodeValidate r) refineNodes
 
@@ -81,15 +80,15 @@ roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     mapM_ (typeValidate r . fieldType) roleKeys
-    exprValidate r role roleKeyRange
+    exprValidate r (CtxRole role) roleKeyRange
     statValidate r role roleBody
     return ()
 
-rlocValidate :: (MonadError String me) => Refine -> RoleLocation -> me ()
-rlocValidate r rloc@RoleLocation{..} = do
-    role <- checkRole (pos rloc) r locRole
-    exprValidate r role locExpr
-    assertR r (isLocation r role locExpr) (pos locExpr) "Not a valid location"
+assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
+assumeValidate r a@Assume{..} = do
+    uniqNames (\v -> "Multiple definitions of variable " ++ v) assVars
+    exprValidate r (CtxAssume a) assExpr
+    assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a boolean expression"
     return ()
 
 nodeValidate :: (MonadError String me) => Refine -> Node -> me ()
@@ -102,7 +101,7 @@ nodeValidate r nd@Node{..} = do
                                   $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical parameter lists"
                           assertR r (roleKeyRange r1 == roleKeyRange r2) (pos nd)
                                   $ "Input-output roles (" ++ p1 ++ "," ++ p2 ++ ") must have identical key ranges"
-                          let validateR rl = do assertR r (length (roleKeys rl) > 0 && isUInt r rl (last $ roleKeys rl)) (pos nd) 
+                          let validateR rl = do assertR r (length (roleKeys rl) > 0 && isUInt r (CtxRole rl) (last $ roleKeys rl)) (pos nd) 
                                                         $ "Port " ++ name rl ++ " must be indexed with an integer key"
                                                 assertR r ((init $ roleKeys rl) == roleKeys nodeRole) (pos nd) 
                                                        $ "Port " ++ name rl ++ " must be indexed with the same keys as node " ++ nodeName ++ " and one extra integer key" 
@@ -110,7 +109,7 @@ nodeValidate r nd@Node{..} = do
                           validateR r2
                           -- input ports can only send to output ports of the same node
                           assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) && 
-                                                                    (all (\(key, arg) -> arg == (EKey nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
+                                                                    (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
                                          $ statSendsTo (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
                           assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd nodePorts)) $ statSendsTo (roleBody r2)) (pos nd)
@@ -130,7 +129,7 @@ checkLinkSt (SSet p _ _)   = err p "Output port may not modify packets"
 checkLinkSt (SSend _ e)    = checkLinkExpr e
 
 checkLinkExpr :: (MonadError String me) => Expr -> me ()
-checkLinkExpr (EKey    _ _)       = return ()
+checkLinkExpr (EVar    _ _)       = return ()
 checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
 checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
 checkLinkExpr (EField _ s _)      = checkLinkExpr s
@@ -145,75 +144,75 @@ checkLinkExpr (ECond _ cs d)      = do mapM (\(c,v) -> do checkLinkExpr c
                                                           checkLinkExpr v) cs
                                        checkLinkExpr d
 
-exprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()
-exprValidate r role (EKey p k) = do 
-   checkKey p role k
+exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+exprValidate r ctx (EVar p v) = do 
+   checkVar p ctx v
    return ()
-exprValidate r role (EApply p f as) = do
+exprValidate r ctx (EApply p f as) = do
     func <- checkFunc p r f
     assertR r ((length $ funcArgs func) == length as) p "Number of arguments does not match function declaration"
-    mapM_ (\(formal,actual) -> do exprValidate r role actual
-                                  matchType r role formal actual) 
+    mapM_ (\(formal,actual) -> do exprValidate r ctx actual
+                                  matchType r ctx formal actual) 
           $ zip (funcArgs func) as
-exprValidate r role (EField p s f) = do
-    exprValidate r role s
-    case typ' r role s of
+exprValidate r ctx (EField p s f) = do
+    exprValidate r ctx s
+    case typ' r ctx s of
          TStruct _ fs -> assertR r (isJust $ find ((==f) . fieldName) fs) p $ "Unknown field " ++ f
          _            -> err p $ "Expression is not of struct type"
 
-exprValidate r role (ELocation p rname as) = do
+exprValidate r ctx (ELocation p rname as) = do
     role' <- checkRole p r rname
     assertR r ((length $ roleKeys role') == length as) p "Number of keys does not match role declaration"
-    mapM_ (\(formal,actual) -> do exprValidate r role actual
-                                  matchType r role formal actual) 
+    mapM_ (\(formal,actual) -> do exprValidate r ctx actual
+                                  matchType r ctx formal actual) 
           $ zip (roleKeys role') as
 
-exprValidate r role (EStruct p n as) = do
+exprValidate r ctx (EStruct p n as) = do
     t <- checkType p r n
-    case typ' r role (tdefType t) of
+    case typ' r ctx (tdefType t) of
          TStruct _ fs -> do assertR r (length as == length fs) p "Number of fields does not match struct definition"
-                            mapM_ (\(field, e) -> do exprValidate r role e
-                                                     matchType r role field e)
+                            mapM_ (\(field, e) -> do exprValidate r ctx e
+                                                     matchType r ctx field e)
                                   $ zip fs as
          _            -> err p $ n ++ " is not a struct type"
-exprValidate r role (EBinOp p op left right) = do
-    exprValidate r role left
-    exprValidate r role right
-    if' (elem op [Eq]) (matchType r role left right)
+exprValidate r ctx (EBinOp p op left right) = do
+    exprValidate r ctx left
+    exprValidate r ctx right
+    if' (elem op [Eq]) (matchType r ctx left right)
      $ if' (elem op [Lt, Lte, Gt, Gte, Plus]) (
-          do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
-             assertR r (isUInt r role right) (pos right) $ "Not an integer expression"
-             matchType r role left right)
+          do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
+             assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression"
+             matchType r ctx left right)
      $ if' (elem op [And, Or]) (
-          do assertR r (isBool r role left)  (pos left)  $ "Not a boolean expression"
-             assertR r (isBool r role right) (pos right) $ "Not a boolean expression")
+          do assertR r (isBool r ctx left)  (pos left)  $ "Not a boolean expression"
+             assertR r (isBool r ctx right) (pos right) $ "Not a boolean expression")
      $ if' (elem op [Mod]) (
-          do assertR r (isUInt r role left)  (pos left)  $ "Not an integer expression"
-             assertR r (isUInt r role right) (pos right) $ "Not an integer expression") 
+          do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
+             assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression") 
      $ undefined
 
-exprValidate r role (EUnOp p op e) = do
-    exprValidate r role e
+exprValidate r ctx (EUnOp p op e) = do
+    exprValidate r ctx e
     case op of
-         Not -> assertR r (isBool r role e) (pos e)  $ "Not a boolean expression"
+         Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a boolean expression"
 
-exprValidate r role (ECond p cs def) = do
-    exprValidate r role def
-    mapM_ (\(cond, e)-> do exprValidate r role cond
-                           exprValidate r role e
-                           assertR r (isBool r role cond) (pos cond) $ "Not a boolean expression"
-                           matchType r role e def) cs
+exprValidate r ctx (ECond p cs def) = do
+    exprValidate r ctx def
+    mapM_ (\(cond, e)-> do exprValidate r ctx cond
+                           exprValidate r ctx e
+                           assertR r (isBool r ctx cond) (pos cond) $ "Not a boolean expression"
+                           matchType r ctx e def) cs
 
 exprValidate _ _ _ = return ()
 
 
-lexprValidate :: (MonadError String me) => Refine -> Role -> Expr -> me ()
-lexprValidate r role e = do
-    exprValidate r role e
+lexprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+lexprValidate r ctx e = do
+    exprValidate r ctx e
     assertR r (isLExpr e) (pos e) "Not an l-value"
 
 isLExpr :: Expr -> Bool
-isLExpr (EKey _ _)        = False
+isLExpr (EVar _ _)        = False
 isLExpr (EPacket _)       = True
 isLExpr (EApply _ _ _)    = False
 isLExpr (EField _ s _)    = isLExpr s
@@ -237,24 +236,24 @@ statValidate r role (SPar p h t) = do
     return $ sends1 || sends2
 
 statValidate r role (SITE p c t e) = do
-    exprValidate r role c
-    assertR r (isBool r role c) (pos c) "Condition must be a boolean expression"
+    exprValidate r (CtxRole role) c
+    assertR r (isBool r (CtxRole role) c) (pos c) "Condition must be a boolean expression"
     sends1 <- statValidate r role t
     sends2 <- statValidate r role e
     return $ sends1 || sends2
 
 statValidate r role (STest p c) = do
-    exprValidate r role c
-    assertR r (isBool r role c) (pos c) "Filter must be a boolean expression"
+    exprValidate r (CtxRole role) c
+    assertR r (isBool r (CtxRole role) c) (pos c) "Filter must be a boolean expression"
     return False
 
 statValidate r role (SSet p lval rval) = do
-    exprValidate r role rval
-    lexprValidate r role lval
-    matchType r role lval rval
+    exprValidate r (CtxRole role) rval
+    lexprValidate r (CtxRole role) lval
+    matchType r (CtxRole role) lval rval
     return False
 
 statValidate r role (SSend p dst) = do
-    exprValidate r role dst
-    assertR r (isLocation r role dst) (pos dst) "Not a valid location"
+    exprValidate r (CtxRole role) dst
+    assertR r (isLocation r (CtxRole role) dst) (pos dst) "Not a valid location"
     return True

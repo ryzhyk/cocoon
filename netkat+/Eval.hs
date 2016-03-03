@@ -22,11 +22,11 @@ type KMap = M.Map String Expr
 
 -- Partially evaluate expression
 evalExpr  :: (?r::Refine, ?role::Role, ?fmap::FMap, ?kmap::KMap) => Expr -> Expr
-evalExpr (EKey _ k)                    = ?kmap M.! k
+evalExpr (EVar _ k)                    = ?kmap M.! k
 evalExpr (EApply _ f [])               = ?fmap M.! f
 evalExpr e@(EField _ s f)        = 
     case evalExpr s of
-         EStruct _ _ fs -> let (TStruct _ sfs) = typ' ?r ?role s
+         EStruct _ _ fs -> let (TStruct _ sfs) = typ' ?r (CtxRole ?role) s
                                fidx = fromJust $ findIndex ((== f) . name) sfs
                            in fs !! fidx
          s'             -> EField nopos s' f
@@ -35,8 +35,8 @@ evalExpr (EStruct _ s fs)              = EStruct nopos s $ map evalExpr fs
 evalExpr (EBinOp _ op lhs rhs)         = 
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-        TUInt _ w1 = typ' ?r ?role lhs'
-        TUInt _ w2 = typ' ?r ?role rhs'
+        TUInt _ w1 = typ' ?r (CtxRole ?role) lhs'
+        TUInt _ w2 = typ' ?r (CtxRole ?role) rhs'
         w = max w1 w2
     in case (lhs', rhs') of
             (EBool _ v1, EBool _ v2)   -> case op of

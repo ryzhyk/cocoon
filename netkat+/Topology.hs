@@ -65,7 +65,7 @@ nodeFromPort r t (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
 portFromNode :: Refine -> InstanceDescr -> String -> Int -> PortInstDescr
 portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt nopos w $ fromIntegral pnum])
     where prole = getRole r pname
-          TUInt _ w = typ' r prole $ last $ roleKeys prole
+          TUInt _ w = typ' r (CtxRole prole) $ last $ roleKeys prole
 
 generateTopology :: Refine -> FMap -> Topology
 generateTopology r fmap = let ?r = r in 
@@ -81,7 +81,7 @@ mkNodeInstMap' nd kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkNodeInstMa
     -- Equation to compute possible values of f from:
     where fConstr = (roleKeyRange ndrole):keyVals
           ndrole = getRole ?r $ nodeName nd
-          keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
+          keyVals = map (\(k,v) -> EBinOp nopos Eq (EVar nopos k) v) $ M.toList kmap
 
 mkNodePortLinks :: (?r::Refine, ?fmap::FMap) => Node -> KMap -> PortLinks
 mkNodePortLinks nd kmap = evalState (mapM (\ports -> do let links = mkNodePortLinks' kmap ports 
@@ -99,7 +99,7 @@ mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ _ pnum) -> (fromInteger pnum, mkLi
           inrole = getRole ?r i
           outrole = getRole ?r o
           portKey = name $ last $ roleKeys inrole
-          keyVals = map (\(k,v) -> EBinOp nopos Eq (EKey nopos k) v) $ M.toList kmap
+          keyVals = map (\(k,v) -> EBinOp nopos Eq (EVar nopos k) v) $ M.toList kmap
 
 -- Compute remote port role is connected to.  Role must be an output port of a switch.
 mkLink :: (?r::Refine, ?fmap::FMap) => Role -> KMap -> Maybe PortInstDescr
@@ -135,10 +135,10 @@ solveFor role es var = map exprFromSMT $ SMT.allSolutions solver (exprs2SMTQuery
 exprs2SMTQuery :: (?r::Refine, ?fmap::FMap) => Role -> [Expr] -> SMT.SMTQuery
 exprs2SMTQuery role es = let ?role = role in
                          let es' = map expr2SMT es
-                             smtvs = (SMT.Var pktVar (typ2SMT $ typ'' ?r role $ TUser nopos packetTypeName)) : 
-                                     (map (\k -> SMT.Var (name k) (typ2SMT $ typ'' ?r role k)) $ roleKeys role)
+                             smtvs = (SMT.Var pktVar (typ2SMT $ typ'' ?r (CtxRole role) $ TUser nopos packetTypeName)) : 
+                                     (map (\k -> SMT.Var (name k) (typ2SMT $ typ'' ?r (CtxRole role) k)) $ roleKeys role)
                              structs = mapMaybe (\d -> case tdefType d of
-                                                            TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r ?role f)) fs
+                                                            TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r (CtxRole ?role) f)) fs
                                                             _            -> Nothing) 
                                                 $ refineTypes ?r
                          in SMT.SMTQuery structs smtvs es'
@@ -150,7 +150,7 @@ typ2SMT (TUser _ n)   = SMT.TStruct n
 typ2SMT (TLocation _) = SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
 
 expr2SMT :: (?r::Refine, ?fmap::FMap, ?role::Role) => Expr -> SMT.Expr
-expr2SMT (EKey _ k)          = SMT.EVar k
+expr2SMT (EVar _ k)          = SMT.EVar k
 expr2SMT (EPacket _)         = SMT.EVar pktVar
 expr2SMT (EApply _ f [])     = expr2SMT $ ?fmap M.! f
 expr2SMT (EField _ s f)      = SMT.EField (expr2SMT s) f

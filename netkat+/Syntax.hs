@@ -6,15 +6,16 @@ module Syntax( pktVar
              , errR, assertR
              , Field(..)
              , Role(..)
-             , RoleLocation(..)
              , NodeType(..)
              , Node(..)
              , Function(..)
+             , Assume(..)
              , Type(..)
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
              , Expr(..)
+             , ECtx(..)
              , conj
              , Statement(..)
              , statSendsTo) where
@@ -32,13 +33,13 @@ pktVar = "pkt"
 
 data Spec = Spec [Refine]
 
-data Refine = Refine { refinePos       :: Pos
-                     , refineTarget    :: [String]
-                     , refineTypes     :: [TypeDef]
-                     , refineFuncs     :: [Function]
-                     , refineRoles     :: [Role]
-                     , refineLocations :: [RoleLocation]
-                     , refineNodes     :: [Node]
+data Refine = Refine { refinePos     :: Pos
+                     , refineTarget  :: [String]
+                     , refineTypes   :: [TypeDef]
+                     , refineFuncs   :: [Function]
+                     , refineRoles   :: [Role]
+                     , refineAssumes :: [Assume]
+                     , refineNodes   :: [Node]
                      }
 
 instance WithPos Refine where
@@ -100,14 +101,14 @@ instance WithPos Node where
 instance WithName Node where
     name = nodeName
 
-data RoleLocation = RoleLocation { locPos  :: Pos
-                                 , locRole :: String
-                                 , locExpr :: Expr
-                                 }
+data Assume = Assume { assPos  :: Pos
+                     , assVars :: [Field]
+                     , assExpr :: Expr
+                     }
 
-instance WithPos RoleLocation where
-    pos = locPos
-    atPos r p = r{locPos = p}
+instance WithPos Assume where
+    pos = assPos
+    atPos a p = a{assPos = p}
 
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
@@ -152,7 +153,7 @@ instance WithPos TypeDef where
 instance WithName TypeDef where
     name = tdefName
 
-data Expr = EKey      {exprPos :: Pos, exprKey :: String}
+data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
@@ -165,7 +166,7 @@ data Expr = EKey      {exprPos :: Pos, exprKey :: String}
           | ECond     {exprPos :: Pos, exprCases :: [(Expr, Expr)], exprDefault :: Expr}
 
 instance Eq Expr where
-    (==) (EKey      _ k1)        (EKey      _ k2)        = k1 == k2
+    (==) (EVar      _ k1)        (EVar      _ k2)        = k1 == k2
     (==) (EPacket   _)           (EPacket   _)           = True
     (==) (EApply    _ f1 as1)    (EApply    _ f2 as2)    = (f1 == f2) && (as1 == as2)
     (==) (EField    _ s1 f1)     (EField    _ s2 f2)     = (s1 == s2) && (f1 == f2)
@@ -183,7 +184,7 @@ instance WithPos Expr where
     atPos e p = e{exprPos = p}
 
 instance PP Expr where
-    pp (EKey _ k)          = pp k
+    pp (EVar _ v)          = pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
@@ -204,6 +205,9 @@ conj []     = EBool nopos True
 conj [e]    = e
 conj (e:es) = EBinOp nopos And e (conj es)
 
+data ECtx = CtxRole Role
+          | CtxAssume Assume
+          
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Statement}

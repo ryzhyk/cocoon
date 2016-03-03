@@ -16,9 +16,9 @@ import Util
 
 reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
 reservedNames = ["and",
+                 "assume",
                  "bool",
                  "case",
-                 "container",
                  "default",
                  "else",
                  "false",
@@ -87,7 +87,7 @@ withPos x = (\s x e -> atPos x (s,e)) <$> getPosition <*> x <*> getPosition
 data SpecItem = SpType         TypeDef
               | SpFunc         Function
               | SpRole         Role
-              | SpRoleLocation RoleLocation
+              | SpAssume       Assume
               | SpNode         Node
 
 
@@ -96,7 +96,7 @@ nkplusGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs roles locs nodes
+mkRefine targets items = Refine nopos targets types funcs roles assumes nodes
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
@@ -106,9 +106,9 @@ mkRefine targets items = Refine nopos targets types funcs roles locs nodes
           roles = mapMaybe (\i -> case i of 
                                        SpRole r -> Just r
                                        _        -> Nothing) items
-          locs  = mapMaybe (\i -> case i of 
-                                       SpRoleLocation l -> Just l
-                                       _                -> Nothing) items
+          assumes = mapMaybe (\i -> case i of 
+                                       SpAssume a -> Just a
+                                       _          -> Nothing) items
           nodes = mapMaybe (\i -> case i of 
                                        SpNode n -> Just n
                                        _        -> Nothing) items
@@ -120,7 +120,7 @@ refine = withPos $ mkRefine <$  reserved "refine"
 decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
-    <|> (SpRoleLocation <$> rloc)
+    <|> (SpAssume       <$> assume)
     <|> (SpNode         <$> node)
 
 
@@ -130,12 +130,11 @@ func = withPos $ Function nopos <$ reserved "function" <*> identifier <*> (paren
 
 role = withPos $ Role nopos <$  reserved "role" 
                             <*> identifier 
-                            <*> (parens $ commaSep arg) 
-                            <*> (option (EBool nopos True) (brackets $ expr))
+                            <*> (brackets $ commaSep arg) 
+                            <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                             <*> (reservedOp "=" *> stat)
 
-
-rloc = withPos $ RoleLocation nopos <$ reserved "container" <*> (parens $ identifier) <* reservedOp "=" <*> expr
+assume = withPos $ Assume nopos <$ reserved "assume" <*> (parens $ commaSep arg) <*> expr
 
 node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost <$ reserved "host"))
                             <*> identifier 
@@ -180,7 +179,7 @@ eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
     where isloc = try $ lookAhead $ identifier *> symbol "["
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
-eterm = EKey nopos <$> identifier
+eterm = EVar nopos <$> identifier
 econd = (fmap uncurry (ECond nopos <$ reserved "case"))
                <*> (braces $ (,) <$> (many $ (,) <$> expr <* colon <*> expr <* semi) 
                                  <*> (reserved "default" *> colon *> expr <* semi))
