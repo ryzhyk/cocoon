@@ -32,7 +32,14 @@ data Var = Var { varName :: String
 instance WithName Var where
     name (Var n _) = n
 
+data Function = Function { funcName :: String
+                         , funcArgs :: [(String, Type)]
+                         , funcType :: Type
+                         , funcDef  :: Expr
+                         }
+
 data Expr = EVar    String
+          | EApply  String [Expr]
           | EField  Expr String
           | EBool   Bool
           | EInt    Int Integer
@@ -59,6 +66,7 @@ typ q (ECond _ d)       = typ q d
 
 data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtVars    :: [Var]
+                         , smtFuncs   :: [Function]
                          , smtExprs   :: [Expr]
                          }
 

@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams #-}
 
-module Eval ( FMap, KMap
+module Eval ( KMap
             , evalExpr) where
 
 import qualified Data.Map as M
@@ -12,18 +12,21 @@ import Syntax
 import Type
 import Pos
 import Name
-
--- Function map: stores values of constant functions
-type FMap = M.Map String Expr
+import NS
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
 
-
 -- Partially evaluate expression
-evalExpr  :: (?r::Refine, ?role::Role, ?fmap::FMap, ?kmap::KMap) => Expr -> Expr
+evalExpr  :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
 evalExpr (EVar _ k)                    = ?kmap M.! k
-evalExpr (EApply _ f [])               = ?fmap M.! f
+evalExpr (EApply pos f as)             = 
+    case funcDef func of
+         Nothing -> EApply pos f as'
+         Just e  -> let ?kmap = foldl' (\m (a,v) -> M.insert (name a) v m) M.empty $ zip (funcArgs func) as'
+                    in evalExpr e
+    where as' = map evalExpr as                                     
+          func = getFunc ?r f
 evalExpr e@(EField _ s f)        = 
     case evalExpr s of
          EStruct _ _ fs -> let (TStruct _ sfs) = typ' ?r (CtxRole ?role) s

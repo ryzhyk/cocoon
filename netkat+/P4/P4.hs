@@ -24,15 +24,24 @@ import Eval
 import Topology
 import P4.Header
 
+-- Dynamic action, i.e., action that depends on expression that can change at run time
+-- and must be encoded in a P4 table maintained by the controller at runtime
+data P4DynAction = P4DynAction { p4dynTable  :: String -- name of the table
+                               , p4dynExpr   :: Expr   -- expression that 
+                               , p4dynAction :: String -- name of action to invoke
+                               , p4dynArg    :: Bool   -- pass the value of the expression to the action?
+                               }
+
 -- State maintained during compilation
-data P4State = P4State { p4TableCnt :: Int   -- table counter
-                       , p4Tables   :: [Doc] -- table specifications
-                       , p4Commands :: [Doc] -- commands to go to the command file
+data P4State = P4State { p4TableCnt   :: Int   -- table counter
+                       , p4Tables     :: [Doc] -- table specifications
+                       , p4Commands   :: [Doc] -- commands to go to the command file
+                       , p4DynActions :: [P4DynAction]
                        }
 
 data P4Statement = P4SSeq   P4Statement P4Statement
                  | P4SITE   Expr P4Statement (Maybe P4Statement)
-                 | P4SApply String
+                 | P4SApply String (Maybe [(String, P4Statement)])
                  | P4SDrop
 
 isITE :: P4Statement -> Bool
@@ -46,21 +55,21 @@ egressSpec  = EField nopos (EVar nopos "standard_metadata") "egress_spec"
 ingressPort = EField nopos (EVar nopos "standard_metadata") "ingress_port"
 
 instance PP P4Statement where
-    pp (P4SSeq s1 s2) = pp s1 $$ pp s2
-    pp (P4SITE c t e) = pp "if" <+> (parens $ printExpr c) <+> lbrace 
-                        $$
-                        (nest' $ pp t)
-                        $$
-                        maybe rbrace (\st -> (rbrace <+> pp "else" <+> (if' (isITE st) empty lbrace)) 
-                                             $$ (nest' $ pp st)
-                                             $$ (if' (isITE st) empty rbrace)) e
-    pp (P4SApply n)   = pp "apply" <> (parens $ pp n) <> semi
-    pp (P4SDrop)      = pp "drop" <> semi
-
-data P4Action = P4AModify Expr Expr
-
-instance PP P4Action where
-    pp (P4AModify lhs rhs) = pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi
+    pp (P4SSeq s1 s2)         = pp s1 $$ pp s2
+    pp (P4SITE c t e)         = (pp "if" <+> (parens $ printExpr c) <+> lbrace)
+                                $$
+                                (nest' $ pp t)
+                                $$
+                                maybe rbrace (\st -> (rbrace <+> pp "else" <+> (if' (isITE st) empty lbrace)) 
+                                                     $$ (nest' $ pp st)
+                                                     $$ (if' (isITE st) empty rbrace)) e
+    pp (P4SApply n Nothing)   = pp "apply" <> (parens $ pp n) <> semi
+    pp (P4SApply n (Just as)) = (pp "apply" <> (parens $ pp n) <> lbrace)
+                                $$
+                                (nest' $ vcat $ map (\(a, s) -> (pp a <+> lbrace) $$ (nest' $ pp s) $$ rbrace) as)
+                                $$ 
+                                (rbrace <> semi)
+    pp (P4SDrop)              = pp "drop" <> semi
 
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
@@ -89,6 +98,19 @@ printBOp Mod   = pp "%"
 printUOp :: UOp -> Doc
 printUOp Not   = pp "not"
 
+exprNeedsTable :: Expr -> Bool
+exprNeedsTable (EVar _ _)         = False
+exprNeedsTable (EPacket _)        = False
+exprNeedsTable (EApply _ _ _)     = True
+exprNeedsTable (EField _ s _)     = exprNeedsTable s
+exprNeedsTable (ELocation _ _ as) = or $ map exprNeedsTable as
+exprNeedsTable (EBool _ _)        = False
+exprNeedsTable (EInt _ _ _)       = False
+exprNeedsTable (EStruct _ _ fs)   = or $ map exprNeedsTable fs
+exprNeedsTable (EBinOp _ _ e1 e2) = exprNeedsTable e1 || exprNeedsTable e2
+exprNeedsTable (EUnOp _ _ e)      = exprNeedsTable e
+exprNeedsTable (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable e || exprNeedsTable e) cs) || exprNeedsTable d
+
 incTableCnt :: State P4State Int
 incTableCnt = do
     n <- gets p4TableCnt
@@ -96,29 +118,28 @@ incTableCnt = do
     return n
 
 -- Generate all P4 switches in the topology
-genP4Switches :: Refine -> FMap -> Topology -> [(InstanceDescr, (Doc, Doc))]
-genP4Switches r fmap topology = 
+genP4Switches :: Refine -> Topology -> [(InstanceDescr, (Doc, Doc, [P4DynAction]))]
+genP4Switches r topology = 
     concatMap (\(switch, imap) -> map (\(descr, links) -> let kmap = M.fromList $ zip (map name $ roleKeys $ getRole r $ name switch) $ idescKeys descr
                                                               pmap = M.fromList $ concatMap (\((i,o),range,_) -> [(i,range),(o,range)]) links
-                                                          in (descr, genP4Switch r switch fmap kmap pmap)) $ instMapFlatten switch imap) 
+                                                          in (descr, genP4Switch r switch kmap pmap)) $ instMapFlatten switch imap) 
               $ filter ((== NodeSwitch) . nodeType . fst) topology
 
 --  Generate P4 switch. Returns to strings: one containing the P4 description
 --  of the switch, and one containing runtime commands to initialize switch tables.
-genP4Switch :: Refine -> Node -> FMap -> KMap -> PMap -> (Doc, Doc)
-genP4Switch r switch fmap kmap pmap = 
+genP4Switch :: Refine -> Node -> KMap -> PMap -> (Doc, Doc, [P4DynAction])
+genP4Switch r switch kmap pmap = 
     let ?r = r in
-    let ?fmap = fmap in
     let ?pmap = pmap in
-    let (controlstat, P4State _ tables commands) = runState (mkSwitch kmap switch) (P4State 0 [] []) 
+    let (controlstat, P4State _ tables commands dynacts) = runState (mkSwitch kmap switch) (P4State 0 [] [] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
                   (nest' $ pp controlstat)
                   $$
                   rbrace
-    in (pp p4HeaderDecls $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands)
+    in (pp p4HeaderDecls $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands, dynacts)
 
-mkSwitch :: (?r::Refine, ?fmap::FMap, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
+mkSwitch :: (?r::Refine, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
 mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
     let portranges = map (\(port,_) -> ?pmap M.! port) $ nodePorts switch
@@ -137,7 +158,7 @@ mkSwitch kmap switch = do
                                                  in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
 
-mkStatement :: (?r::Refine, ?role::Role, ?fmap::FMap, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
+mkStatement :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
 mkStatement (SSeq  _ s1 s2) = do 
     s1' <- mkStatement s1
     s2' <- mkStatement s2
@@ -148,8 +169,13 @@ mkStatement (SPar  _ _ _)   = error "Not implemented: P4.mkStatement: SPar"
 mkStatement (SITE  _ c t e) = do
     let c' = evalExpr c
     t' <- mkStatement t
-    e' <- mkStatement e
-    return $ P4SITE c' t' (Just e')
+    e' <- mkStatement e 
+    if exprNeedsTable c'
+       then do tableid <- incTableCnt
+               let tablename = "cond" ++ show tableid
+               mkCondTable tablename c'
+               return $ P4SApply tablename $ Just [("hit", t'), ("miss", e')]
+       else return $ P4SITE c' t' (Just e')
 
 mkStatement (STest _ e)     = do
     let e' = evalExpr e
@@ -160,23 +186,23 @@ mkStatement (SSet  _ lhs rhs) = do
     let tablename = "set" ++ show tableid
         lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-    mkSingleActionTable tablename (P4AModify lhs' rhs')
-    return $ P4SApply tablename
+    mkAssignTable tablename lhs' rhs'
+    return $ P4SApply tablename Nothing
 
 mkStatement (SSend _ (ELocation _ n ks)) = do
     let (base, _) = ?pmap M.! n
         portnum = evalExpr $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
     tableid <- incTableCnt
     let tablename = "send" ++ show tableid
-    mkSingleActionTable tablename (P4AModify egressSpec portnum)
-    return $ P4SApply tablename
+    mkAssignTable tablename egressSpec portnum
+    return $ P4SApply tablename Nothing
 
-mkSingleActionTable :: String -> P4Action -> State P4State ()
-mkSingleActionTable n a = do
+mkAssignTable :: String -> Expr -> Expr -> State P4State ()
+mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
-        table = (pp "action" <+> pp actname <> parens empty <+> lbrace)
+        table = (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
                 $$
-                (nest' $ pp a)
+                (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> pp "_val") <> semi)
                 $$
                 rbrace
                 $$
@@ -186,7 +212,19 @@ mkSingleActionTable n a = do
                 $$
                 rbrace
         command = pp "table_set_default" <+> pp n <+> pp actname
+        dyn = P4DynAction n rhs actname True
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
                      , p4Commands = p4Commands p4 ++ [command]})
  
-
+mkCondTable :: String -> Expr -> State P4State ()
+mkCondTable n e = do
+    let table = (pp "table" <+> pp n <+> lbrace) 
+                $$
+                (nest' $ pp "actions" <+> (braces $ pp "no_op" <> semi))
+                $$
+                rbrace
+        command = pp "table_set_default" <+> pp n <+> pp "no_op"
+        dyn = P4DynAction n e "no_op" False
+    modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
+                     , p4Commands = p4Commands p4 ++ [command]
+                     , p4DynActions = p4DynActions p4 ++ [dyn]})

@@ -61,6 +61,8 @@ instance PP SMTQuery where
         $+$
         (vcat $ map smtpp smtVars)
         $+$
+        (vcat $ map smtpp smtFuncs)
+        $+$
         (vcat $ mapIdx (\e i -> parens $ text "assert" 
                                          <+> (parens $ char '!' <+> smtpp e <+> text ":named" <+> text assertName <> int i)) smtExprs)
 
@@ -105,6 +107,12 @@ instance SMTPP BOp where
 
 instance SMTPP UOp where
     smtpp Not   = pp "not"
+
+instance SMTPP Function where
+    smtpp Function{..} = parens $   pp "define-fun" <+> pp funcName 
+                                <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp t) funcArgs) 
+                                <+> smtpp funcType
+                                <+> smtpp funcDef
 
 --------------------------------------------------------
 ---- Running solver in different modes

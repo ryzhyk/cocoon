@@ -40,14 +40,13 @@ main = do
     let final = last combined
     putStrLn "Validation successful"
 
-    let fmap = M.fromList [("k", EInt nopos 8 2), ("netmask", EInt nopos 8 10)]
-        topology = generateTopology final fmap
+    let topology = generateTopology final
         (mntopology, instmap) = generateMininetTopology final topology
-        p4switches = genP4Switches final fmap topology
+        p4switches = genP4Switches final topology
     writeFile (workdir </> addExtension basename "mn") mntopology
-    mapM (\(descr, (p4,cmd)) -> do let swname = snd $ fromJust $ find ((==descr) . fst) instmap
-                                   writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
-                                   writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
+    mapM (\(descr, (p4,cmd,dyn)) -> do let swname = snd $ fromJust $ find ((==descr) . fst) instmap
+                                       writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
+                                       writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
          p4switches
     return ()
 
