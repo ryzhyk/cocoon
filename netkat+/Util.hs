@@ -24,6 +24,12 @@ assert b p m =
        then return ()
        else err p m
 
+-- Tuples
+mapFst :: (a -> b) -> (a, c) -> (b, c)
+mapFst f (x,y) = (f x,y)
+mapSnd :: (a -> b) -> (c, a) -> (c, b)
+mapSnd f (x,y) = (x,f y)
+
 -- Check for duplicate declarations
 uniq :: (MonadError String me, WithPos a, Ord b) => (a -> b) -> (a -> String) -> [a] -> me ()
 uniq = uniq' pos

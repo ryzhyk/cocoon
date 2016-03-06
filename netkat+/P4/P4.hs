@@ -24,10 +24,26 @@ import Eval
 import Topology
 import P4.Header
 
+{-
+
+Compilation consists of two phases: the compile-time phase produces control blocks,
+tables and actions.  The runtime phase is only allowed to modify tables.  Specifically,
+these modifications happen when a function that was undefined at compile time is given
+a definition by the user.  Given P4 restrictions, not any function definition can be
+encoded via table entries.  For example, the following definition
+
+func(pkt) = case { pkt.f1 = const: pkt.f2 }
+
+requires passing field f2 of the packet to an action defined at compile time.  This is 
+impossible, since P4 match tables do not allow actions with non-const parameters.
+
+-} 
+
+
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
 data P4DynAction = P4DynAction { p4dynTable  :: String -- name of the table
-                               , p4dynExpr   :: Expr   -- expression that 
+                               , p4dynExpr   :: Expr   -- expression that the table computes
                                , p4dynAction :: String -- name of action to invoke
                                , p4dynArg    :: Bool   -- pass the value of the expression to the action?
                                }
@@ -98,6 +114,7 @@ printBOp Mod   = pp "%"
 printUOp :: UOp -> Doc
 printUOp Not   = pp "not"
 
+-- True if expression cannot be interpreted at compile time and requires a P4 table.
 exprNeedsTable :: Expr -> Bool
 exprNeedsTable (EVar _ _)         = False
 exprNeedsTable (EPacket _)        = False
@@ -109,7 +126,8 @@ exprNeedsTable (EInt _ _ _)       = False
 exprNeedsTable (EStruct _ _ fs)   = or $ map exprNeedsTable fs
 exprNeedsTable (EBinOp _ _ e1 e2) = exprNeedsTable e1 || exprNeedsTable e2
 exprNeedsTable (EUnOp _ _ e)      = exprNeedsTable e
-exprNeedsTable (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable e || exprNeedsTable e) cs) || exprNeedsTable d
+exprNeedsTable (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable c || exprNeedsTable e) cs) || exprNeedsTable d
+
 
 incTableCnt :: State P4State Int
 incTableCnt = do
@@ -179,15 +197,25 @@ mkStatement (SITE  _ c t e) = do
 
 mkStatement (STest _ e)     = do
     let e' = evalExpr e
-    return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
+    if exprNeedsTable e'
+       then do tableid <- incTableCnt
+               let tablename = "test" ++ show tableid
+               mkCondTable tablename e'
+               return $ P4SApply tablename $ Just [("miss", P4SDrop)]
+       else return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
 
 mkStatement (SSet  _ lhs rhs) = do
-    tableid <- incTableCnt
-    let tablename = "set" ++ show tableid
-        lhs' = evalExpr lhs
-        rhs' = evalExpr rhs
-    mkAssignTable tablename lhs' rhs'
-    return $ P4SApply tablename Nothing
+    let lhs' = evalExpr lhs
+        rhs' = flattenRHS $ evalExpr rhs
+    let assignToCascade l (ECond _ [] d)         = assignToCascade l d
+        assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (assignToCascade l (ECond nopos cs d))
+        assignToCascade l v                      = SSet nopos l v
+    case rhs' of 
+         ECond _ _ _ -> mkStatement $ assignToCascade lhs' rhs'
+         _           -> do tableid <- incTableCnt
+                           let tablename = "set" ++ show tableid
+                           mkAssignTable tablename lhs' rhs'
+                           return $ P4SApply tablename Nothing
 
 mkStatement (SSend _ (ELocation _ n ks)) = do
     let (base, _) = ?pmap M.! n
@@ -197,14 +225,43 @@ mkStatement (SSend _ (ELocation _ n ks)) = do
     mkAssignTable tablename egressSpec portnum
     return $ P4SApply tablename Nothing
 
+flattenRHS :: Expr -> Expr
+flattenRHS e = 
+    case e of 
+         EVar _ _          -> e
+         EPacket _         -> e
+         EApply _ f as     -> combineCascades (EApply nopos f) $ map flattenRHS as
+         EField _ s f      -> combineCascades (\[s'] -> EField nopos s' f) [flattenRHS s]
+         ELocation _ r as  -> combineCascades (ELocation nopos r) $ map flattenRHS as
+         EBool _ _         -> e
+         EInt _ _ _        -> e
+         EStruct _ s fs    -> combineCascades (EStruct nopos s) $ map flattenRHS fs
+         EBinOp _ op e1 e2 -> combineCascades (\[e1', e2'] -> EBinOp nopos op e1' e2') [flattenRHS e1, flattenRHS e2]
+         EUnOp _ op e      -> combineCascades (EUnOp nopos op . head) [flattenRHS e]
+         ECond _ cs d      -> ECond nopos (map (\(c,e) -> (flattenRHS c, flattenRHS e)) cs) (flattenRHS d)
+    where combineCascades f es  = combineCascades' f es [] 
+          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\e -> combineCascades' f (e:es) es')) cs) (combineCascades' f (d:es) es')
+          combineCascades' f (e:es) es'              = combineCascades' f es (es' ++ [e])
+          combineCascades' f [] es'                  = f es'
+
 mkAssignTable :: String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
-        table = (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
-                $$
-                (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> pp "_val") <> semi)
-                $$
-                rbrace
+        action = if exprNeedsTable rhs
+                    then (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
+                         $$
+                         (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> pp "_val") <> semi)
+                         $$
+                         rbrace
+                    else (pp "action" <+> pp actname <> parens empty <+> lbrace)
+                         $$
+                         (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi)
+                         $$
+                         rbrace
+        dyn = if exprNeedsTable rhs
+                 then [P4DynAction n rhs actname True]
+                 else []
+        table = action
                 $$
                 (pp "table" <+> pp n <+> lbrace) 
                 $$
@@ -212,9 +269,9 @@ mkAssignTable n lhs rhs = do
                 $$
                 rbrace
         command = pp "table_set_default" <+> pp n <+> pp actname
-        dyn = P4DynAction n rhs actname True
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
-                     , p4Commands = p4Commands p4 ++ [command]})
+                     , p4Commands = p4Commands p4 ++ [command]
+                     , p4DynActions = p4DynActions p4 ++ dyn})
  
 mkCondTable :: String -> Expr -> State P4State ()
 mkCondTable n e = do
@@ -228,3 +285,7 @@ mkCondTable n e = do
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
                      , p4Commands = p4Commands p4 ++ [command]
                      , p4DynActions = p4DynActions p4 ++ [dyn]})
+
+--populateTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => P4DynAction -> Doc
+--populateTable P4DynAction{..} = 
+--    where e = evalExpr p4dynExpr
