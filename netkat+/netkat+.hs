@@ -1,7 +1,6 @@
 import System.Environment
 import Text.Parsec.Prim
 import Control.Monad
-import qualified Data.Map as M
 import System.FilePath.Posix
 import Text.PrettyPrint
 import Data.Maybe
@@ -11,14 +10,8 @@ import System.Directory
 import Parse
 import Validate
 import P4.P4
-import Syntax
-import Pos
-import NS
-import Name
 import Topology
 import MiniNet.MiniNet
-import qualified SMT.SMTSolver as SMT
-import qualified SMT.SMTLib2   as SMT
 
 
 main = do
@@ -44,10 +37,10 @@ main = do
         (mntopology, instmap) = generateMininetTopology final topology
         p4switches = genP4Switches final topology
     writeFile (workdir </> addExtension basename "mn") mntopology
-    mapM (\(descr, (p4,cmd,dyn)) -> do let swname = snd $ fromJust $ find ((==descr) . fst) instmap
-                                       writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
-                                       writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
-         p4switches
+    mapM_ (\(descr, (p4,cmd,dyn)) -> do let swname = snd $ fromJust $ find ((==descr) . fst) instmap
+                                        writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
+                                        writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
+          p4switches
     return ()
 
 

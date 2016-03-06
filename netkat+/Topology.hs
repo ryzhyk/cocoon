@@ -178,3 +178,4 @@ exprFromSMT :: SMT.Expr -> Expr
 exprFromSMT (SMT.EBool b)      = EBool nopos b
 exprFromSMT (SMT.EInt w i)     = EInt nopos w i
 exprFromSMT (SMT.EStruct n fs) = EStruct nopos n $ map exprFromSMT fs
+exprFromSMT e                  = error $ "Topology.exprFromSMT " ++ show e

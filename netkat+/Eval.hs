@@ -23,14 +23,14 @@ type KMap = M.Map String Expr
 -- function calls and with only pkt variables.
 evalExpr  :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
 evalExpr (EVar _ k)                    = ?kmap M.! k
-evalExpr (EApply pos f as)             = 
+evalExpr (EApply p f as)             = 
     case funcDef func of
-         Nothing -> EApply pos f as'
+         Nothing -> EApply p f as'
          Just e  -> let ?kmap = foldl' (\m (a,v) -> M.insert (name a) v m) M.empty $ zip (funcArgs func) as'
                     in evalExpr e
     where as' = map evalExpr as                                     
           func = getFunc ?r f
-evalExpr e@(EField _ s f)        = 
+evalExpr (EField _ s f)        = 
     case evalExpr s of
          EStruct _ _ fs -> let (TStruct _ sfs) = typ' ?r (CtxRole ?role) s
                                fidx = fromJust $ findIndex ((== f) . name) sfs
@@ -38,7 +38,7 @@ evalExpr e@(EField _ s f)        =
          s'             -> EField nopos s' f
 evalExpr (ELocation _ r ks)            = ELocation nopos r $ map evalExpr ks
 evalExpr (EStruct _ s fs)              = EStruct nopos s $ map evalExpr fs
-evalExpr (EBinOp _ op lhs rhs)         = 
+evalExpr e@(EBinOp _ op lhs rhs)         = 
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
         TUInt _ w1 = typ' ?r (CtxRole ?role) lhs'
@@ -49,6 +49,7 @@ evalExpr (EBinOp _ op lhs rhs)         =
                                                Eq  -> EBool nopos (v1 == v2)
                                                And -> EBool nopos (v1 && v2)
                                                Or  -> EBool nopos (v1 || v2)
+                                               _   -> error $ "Eval.evalExpr " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
                                                Eq    -> EBool nopos (v1 == v2)
                                                Lt    -> EBool nopos (v1 < v2)
@@ -58,6 +59,7 @@ evalExpr (EBinOp _ op lhs rhs)         =
                                                Plus  -> EInt  nopos w ((v1 + v2) `mod` (1 `shiftL` w))
                                                Minus -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
                                                Mod   -> EInt  nopos w1 (v1 `mod` v2)
+                                               _     -> error $ "Eval.evalExpr " ++ show e
             _                          -> EBinOp nopos op lhs' rhs'
 evalExpr (EUnOp _ op e)                = 
     let e' = evalExpr e

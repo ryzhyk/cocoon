@@ -54,8 +54,8 @@ lexer = T.makeTokenParser (emptyDef {T.commentStart      = "(*"
 reservedOp = T.reservedOp lexer
 reserved   = T.reserved lexer
 identifier = T.identifier lexer
-semiSep    = T.semiSep lexer
-semiSep1   = T.semiSep1 lexer
+--semiSep    = T.semiSep lexer
+--semiSep1   = T.semiSep1 lexer
 colon      = T.colon lexer
 commaSep   = T.commaSep lexer
 commaSep1  = T.commaSep1 lexer
@@ -65,23 +65,22 @@ comma      = T.comma lexer
 braces     = T.braces lexer
 parens     = T.parens lexer
 angles     = T.angles lexer
-squares    = T.squares lexer
 brackets   = T.brackets lexer
-natural    = T.natural lexer
+--natural    = T.natural lexer
 decimal    = T.decimal lexer
-integer    = T.integer lexer
+--integer    = T.integer lexer
 whiteSpace = T.whiteSpace lexer
 lexeme     = T.lexeme lexer
 dot        = T.dot lexer
-stringLit  = T.stringLiteral lexer
-charLit    = T.charLiteral lexer
+--stringLit  = T.stringLiteral lexer
+--charLit    = T.charLiteral lexer
 
 
 removeTabs = do s <- getInput
                 let s' = map (\c -> if c == '\t' then ' ' else c ) s 
                 setInput s'          
 
-withPos x = (\s x e -> atPos x (s,e)) <$> getPosition <*> x <*> getPosition
+withPos x = (\s a e -> atPos a (s,e)) <$> getPosition <*> x <*> getPosition
 
 
 data SpecItem = SpType         TypeDef
@@ -209,9 +208,9 @@ parseOct :: Stream s m Char => ParsecT s u m Integer
 parseOct = (fst . head . readOct) <$> many1 octDigit
 parseDec :: Stream s m Char => ParsecT s u m Integer
 parseDec = (fst . head . readDec) <$> many1 digit
-parseSDec = (\m v -> m * v)
-            <$> (option 1 ((-1) <$ reservedOp "-"))
-            <*> ((fst . head . readDec) <$> many1 digit)
+--parseSDec = (\m v -> m * v)
+--            <$> (option 1 ((-1) <$ reservedOp "-"))
+--            <*> ((fst . head . readDec) <$> many1 digit)
 parseHex :: Stream s m Char => ParsecT s u m Integer
 parseHex = (fst . head . readHex) <$> many1 hexDigit
 

@@ -53,7 +53,7 @@ checkFRefinement f f' = do
 
 -- construct dependency graph
 typeGraph :: Refine -> G.Gr TypeDef ()
-typeGraph r = undefined
+typeGraph _ = undefined
 
 -- Validate refinement with previous definitions inlined
 validate1 :: (MonadError String me) => Refine -> me ()
