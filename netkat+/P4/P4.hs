@@ -204,6 +204,7 @@ mkStatement (STest _ e)     = do
                return $ P4SApply tablename $ Just [("miss", P4SDrop)]
        else return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
 
+-- Make sure that assignment statements do not contain case-expressions in the RHS.
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
         rhs' = flattenRHS $ evalExpr rhs
@@ -240,7 +241,7 @@ flattenRHS e =
          EUnOp _ op e      -> combineCascades (EUnOp nopos op . head) [flattenRHS e]
          ECond _ cs d      -> ECond nopos (map (\(c,e) -> (flattenRHS c, flattenRHS e)) cs) (flattenRHS d)
     where combineCascades f es  = combineCascades' f es [] 
-          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\e -> combineCascades' f (e:es) es')) cs) (combineCascades' f (d:es) es')
+          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\e -> combineCascades' f (e:es) es')[) cs) (combineCascades' f (d:es) es')
           combineCascades' f (e:es) es'              = combineCascades' f es (es' ++ [e])
           combineCascades' f [] es'                  = f es'
 
