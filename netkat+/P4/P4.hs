@@ -2,22 +2,19 @@
 
 -- Convert NetKAT+ spec to P4
 
-module P4.P4( genP4Switches
+module P4.P4( P4DynAction(..)
+            , genP4Switches
             , genP4Switch) where
 
 import Control.Monad.State
 import Text.PrettyPrint
-import Data.Bits
 import Data.List
-import Data.Maybe
 import qualified Data.Map as M
-import Debug.Trace
 
 import Util
 import PP
 import Syntax
 import Pos
-import Type
 import NS
 import Name
 import Eval
@@ -67,6 +64,7 @@ isITE _              = False
 -- Port map: stores physical port range for each input and output port of the switch
 type PMap = M.Map String (Int,Int)
 
+egressSpec, ingressPort :: Expr
 egressSpec  = EField nopos (EVar nopos "standard_metadata") "egress_spec"
 ingressPort = EField nopos (EVar nopos "standard_metadata") "ingress_port"
 
@@ -98,6 +96,7 @@ printExpr (EBool _ False)   = pp "false"
 printExpr (EInt _ _ v)      = pp $ show v
 printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)    = parens $ printUOp op <+> printExpr e
+printExpr e                 = error $ "P4.printExpr " ++ show e
 
 printBOp :: BOp -> Doc
 printBOp Eq    = pp "=="
@@ -170,9 +169,9 @@ mkSwitch kmap switch = do
              $ nodePorts switch
     let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', (first, last)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos 32 $ fromIntegral first)
-                                                     bound2 = EBinOp nopos Lte ingressPort (EInt nopos 32 $ fromIntegral last)
-                                                     cond = EBinOp nopos And bound1 bound2
+    return $ foldl' (\st (st', (first, lst)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos 32 $ fromIntegral first)
+                                                    bound2 = EBinOp nopos Lte ingressPort (EInt nopos 32 $ fromIntegral lst)
+                                                    cond = EBinOp nopos And bound1 bound2
                                                  in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
 
@@ -186,23 +185,28 @@ mkStatement (SPar  _ _ _)   = error "Not implemented: P4.mkStatement: SPar"
 
 mkStatement (SITE  _ c t e) = do
     let c' = evalExpr c
-    t' <- mkStatement t
-    e' <- mkStatement e 
-    if exprNeedsTable c'
-       then do tableid <- incTableCnt
-               let tablename = "cond" ++ show tableid
-               mkCondTable tablename c'
-               return $ P4SApply tablename $ Just [("hit", t'), ("miss", e')]
-       else return $ P4SITE c' t' (Just e')
+    case c' of
+         EBool _ True  -> mkStatement t
+         EBool _ False -> mkStatement e
+         _             -> do t' <- mkStatement t
+                             e' <- mkStatement e 
+                             if exprNeedsTable c'
+                                then do tableid <- incTableCnt
+                                        let tablename = "cond" ++ show tableid
+                                        mkCondTable tablename c'
+                                        return $ P4SApply tablename $ Just [("hit", t'), ("miss", e')]
+                                else return $ P4SITE c' t' (Just e')
 
 mkStatement (STest _ e)     = do
     let e' = evalExpr e
-    if exprNeedsTable e'
-       then do tableid <- incTableCnt
-               let tablename = "test" ++ show tableid
-               mkCondTable tablename e'
-               return $ P4SApply tablename $ Just [("miss", P4SDrop)]
-       else return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
+    case e' of
+         EBool _ False -> return P4SDrop
+         _             -> if exprNeedsTable e'
+                             then do tableid <- incTableCnt
+                                     let tablename = "test" ++ show tableid
+                                     mkCondTable tablename e'
+                                     return $ P4SApply tablename $ Just [("miss", P4SDrop)]
+                             else return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
 
 -- Make sure that assignment statements do not contain case-expressions in the RHS.
 mkStatement (SSet  _ lhs rhs) = do
@@ -218,13 +222,20 @@ mkStatement (SSet  _ lhs rhs) = do
                            mkAssignTable tablename lhs' rhs'
                            return $ P4SApply tablename Nothing
 
-mkStatement (SSend _ (ELocation _ n ks)) = do
-    let (base, _) = ?pmap M.! n
-        portnum = evalExpr $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
-    tableid <- incTableCnt
-    let tablename = "send" ++ show tableid
-    mkAssignTable tablename egressSpec portnum
-    return $ P4SApply tablename Nothing
+mkStatement (SSend _ dst) = do
+    let dst' = flattenRHS $ evalExpr dst
+    let sendToCascade (ECond _ [] d)         = sendToCascade d
+        sendToCascade (ECond _ ((c,v):cs) d) = SITE nopos c (sendToCascade v) (sendToCascade (ECond nopos cs d))
+        sendToCascade v                      = SSend nopos v
+    case dst' of
+         ECond _ _ _ -> mkStatement $ sendToCascade dst'
+         _           -> do let ELocation _ n ks = dst'
+                           let (base, _) = ?pmap M.! n
+                               portnum = evalExpr $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
+                           tableid <- incTableCnt
+                           let tablename = "send" ++ show tableid
+                           mkAssignTable tablename egressSpec portnum
+                           return $ P4SApply tablename Nothing
 
 flattenRHS :: Expr -> Expr
 flattenRHS e = 
@@ -238,11 +249,11 @@ flattenRHS e =
          EInt _ _ _        -> e
          EStruct _ s fs    -> combineCascades (EStruct nopos s) $ map flattenRHS fs
          EBinOp _ op e1 e2 -> combineCascades (\[e1', e2'] -> EBinOp nopos op e1' e2') [flattenRHS e1, flattenRHS e2]
-         EUnOp _ op e      -> combineCascades (EUnOp nopos op . head) [flattenRHS e]
-         ECond _ cs d      -> ECond nopos (map (\(c,e) -> (flattenRHS c, flattenRHS e)) cs) (flattenRHS d)
+         EUnOp _ op v      -> combineCascades (EUnOp nopos op . head) [flattenRHS v]
+         ECond _ cs d      -> ECond nopos (map (\(c,v) -> (flattenRHS c, flattenRHS v)) cs) (flattenRHS d)
     where combineCascades f es  = combineCascades' f es [] 
-          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\e -> combineCascades' f (e:es) es')[) cs) (combineCascades' f (d:es) es')
-          combineCascades' f (e:es) es'              = combineCascades' f es (es' ++ [e])
+          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
+          combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
           combineCascades' f [] es'                  = f es'
 
 mkAssignTable :: String -> Expr -> Expr -> State P4State ()
