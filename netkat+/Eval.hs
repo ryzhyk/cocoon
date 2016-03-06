@@ -17,7 +17,10 @@ import NS
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
 
--- Partially evaluate expression
+-- Partially evaluate expression: 
+-- Expand function definitions, substitute variable values defined in KMap
+-- When all functions are defined, the result should be an expression without
+-- function calls and with only pkt variables.
 evalExpr  :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
 evalExpr (EVar _ k)                    = ?kmap M.! k
 evalExpr (EApply pos f as)             = 
@@ -63,12 +66,12 @@ evalExpr (EUnOp _ op e)                =
                                Not -> EBool nopos (not v)
            _           -> EUnOp nopos op e'
 evalExpr (ECond _ cs d)                = 
-    let cs' = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
-        cs'' = filter ((/= EBool nopos False) . fst) cs'
+    let cs1 = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
+        cs2 = filter ((/= EBool nopos False) . fst) cs1
         d'  = evalExpr d
-    in if null cs'' 
-          then d'
-          else if (fst $ head cs'') == (EBool nopos True)
-                  then snd $ head cs''
-                  else ECond nopos cs'' d'
+    in case break ((== EBool nopos True) . fst) cs2 of 
+            ([],[])       -> d'
+            (cs3,[])      -> ECond nopos cs3 d'
+            ([],(_,e):_)  -> e
+            (cs3,(_,e):_) -> ECond nopos cs3 e
 evalExpr e                             = e
