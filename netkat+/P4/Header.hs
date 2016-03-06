@@ -4,6 +4,7 @@ module P4.Header (p4HeaderDecls) where
 
 import Text.Heredoc
 
+p4HeaderDecls :: String
 p4HeaderDecls = [str|
 |header_type ethernet_t {
 |    fields {

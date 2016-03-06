@@ -38,8 +38,8 @@ uniq' :: (MonadError String me, Ord b) => (a -> Pos) -> (a -> b) -> (a -> String
 uniq' fpos ford msgfunc xs = do
     case filter ((>1) . length) $ groupBy (\x1 x2 -> compare (ford x1) (ford x2) == EQ)  
                                 $ sortBy (\x1 x2 -> compare (ford x1) (ford x2)) xs of
-         []        -> return ()
          g@(x:_):_ -> err (fpos x) $ msgfunc x ++ " at the following locations:\n  " ++ (intercalate "\n  " $ map (spos . fpos) g)
+         _         -> return ()
 
 uniqNames :: (MonadError String me, WithPos a, WithName a) => (String -> String) -> [a] -> me ()
 uniqNames msgfunc = uniq name (\x -> msgfunc (name x))
@@ -50,7 +50,7 @@ grCycle g = case mapMaybe nodeCycle (nodes g) of
                  []  -> Nothing
                  c:_ -> Just c
   where
-    nodeCycle n = listToMaybe $ map (\s -> map (\id -> (id, fromJust $ lab g id)) (n:(esp s n g))) $ 
+    nodeCycle n = listToMaybe $ map (\s -> map (\i -> (i, fromJust $ lab g i)) (n:(esp s n g))) $ 
                                 filter (\s -> elem n (reachable s g)) $ suc g n
 
 --Logarithm to base 2. Equivalent to floor(log2(x))
@@ -75,17 +75,18 @@ mapIdxM_ :: (Monad m) => (a -> Int -> m ()) -> [a] -> m ()
 mapIdxM_ f xs = mapM_ (uncurry f) $ zip xs [0..]
 
 foldIdx :: (a -> b -> Int -> a) -> a -> [b] -> a
-foldIdx f acc xs = foldl' (\acc (x,idx) -> f acc x idx) acc $ zip xs [0..]
+foldIdx f acc xs = foldl' (\acc' (x,idx) -> f acc' x idx) acc $ zip xs [0..]
 
 foldIdxM :: (Monad m) => (a -> b -> Int -> m a) -> a -> [b] -> m a
-foldIdxM f acc xs = foldM (\acc (x,idx) -> f acc x idx) acc $ zip xs [0..]
+foldIdxM f acc xs = foldM (\acc' (x,idx) -> f acc' x idx) acc $ zip xs [0..]
 
 -- parse binary number
 readBin :: String -> Integer
 readBin s = foldl' (\acc c -> (acc `shiftL` 1) +
                               case c of
                                    '0' -> 0
-                                   '1' -> 1) 0 s
+                                   '1' -> 1
+                                   _   -> error $ "readBin" ++ s) 0 s
 
 -- Determine the most significant set bit of a non-negative number 
 -- (returns 0 if not bits are set)

@@ -70,6 +70,12 @@ instance WithPos Field where
 instance WithName Field where
     name = fieldName
 
+instance PP Field where
+    pp (Field _ n t) = pp t <+> pp n
+
+instance Show Field where
+    show = render . pp
+
 data Role = Role { rolePos       :: Pos
                  , roleName      :: String
                  , roleKeys      :: [Field]
@@ -143,6 +149,16 @@ instance WithPos Type where
     pos = typePos
     atPos t p = t{typePos = p}
 
+instance PP Type where
+    pp (TLocation _)  = pp "Location"
+    pp (TBool _)      = pp "bool"
+    pp (TUInt _ w)    = pp "uint<" <> pp w <> pp ">" 
+    pp (TStruct _ fs) = pp "struct" <> (braces $ hsep $ punctuate comma $ map pp fs)
+    pp (TUser _ n)    = pp n
+
+instance Show Type where
+    show = render . pp
+
 data TypeDef = TypeDef { tdefPos  :: Pos
                        , tdefName :: String
                        , tdefType :: Type
@@ -213,7 +229,7 @@ data ECtx = CtxRole   Role
           
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Statement}
+               | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Maybe Statement}
                | STest {statPos :: Pos, statCond :: Expr}
                | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
                | SSend {statPos :: Pos, statDst :: Expr}
@@ -225,7 +241,7 @@ statSendsTo st = nub $ statSendsTo' st
 statSendsTo' :: Statement -> [Expr]
 statSendsTo' (SSeq  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
 statSendsTo' (SPar  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ (maybe [] statSendsTo' s2)
 statSendsTo' (STest _ _)       = []
 statSendsTo' (SSet  _ _ _)     = []
 statSendsTo' (SSend _ loc)     = [loc]
@@ -233,3 +249,21 @@ statSendsTo' (SSend _ loc)     = [loc]
 instance WithPos Statement where
     pos = statPos
     atPos s p = s{statPos = p}
+
+instance PP Statement where
+    pp (SSeq _ s1 s2) = lbrace 
+                        $$ (nest' $ (pp s1 <> semi) $$ pp s2)
+                        $$ rbrace
+    pp (SPar _ s1 s2) = lbrace 
+                        $$ (nest' $ pp s1 $$ pp "|" $$ pp s2)
+                        $$ rbrace
+    pp (SITE _ c t e) = (pp "if" <+> pp c <+> pp "then")
+                        $$ (nest' $ pp t)
+                        $$ (maybe empty (\e' -> pp "else" $$ (nest' $ pp e')) e)
+    pp (STest _ c)    = pp "filter" <+> pp c
+    pp (SSet _ l r)   = pp l <+> pp ":=" <+> pp r
+    pp (SSend _ d)    = pp "send" <+> pp d
+
+instance Show Statement where
+    show = render . pp
+

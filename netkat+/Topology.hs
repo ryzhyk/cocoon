@@ -53,14 +53,15 @@ getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (snd $ fromJust $
 getInstPortMap' :: InstanceMap -> [Expr] -> PortLinks
 getInstPortMap' (InstanceMap (Left mp))     (k:ks) = getInstPortMap' (fromJust $ lookup k mp) ks
 getInstPortMap' (InstanceMap (Right links)) []     = links
+getInstPortMap' _ _                                = error "Topology.getInstPortMap': unexpected input"
 
 phyPortNum :: Topology -> InstanceDescr -> String -> Int -> Int
 phyPortNum t inst pname pnum = base + pnum
     where plinks = getInstPortMap t inst
           (_, (base, _), _) = fromJust $ find ((\(i,o) -> i == pname || o == pname) . sel1) plinks
 
-nodeFromPort :: Refine -> Topology -> PortInstDescr -> InstanceDescr
-nodeFromPort r t (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
+nodeFromPort :: Refine -> PortInstDescr -> InstanceDescr
+nodeFromPort r (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
     where noderole = name $ fromJust $ find (isJust . find (\(i,o) -> i == pname || o == pname) . nodePorts) $ refineNodes r
 
 portFromNode :: Refine -> InstanceDescr -> String -> Int -> PortInstDescr
@@ -116,13 +117,16 @@ evalPortStatement :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> Stat
 evalPortStatement (SSend _ e)    = SSend nopos $ evalExpr e
 evalPortStatement (SITE _ c t e) = case evalExpr c of
                                         EBool _ True  -> evalPortStatement t
-                                        EBool _ False -> evalPortStatement e
+                                        EBool _ False -> case e of
+                                                              Nothing -> STest nopos (EBool nopos False)
+                                                              Just e' -> evalPortStatement e'
                                         _             -> error "Topology.evalPortStatement: condition does not evaluate to a constant"
 evalPortStatement (SSeq  _ s1 s2) = case evalPortStatement s1 of
                                          STest _ (EBool _ True)        -> evalPortStatement s2
                                          s1'@(STest _ (EBool _ False)) -> s1'
                                          _                             -> error "Topology.evalPortStatement: statement does not evaluate to a constant"
 evalPortStatement (STest _ cond) = STest nopos $ evalExpr cond
+evalPortStatement s              = error $ "Topology.evalPortStatement " ++ show s
 
                -- | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                -- | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
@@ -155,6 +159,7 @@ typ2SMT (TBool _)     = SMT.TBool
 typ2SMT (TUInt _ w)   = SMT.TUInt w
 typ2SMT (TUser _ n)   = SMT.TStruct n
 typ2SMT (TLocation _) = SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+typ2SMT t             = error $ "Topology.typ2SMT " ++ show t
 
 expr2SMT :: (?r::Refine) => Expr -> SMT.Expr
 expr2SMT (EVar _ k)          = SMT.EVar k
@@ -162,7 +167,7 @@ expr2SMT (EPacket _)         = SMT.EVar pktVar
 expr2SMT (EApply _ f as)     = SMT.EApply f $ map expr2SMT as
 expr2SMT (EField _ s f)      = SMT.EField (expr2SMT s) f
 expr2SMT (EBool _ b)         = SMT.EBool b
-expr2SMT e@(EInt _ w i)      = SMT.EInt w i
+expr2SMT (EInt _ w i)        = SMT.EInt w i
 expr2SMT (EStruct _ s fs)    = SMT.EStruct s $ map expr2SMT fs
 expr2SMT (EBinOp _ op e1 e2) = SMT.EBinOp op (expr2SMT e1) (expr2SMT e2)
 expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)

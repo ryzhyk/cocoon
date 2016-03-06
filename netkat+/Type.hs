@@ -10,7 +10,6 @@ import Control.Monad.Except
 
 import Syntax
 import NS
-import Util
 import Pos
 import Name
 
@@ -24,29 +23,30 @@ instance WithType Field where
     typ _ _ = fieldType
 
 instance WithType Expr where
-    typ r ctx (EVar _ v)          = fieldType $ getVar ctx v
-    typ r _  (EPacket _)          = tdefType $ getType r packetTypeName
-    typ r _  (EApply _ f _)       = funcType $ getFunc r f
-    typ r ctx (EField _ e f)      = let TStruct _ fs = typ' r ctx e
-                                    in fieldType $ fromJust $ find ((== f) . name) fs
+    typ _ ctx  (EVar _ v)         = fieldType $ getVar ctx v
+    typ r _    (EPacket _)        = tdefType $ getType r packetTypeName
+    typ r _    (EApply _ f _)     = funcType $ getFunc r f
+    typ r ctx  (EField _ e f)     = let TStruct _ fs = typ' r ctx e
+                                     in fieldType $ fromJust $ find ((== f) . name) fs
     typ _ _    (ELocation _ _ _)  = TLocation nopos
     typ _ _    (EBool _ _)        = TBool nopos
     typ _ _    (EInt _ w _)       = TUInt nopos w
     typ r _    (EStruct _ n _)    = TUser (pos tdef) (name tdef)
                                     where tdef = getType r n
     typ r ctx (EBinOp _ op e1 e2) = case op of
-                                         Eq   -> TBool nopos
-                                         Lt   -> TBool nopos
-                                         Gt   -> TBool nopos
-                                         Lte  -> TBool nopos
-                                         Gte  -> TBool nopos
-                                         And  -> TBool nopos
-                                         Or   -> TBool nopos
-                                         Plus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
-                                         Mod  -> t1
+                                         Eq    -> TBool nopos
+                                         Lt    -> TBool nopos
+                                         Gt    -> TBool nopos
+                                         Lte   -> TBool nopos
+                                         Gte   -> TBool nopos
+                                         And   -> TBool nopos
+                                         Or    -> TBool nopos
+                                         Plus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
+                                         Minus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
+                                         Mod   -> t1
         where t1 = typ' r ctx e1
               t2 = typ' r ctx e2
-    typ _ _    (EUnOp _ Not _)    = TBool nopos
+    typ _ _   (EUnOp _ Not _)     = TBool nopos
     typ r ctx (ECond _ _ d)       = typ r ctx d
 
 -- Unwrap typedef's down to actual type definition
@@ -89,5 +89,6 @@ matchType' r ctx x y =
          (TUInt _ w1, TUInt _ w2)       -> w1==w2
          (TStruct _ fs1, TStruct _ fs2) -> (length fs1 == length fs2) &&
                                            (all (uncurry $ matchType' r ctx) $ zip fs1 fs2)
+         _                              -> False
     where t1 = typ' r ctx x
           t2 = typ' r ctx y

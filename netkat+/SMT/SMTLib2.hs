@@ -13,12 +13,7 @@ import System.Process
 import System.Exit
 import Control.Monad.Except
 import Control.Applicative hiding (empty)
-import Data.List
-import Data.Maybe
-import qualified Data.Set             as S
-import qualified Data.Map             as M
 import Data.String.Utils
-import Debug.Trace
 
 import Util
 import PP
@@ -54,8 +49,8 @@ mkIdent str = if valid then str else "|" ++ (replace  "|" "_" str) ++ "|"
 class SMTPP a where
     smtpp :: (?q::SMTQuery) => a -> Doc
 
-instance PP SMTQuery where
-    pp q@SMTQuery{..} = 
+printQuery :: SMTQuery -> Doc
+printQuery q@SMTQuery{..} = 
         let ?q = q in
         (vcat $ map smtpp smtStructs)
         $+$
@@ -92,6 +87,7 @@ instance SMTPP Expr where
     smtpp (EBinOp op e1 e2) = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
     smtpp (EUnOp op e)      = parens $ smtpp op <+> smtpp e
     smtpp (ECond cs d)      = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
+    smtpp (EApply f as)     = parens $ pp f <+> (hsep $ map smtpp as)
 
 instance SMTPP BOp where
     smtpp Eq    = pp "="
@@ -140,7 +136,7 @@ runSolver cfg query parser =
 
 checkSat :: SMT2Config -> SMTQuery -> Maybe Bool
 checkSat cfg q = runSolver cfg query satresParser
-    where query = pp q $$ text "(check-sat)"
+    where query = printQuery q $$ text "(check-sat)"
 
 
 getUnsatCore :: SMT2Config -> SMTQuery -> Maybe (Maybe [Int])
@@ -152,7 +148,7 @@ getUnsatCore cfg q =
               Just True  -> return (Just Nothing)
               _          -> return Nothing
     where query = text "(set-option :produce-unsat-cores true)"
-               $$ pp q
+               $$ printQuery q
                $$ text "(check-sat)"
                $$ text "(get-unsat-core)"
 
@@ -165,7 +161,7 @@ getModel cfg q =
               Just False -> return $ Just Nothing
               _          -> return Nothing
     where query = text "(set-option :produce-models true)"
-               $$ (pp q)
+               $$ (printQuery q)
                $$ text "(check-sat)"
                $$ text "(get-model)"
 
@@ -179,7 +175,7 @@ getModelOrCore cfg q =
               _          -> return Nothing
     where query = text "(set-option :produce-unsat-cores true)"
                $$ text "(set-option :produce-models true)"
-               $$ (pp q)
+               $$ (printQuery q)
                $$ text "(check-sat)"
                $$ text "(get-model)"
                $$ text "(get-unsat-core)"

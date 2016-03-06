@@ -6,6 +6,7 @@ module PP(PP(..),
 
 import Text.PrettyPrint
 
+ppshift :: Int
 ppshift = 4
 
 -- pretty-printing class
@@ -29,6 +30,9 @@ instance (PP a) => PP (Maybe a) where
     pp Nothing = empty
     pp (Just x) = pp x
 
+nest' :: Doc -> Doc
 nest' = nest ppshift
+
+braces' :: Doc -> Doc
 braces' x = lbrace $+$ nest' x $+$ rbrace
 

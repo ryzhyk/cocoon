@@ -258,7 +258,7 @@ simpleStat = withPos $
 stest = STest nopos <$ reserved "filter" <*> expr
 ssend = SSend nopos <$ reserved "send" <*> expr
 sset  = SSet  nopos <$> expr <*> (reservedOp ":=" *> expr)
-site  = SITE  nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (reserved "else" *> stat)
+site  = SITE  nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (optionMaybe $ reserved "else" *> stat)
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]

@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE ImplicitParams, TupleSections #-}
 
 -- Convert NetKAT+ spec to P4
 
@@ -187,15 +187,15 @@ mkStatement (SITE  _ c t e) = do
     let c' = evalExpr c
     case c' of
          EBool _ True  -> mkStatement t
-         EBool _ False -> mkStatement e
+         EBool _ False -> maybe (return P4SDrop) mkStatement e
          _             -> do t' <- mkStatement t
-                             e' <- mkStatement e 
+                             e' <- maybe (return Nothing) (liftM Just . mkStatement) e 
                              if exprNeedsTable c'
                                 then do tableid <- incTableCnt
                                         let tablename = "cond" ++ show tableid
                                         mkCondTable tablename c'
-                                        return $ P4SApply tablename $ Just [("hit", t'), ("miss", e')]
-                                else return $ P4SITE c' t' (Just e')
+                                        return $ P4SApply tablename $ Just $ ("hit", t'):(maybe [] (return . ("miss",)) e')
+                                else return $ P4SITE c' t' e'
 
 mkStatement (STest _ e)     = do
     let e' = evalExpr e
@@ -213,7 +213,7 @@ mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
         rhs' = flattenRHS $ evalExpr rhs
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
-        assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (assignToCascade l (ECond nopos cs d))
+        assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
     case rhs' of 
          ECond _ _ _ -> mkStatement $ assignToCascade lhs' rhs'
@@ -225,7 +225,7 @@ mkStatement (SSet  _ lhs rhs) = do
 mkStatement (SSend _ dst) = do
     let dst' = flattenRHS $ evalExpr dst
     let sendToCascade (ECond _ [] d)         = sendToCascade d
-        sendToCascade (ECond _ ((c,v):cs) d) = SITE nopos c (sendToCascade v) (sendToCascade (ECond nopos cs d))
+        sendToCascade (ECond _ ((c,v):cs) d) = SITE nopos c (sendToCascade v) (Just $ sendToCascade (ECond nopos cs d))
         sendToCascade v                      = SSend nopos v
     case dst' of
          ECond _ _ _ -> mkStatement $ sendToCascade dst'

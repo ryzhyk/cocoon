@@ -17,8 +17,9 @@ import Name
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
 validate :: (MonadError String me) => Spec -> me [Refine]
+validate (Spec []) = err nopos "Empty spec"
 validate (Spec (r:rs)) = do
-    combined <- liftM reverse $ foldM (\(p:rs) new -> liftM (:p:rs) (combine p new)) [r] rs
+    combined <- liftM reverse $ foldM (\(p:rs') new -> liftM (:p:rs') (combine p new)) [r] rs
     mapM_ validate1 combined
     return combined
 
@@ -60,7 +61,6 @@ validate1 r@Refine{..} = do
     uniqNames (\n -> "Multiple definitions of role " ++ n) refineRoles
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
-    mergeFuncs refineFuncs
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
     mapM_ (typeValidate r . tdefType) refineTypes
@@ -81,7 +81,7 @@ typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
 typeValidate r (TStruct _ fs) = do uniqNames (\f -> "Multiple definitions of field " ++ f) fs
                                    mapM_ (typeValidate r . fieldType) fs
-typeValidate r (TUser   p n)  = do checkType p r n
+typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
 
@@ -98,7 +98,7 @@ roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) roleKeyRange
-    statValidate r role roleBody
+    _ <- statValidate r role roleBody
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
@@ -140,7 +140,7 @@ checkLinkSt (SSeq _ s1 s2) = do checkLinkSt s1
 checkLinkSt (SPar p _  _)  = err p "Parallel composition not allowed in output port body" 
 checkLinkSt (SITE _ c t e) = do checkLinkExpr c
                                 checkLinkSt t
-                                checkLinkSt e
+                                maybe (return ()) checkLinkSt e
 checkLinkSt (STest _ e)    = checkLinkExpr e
 checkLinkSt (SSet p _ _)   = err p "Output port may not modify packets"
 checkLinkSt (SSend _ e)    = checkLinkExpr e
@@ -150,20 +150,20 @@ checkLinkExpr (EVar    _ _)       = return ()
 checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
 checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
 checkLinkExpr (EField _ s _)      = checkLinkExpr s
-checkLinkExpr (ELocation _ r es)  = mapM_ checkLinkExpr es
+checkLinkExpr (ELocation _ _ es)  = mapM_ checkLinkExpr es
 checkLinkExpr (EBool _ _)         = return ()
 checkLinkExpr (EInt _ _ _)        = return ()
 checkLinkExpr (EStruct _ _ fs)    = mapM_ checkLinkExpr fs
 checkLinkExpr (EBinOp _ _ e1 e2)  = do checkLinkExpr e1
                                        checkLinkExpr e2
 checkLinkExpr (EUnOp _ _ e)       = checkLinkExpr e
-checkLinkExpr (ECond _ cs d)      = do mapM (\(c,v) -> do checkLinkExpr c
-                                                          checkLinkExpr v) cs
+checkLinkExpr (ECond _ cs d)      = do mapM_ (\(c,v) -> do checkLinkExpr c
+                                                           checkLinkExpr v) cs
                                        checkLinkExpr d
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-exprValidate r ctx (EVar p v) = do 
-   checkVar p ctx v
+exprValidate _ ctx (EVar p v) = do 
+   _ <- checkVar p ctx v
    return ()
 exprValidate r ctx (EApply p f as) = do
     func <- checkFunc p r f
@@ -192,7 +192,7 @@ exprValidate r ctx (EStruct p n as) = do
                                                      matchType r ctx field e)
                                   $ zip fs as
          _            -> err p $ n ++ " is not a struct type"
-exprValidate r ctx (EBinOp p op left right) = do
+exprValidate r ctx (EBinOp _ op left right) = do
     exprValidate r ctx left
     exprValidate r ctx right
     if' (elem op [Eq]) (matchType r ctx left right)
@@ -208,12 +208,12 @@ exprValidate r ctx (EBinOp p op left right) = do
              assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression") 
      $ undefined
 
-exprValidate r ctx (EUnOp p op e) = do
+exprValidate r ctx (EUnOp _ op e) = do
     exprValidate r ctx e
     case op of
          Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a boolean expression"
 
-exprValidate r ctx (ECond p cs def) = do
+exprValidate r ctx (ECond _ cs def) = do
     exprValidate r ctx def
     mapM_ (\(cond, e)-> do exprValidate r ctx cond
                            exprValidate r ctx e
@@ -242,35 +242,35 @@ isLExpr (EUnOp _ _ _)     = False
 isLExpr (ECond _ _ _)     = False
 
 statValidate :: (MonadError String me) => Refine -> Role -> Statement -> me Bool
-statValidate r role (SSeq p h t) = do
+statValidate r role (SSeq _ h t) = do
     sends <- statValidate r role h
     assertR r (not sends) (pos h) "Send not allowed in the middle of a sequence"
     statValidate r role t
 
-statValidate r role (SPar p h t) = do
+statValidate r role (SPar _ h t) = do
     sends1 <- statValidate r role h
     sends2 <- statValidate r role t
     return $ sends1 || sends2
 
-statValidate r role (SITE p c t e) = do
+statValidate r role (SITE _ c t e) = do
     exprValidate r (CtxRole role) c
     assertR r (isBool r (CtxRole role) c) (pos c) "Condition must be a boolean expression"
     sends1 <- statValidate r role t
-    sends2 <- statValidate r role e
+    sends2 <- maybe (return False) (statValidate r role) e
     return $ sends1 || sends2
 
-statValidate r role (STest p c) = do
+statValidate r role (STest _ c) = do
     exprValidate r (CtxRole role) c
     assertR r (isBool r (CtxRole role) c) (pos c) "Filter must be a boolean expression"
     return False
 
-statValidate r role (SSet p lval rval) = do
+statValidate r role (SSet _ lval rval) = do
     exprValidate r (CtxRole role) rval
     lexprValidate r (CtxRole role) lval
     matchType r (CtxRole role) lval rval
     return False
 
-statValidate r role (SSend p dst) = do
+statValidate r role (SSend _ dst) = do
     exprValidate r (CtxRole role) dst
     assertR r (isLocation r (CtxRole role) dst) (pos dst) "Not a valid location"
     return True

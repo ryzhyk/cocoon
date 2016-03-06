@@ -47,22 +47,24 @@ data Expr = EVar    String
           | EBinOp  BOp Expr Expr
           | EUnOp   UOp Expr 
           | ECond   [(Expr, Expr)] Expr
+          deriving Show
 
 -- Assigns values to variables.
 type Assignment = M.Map String Expr
 
 typ :: SMTQuery -> Expr -> Type
 typ q (EVar n)      = varType $ fromJust $ find ((==n) . name) $ smtVars q
-typ q (EField e f)  = fromJust $ lookup n fs
+typ q (EField e f)  = fromJust $ lookup f fs
                       where TStruct n = typ q e
                             Struct _ fs = fromJust $ find ((== n) . name) $ smtStructs q
 typ _ (EBool _)         = TBool
 typ _ (EInt w _)        = TUInt w
 typ _ (EStruct n _)     = TStruct n
-typ q (EBinOp op e1 e2) | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
+typ q (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                         | elem op [Plus, Minus, Mod] = typ q e1
 typ _ (EUnOp Not _)     = TBool 
 typ q (ECond _ d)       = typ q d
+typ _ e                 = error $ "SMTSolver.typ " ++ show e
 
 data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtVars    :: [Var]
@@ -100,3 +102,4 @@ solToArray (EBool True)   = [1]
 solToArray (EBool False)  = [0]
 solToArray (EInt _ i)     = [i]
 solToArray (EStruct _ es) = concatMap solToArray es
+solToArray e              = error $ "SMTSolver.solToArray " ++ show e

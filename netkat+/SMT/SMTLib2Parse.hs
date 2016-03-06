@@ -8,28 +8,23 @@ module SMT.SMTLib2Parse ( assertName
 
 import Data.Maybe
 import Data.List
-import Data.Bits
 import qualified Data.Map             as M
 import Text.Parsec hiding ((<|>))
 import Text.Parsec.Language
 import qualified Text.Parsec.Token    as T
 import Control.Applicative hiding (many)
 import Numeric
-import Debug.Trace
 
 import Util
 import SMT.SMTSolver
 
 -- appended to each assertion name
+assertName :: String
 assertName = "__assert"
 
-data ModelDecl = DeclConst  {dconstName::String, dconstType::TypeSpec}
-               | DeclVarAsn {dvarName::String, dvarArgs::[String], dvarVal::SMTExpr}
+data ModelDecl = DeclConst  String TypeSpec
+               | DeclVarAsn String [String] SMTExpr
                deriving (Eq)
-
-declIsConst :: ModelDecl -> Bool
-declIsConst (DeclConst _ _) = True
-declIsConst _               = False
 
 declIsAsn :: ModelDecl -> Bool
 declIsAsn (DeclVarAsn _ _ _) = True
@@ -140,7 +135,7 @@ literal =  (ExpInt <$> decimal)
 
 assignmentFromModel :: (?q::SMTQuery) => [ModelDecl] -> Assignment
 assignmentFromModel decls = 
-    let asndecls = map (\d -> (dvarName d, dvarVal d)) $ filter declIsAsn decls in
+    let asndecls = map (\(DeclVarAsn n _ v) -> (n, v)) $ filter declIsAsn decls in
     M.unions (map parseAsn asndecls)
 
 parseAsn :: (?q::SMTQuery) => (String, SMTExpr) -> Assignment
@@ -158,9 +153,8 @@ parseExpr t           (ExpApply "ite" [i,th,el]) = if' cond (parseExpr t th) (pa
 parseExpr (TStruct s) (ExpApply n as) | isPrefixOf "mk-" n =
     if length fs /= length as
        then error "parseExpr: incorrect number of fields in a struct"
-       else EStruct n' (map (\((f,t), e) -> parseExpr t e) $ zip fs as)
-    where n' = drop (length "mk-") n
-          Struct _ fs = fromJust $ find ((==n') . structName) $ smtStructs ?q
+       else EStruct s (map (\((_,t), e) -> parseExpr t e) $ zip fs as)
+    where Struct _ fs = fromJust $ find ((==s) . structName) $ smtStructs ?q
 
 --parseExpr (ExpIdent i) = case lookupEnumerator i of
 --         Just _  -> SVal $ EnumVal i
