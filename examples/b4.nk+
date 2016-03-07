@@ -19,9 +19,9 @@ role Host
 (* true: host with the given IP exists *)
 function hostExists(IP4): bool
 
-role HostOut(IP4 addr)[exists(addr)] = 
-    if exists(pkt.dstip) then
-        send HostIn(addr)
+role HostOut[IP4 addr] | hostExists(addr) = 
+    if hostExists(pkt.dstip) then
+        send HostIn[pkt.dstip]
 
 role HostIn(IP4) = filter false
 
@@ -33,9 +33,9 @@ refine HostOut {
     function hostSite(IP4): SiteId
     function siteExists(SiteId): bool
 
-    assume exists(addr) => siteExists(hostSite(addr))
+    assume hostExists(addr) => siteExists(hostSite(addr))
 
-    role HostOut(IP4 addr)[exists(addr)] = send LocalFabric[hostSite(addr)]
+    role HostOut(IP4 addr)[hostExists(addr)] = send LocalFabric[hostSite(addr)]
     
     role LocalFabric(SiteId site)[siteExists(site)] = 
         if hostExists(pkt.dstip) && hostSite(pkt.dstip) = site then 
@@ -65,10 +65,10 @@ refine GlobalFabricIn {
     (* TODO: define domains of functions *)
     function tunnel(SiteId, SiteId, uint<16>): TunnelId
 
+    function destination(TunnelId): IP4
     assume destination(tunnel(s1, s2, tag)) = s2
 
     function nexthop(TunnelID, SiteId): uint<8>
-
     assume (tid = tunnel(src, dst, tag) && 
             next = wanLink(WANPort{src, nexthop(tid, src)}).site) => 
            (next = dst || wanLink(WANPort{next, nexthop(tid, next)} = dst))
