@@ -50,6 +50,26 @@ evalExpr e@(EBinOp _ op lhs rhs)         =
                                                And -> EBool nopos (v1 && v2)
                                                Or  -> EBool nopos (v1 || v2)
                                                _   -> error $ "Eval.evalExpr " ++ show e
+            (EBool _ True, _)          -> case op of
+                                               Eq  -> rhs'
+                                               And -> rhs'
+                                               Or  -> lhs'
+                                               _   -> error $ "Eval.evalExpr " ++ show e
+            (EBool _ False, _)         -> case op of
+                                               Eq  -> EUnOp nopos Not rhs'
+                                               And -> lhs'
+                                               Or  -> rhs'
+                                               _   -> error $ "Eval.evalExpr " ++ show e
+            (_, EBool _ True)          -> case op of
+                                               Eq  -> lhs'
+                                               And -> lhs'
+                                               Or  -> rhs'
+                                               _   -> error $ "Eval.evalExpr " ++ show e
+            (_, EBool _ False)          -> case op of
+                                               Eq  -> EUnOp nopos Not lhs'
+                                               And -> rhs'
+                                               Or  -> lhs'
+                                               _   -> error $ "Eval.evalExpr " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
                                                Eq    -> EBool nopos (v1 == v2)
                                                Lt    -> EBool nopos (v1 < v2)

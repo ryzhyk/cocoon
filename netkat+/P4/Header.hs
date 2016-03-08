@@ -59,4 +59,6 @@ p4HeaderDecls = [str|
 |    extract(pkt);
 |    return ingress;
 |}
+|action yes(){}
+|action no(){}
 |]
