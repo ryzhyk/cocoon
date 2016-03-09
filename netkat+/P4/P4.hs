@@ -333,7 +333,8 @@ populateTable P4DynAction{..} =
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk (nentries - i)
-                                                 EBool _ False -> mkTableEntry p4dynTable "no"  [] msk (nentries - i)) es
+                                                 EBool _ False -> mkTableEntry p4dynTable "no"  [] msk (nentries - i)
+                                                 _             -> error $ "Non-constant boolean value " ++ show val ++ "") es
          Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk (nentries - i)) es
     where es = concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
                $ flattenConds 
@@ -372,6 +373,8 @@ exprToDNF e@(EBinOp _ Eq e1 e2)  =
     case typ' ?r (CtxRole ?role) e1 of
          TStruct _ fs -> exprToDNF $ conj $ map (\f -> EBinOp nopos Eq (EField nopos e1 $ name f) (EField nopos e2 $ name f)) fs
          TUInt _ _    -> [[e]]
+         _            -> error $ "Cannot convert expression " ++ show e ++ " to DNF" 
+exprToDNF e = error $ "Cannot convert expression " ++ show e ++ " to DNF" 
 
 disjunctToMask :: (?r::Refine, ?role::Role) => [Expr] -> Doc
 disjunctToMask atoms = mkMatch $ map atomToMatch atoms
@@ -382,6 +385,7 @@ atomToMatch e =
     case e of
          EBinOp _ Eq e1 (EInt _ _ i) -> (e1, "0x" ++ showHex i "")
          EBinOp _ Eq (EInt _ _ i) e2 -> (e2, "0x" ++ showHex i "")
+         _                           -> error $ "Not implemented: P4.aromToMatch " ++ show e
 
 -- Convert a list of (field,value) pairs into a P4 table match clause
 -- by ordering the fields in the order required by the table and adding
@@ -395,3 +399,4 @@ mkMatch atoms = hsep $ map (\e -> let TUInt _ w = typ' ?r (CtxRole ?role) e in
 
 exprToVal :: Expr -> Doc
 exprToVal (EInt _ _ i) = pp $ "0x" ++ showHex i ""
+exprToVal e            = error $ "P4.exprToVal " ++ show e
