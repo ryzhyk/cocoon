@@ -102,7 +102,10 @@ funcValidate r f@Function{..} = do
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
     exprValidate r (CtxFunc f) funcDom
-    maybe (return ()) (exprValidate r (CtxFunc f)) funcDef
+    case funcDef of
+         Nothing  -> return ()
+         Just def -> do exprValidate r (CtxFunc f) def
+                        matchType r (CtxFunc f) funcType def 
 
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r role@Role{..} = do
