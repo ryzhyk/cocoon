@@ -12,8 +12,8 @@ typedef struct {
     uint<8> dstip0
 } Packet
 
-function netmask(): uint<8>
-function k(): uint<8>
+function netmask(): uint<8> = 8'd10
+function k(): uint<8> = 8'd2
 
 role NodeIn[IP4 addr, uint<8> port] | addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port == 8'd0 = (filter false)
 role NodeOut[IP4 addr, uint<8> port] | addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k() and port == 8'd0 = 
