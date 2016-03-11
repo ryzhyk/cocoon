@@ -30,6 +30,7 @@ from time import sleep
 import os
 import signal
 import subprocess
+import time
 
 _THIS_DIR = os.path.dirname(os.path.realpath(__file__))
 _THRIFT_BASE_PORT = 22222
@@ -78,12 +79,12 @@ def updateConfig(nkp, loadedTopology, oldts):
 
     # read output until magic line appears
     for line in nkp.stdout:
-        sys.stdout.write("netkat+:"+line)
+        print "netkat+: " + line
         if line == "Network configuration complete":
             break
 
     if nkp.poll() != None:
-        raise Exception(args.nkp + " terminated with error code " + nkp.returncode)
+        raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
 
     # re-apply switch configuration files whose timestamps are newer than the previous timestamp
     for sw in loadedTopology['switches']:
@@ -115,12 +116,12 @@ def main():
     print " ".join(cmd)
     nkp = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     for line in nkp.stdout:
-        sys.stdout.write("netkat+:"+line)
+        print "netkat+: " + line
         if line == "Network generation complete":
             break
 
     if nkp.poll() != None:
-        raise Exception(args.nkp + " terminated with error code " + nkp.returncode)
+        raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
 
     specdir, specfname = os.path.split(args.spec)
     netname, specext = os.path.splitext(specfname)
