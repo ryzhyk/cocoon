@@ -28,6 +28,7 @@ from p4_mininet import P4Switch, P4Host
 import argparse
 from time import sleep
 import os
+import signal
 import subprocess
 
 _THIS_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -36,9 +37,13 @@ _THRIFT_BASE_PORT = 22222
 parser = argparse.ArgumentParser(description='Mininet demo')
 parser.add_argument('--behavioral-exe', help='Path to behavioral executable',
                     type=str, action="store", required=True)
-parser.add_argument('--mn', help='Path to JSON MiniNet topology file',
+parser.add_argument('--spec', help='Path to NetKAT+ spec file',
+                    type=str, action="store", required=True)
+parser.add_argument('--cfg', help='Path to NetKAT+ config file',
                     type=str, action="store", required=True)
 parser.add_argument('--cli', help='Path to BM CLI',
+                    type=str, action="store", required=True)
+parser.add_argument('--nkp', help='Path to NetKAT+ compiler',
                     type=str, action="store", required=True)
 parser.add_argument('--p4c', help='Path to P4C-to-json compiler',
                     type=str, action="store", required=True)
@@ -67,12 +72,64 @@ class MyTopo(Topo):
         for link in topology['links']:
             self.addLink(link['src'], link['dest'], port1 = link['srcport'], port2 = link['destport'])
 
+def updateConfig(nkp, loadedTopology, oldts):
+    # send signal to the netkat+ process
+    nkp.send_signal(signal.SIGHUP)
+
+    # read output until magic line appears
+    for line in nkp.stdout:
+        sys.stdout.write("netkat+:"+line)
+        if line == "Network configuration complete":
+            break
+
+    if nkp.poll() != None:
+        raise Exception(args.nkp + " terminated with error code " + nkp.returncode)
+
+    # re-apply switch configuration files whose timestamps are newer than the previous timestamp
+    for sw in loadedTopology['switches']:
+        hostname = sw['opts']['hostname']
+        cmd = [args.cli, "--json", os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
+               "--thrift-port", str(_THRIFT_BASE_PORT + sw['opts']['nodeNum'])]
+        swcfgpath = os.path.join(netdir, netname) + '.' + hostname + '.' + 'txt'
+        if os.path.getmtime(swcfgpath) > oldts:
+            with open(swcfgpath, "r") as f:
+                print " ".join(cmd)
+            try:
+                p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                output = p.communicate("reset_state")
+                print output
+                output = subprocess.check_output(cmd, stdin = f)
+                print output
+            except subprocess.CalledProcessError as e:
+                print e
+                print e.output
+    sleep(1)
+
 def main():
 
-    mnfile = open(args.mn, "r")
+    oldts = time.time()
+
+    # Start the NetKAT+ process.  Wait for it to generate network topology,
+    # and leave it running for future network updates
+    cmd = [args.nkp, args.spec]
+    print " ".join(cmd)
+    nkp = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    for line in nkp.stdout:
+        sys.stdout.write("netkat+:"+line)
+        if line == "Network generation complete":
+            break
+
+    if nkp.poll() != None:
+        raise Exception(args.nkp + " terminated with error code " + nkp.returncode)
+
+    specdir, specfname = os.path.split(args.spec)
+    netname, specext = os.path.splitext(specfname)
+    netdir = os.path.join(specdir, specname)
+    mnfname = os.path.join(netdir, netname+".mn")
+
+    print "Loading network topology from " + mnfname 
+    mnfile = open(mnfname, "r")
     loadedTopology = json.load(mnfile)
-    netdir, fname = os.path.split(args.mn)
-    netname, fextension = os.path.splitext(fname)
 
     # convert .p4 switches to json
     for sw in loadedTopology['switches']:
@@ -116,23 +173,12 @@ def main():
 
     sleep(1)
 
-    # configure switches
-    for sw in loadedTopology['switches']:
-        hostname = sw['opts']['hostname']
-        cmd = [args.cli, "--json", os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
-               "--thrift-port", str(_THRIFT_BASE_PORT + sw['opts']['nodeNum'])]
-        with open(os.path.join(netdir, netname) + '.' + hostname + '.' + 'txt', "r") as f:
-            print " ".join(cmd)
-            try:
-                output = subprocess.check_output(cmd, stdin = f)
-                print output
-            except subprocess.CalledProcessError as e:
-                print e
-                print e.output
+    while True:
+        newts = time.time()
+        updateConfig(nkp, loadedTopology, oldts)
+        oldts = newts
+        CLI( net )
 
-    sleep(1)
-
-    CLI( net )
     net.stop()
 
 if __name__ == '__main__':

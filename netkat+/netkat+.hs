@@ -53,6 +53,8 @@ main = do
                                             writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
                                             writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
           p4switches      
+    -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
+    -- end of the compilation phase
     putStrLn "Network generation complete"
 
     maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
@@ -89,6 +91,10 @@ refreshTables workdir basename instmap base prev switches cfname =
              modSwitches
        putStrLn $ "Switches updated: " ++ (intercalate " " $ map (\sw -> fromJust $ lookup (p4Descr sw) instmap) modSwitches)
        _ <- installHandler lostConnection {-SIGHUP-} (CatchOnce (refreshTables workdir basename instmap base (Just combined) switches cfname)) Nothing
+
+       -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
+       -- end of the compilation phase
+       putStrLn "Network configuration complete"
        return ()
    `catchIOError` 
        \e -> do putStrLn ("Exception: " ++ show e)
