@@ -145,7 +145,7 @@ exprs2SMTQuery role es = let ?role = role in
                                                             TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r (CtxRole ?role) f)) fs
                                                             _            -> Nothing) 
                                                 $ refineTypes ?r
-                             smtfuncs = map (func2SMT . getFunc ?r) $ nub $ concatMap exprFuncs es
+                             smtfuncs = map (func2SMT . getFunc ?r) $ nub $ concatMap (exprFuncs ?r) es
                          in SMT.SMTQuery structs smtvs smtfuncs es'
 
 func2SMT :: (?r::Refine) => Function -> SMT.Function

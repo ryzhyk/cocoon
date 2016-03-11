@@ -8,8 +8,8 @@ import Syntax
 import NS
 
 -- Recursively enumerate all functions invoked by the expression
-exprFuncs :: (?r::Refine) => Expr -> [String]
-exprFuncs = nub . exprFuncs'
+exprFuncs :: Refine -> Expr -> [String]
+exprFuncs r e = let ?r = r in nub $ exprFuncs' e
 
 exprFuncs' :: (?r::Refine) => Expr -> [String]
 exprFuncs' (EVar _ _)         = []

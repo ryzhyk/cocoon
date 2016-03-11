@@ -14,6 +14,7 @@ import Util
 import Type
 import Pos
 import Name
+import Expr
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -109,6 +110,8 @@ roleValidate r role@Role{..} = do
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) roleKeyRange
     _ <- statValidate r role roleBody
+    mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
+          $ exprFuncs r roleKeyRange
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
