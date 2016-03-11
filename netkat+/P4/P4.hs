@@ -321,10 +321,10 @@ mkCondTable n e = do
                 (nest' $ pp "actions" <+> (braces $ pp "yes" <> semi <+> pp "no" <> semi))
                 $$
                 rbrace
-        command = pp "table_set_default" <+> pp n <+> pp "no"
+--        command = pp "table_set_default" <+> pp n <+> pp "no"
         dyn = P4DynAction n ?role ?kmap e Nothing
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
-                     , p4Commands = p4Commands p4 ++ [command]
+--                     , p4Commands = p4Commands p4 ++ [command]
                      , p4DynActions = p4DynActions p4 ++ [dyn]})
 
 pktFields :: (?r::Refine, ?role::Role) => [Expr]
