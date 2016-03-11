@@ -76,7 +76,7 @@ class MyTopo(Topo):
 
 def updateConfig(nkp, loadedTopology):
     # send signal to the netkat+ process
-    nkp.send_signal(signal.SIGHUP)
+    nkp.stdin.write("update\n")
 
     # read output until magic line appears
     while True:
@@ -98,15 +98,15 @@ def applyConfig(loadedTopology, netdir, netname, oldts):
         if os.path.getmtime(swcfgpath) > oldts:
             with open(swcfgpath, "r") as f:
                 print " ".join(cmd)
-            try:
-                p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                output = p.communicate("reset_state")
-                print output
-                output = subprocess.check_output(cmd, stdin = f)
-                print output
-            except subprocess.CalledProcessError as e:
-                print e
-                print e.output
+                try:
+                    p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    output = p.communicate("reset_state")
+                    print output
+                    output = subprocess.check_output(cmd, stdin = f)
+                    print output
+                except subprocess.CalledProcessError as e:
+                    print e
+                    print e.output
     sleep(1)
 
 def main():
@@ -117,7 +117,7 @@ def main():
     # and leave it running for future network updates
     cmd = [args.nkp, args.spec, args.cfg]
     print " ".join(cmd)
-    nkp = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    nkp = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     while True:
         line = nkp.stdout.readline() # This blocks until it receives a newline.
         sys.stdout.write("netkat+: " + line)
