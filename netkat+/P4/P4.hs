@@ -3,8 +3,8 @@
 -- Convert NetKAT+ spec to P4
 
 module P4.P4( P4DynAction(..)
+            , P4Switch(..)
             , genP4Switches
-            , genP4Switch
             , populateTable) where
 
 import Control.Monad.State
@@ -44,6 +44,8 @@ impossible, since P4 match tables do not allow actions with non-const parameters
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
 data P4DynAction = P4DynAction { p4dynTable  :: String       -- name of the table
+                               , p4dynRole   :: Role         -- role that the action belongs to
+                               , p4dynKMap   :: KMap
                                , p4dynExpr   :: Expr         -- expression that the table computes
                                , p4dynAction :: Maybe String -- name of action to invoke. If false, it's a yes-no action
                                }
@@ -137,16 +139,23 @@ incTableCnt = do
     modify (\s -> s{p4TableCnt = n + 1})
     return n
 
+data P4Switch = P4Switch { p4Descr   :: InstanceDescr
+                         , p4Prog    :: Doc             -- P4 description of the switch
+                         , p4Init    :: Doc             -- switch initialization commands
+                         , p4DynActs :: [P4DynAction]   -- dynamic actions to be programmed at runtime
+                         }
+
 -- Generate all P4 switches in the topology
-genP4Switches :: Refine -> Topology -> [(InstanceDescr, (Doc, Doc, [P4DynAction]))]
+genP4Switches :: Refine -> Topology -> [P4Switch]
 genP4Switches r topology = 
     concatMap (\(switch, imap) -> map (\(descr, links) -> let kmap = M.fromList $ zip (map name $ roleKeys $ getRole r $ name switch) $ idescKeys descr
                                                               pmap = M.fromList $ concatMap (\((i,o),range,_) -> [(i,range),(o,range)]) links
-                                                          in (descr, genP4Switch r switch kmap pmap)) $ instMapFlatten switch imap) 
+                                                              (prog, initial, acts) = genP4Switch r switch kmap pmap
+                                                          in P4Switch descr prog initial acts) $ instMapFlatten switch imap) 
               $ filter ((== NodeSwitch) . nodeType . fst) topology
 
---  Generate P4 switch. Returns to strings: one containing the P4 description
---  of the switch, and one containing runtime commands to initialize switch tables.
+-- Generate P4 switch. Returns two strings: one containing the P4 description
+-- of the switch, and one containing runtime commands to initialize switch tables.
 genP4Switch :: Refine -> Node -> KMap -> PMap -> (Doc, Doc, [P4DynAction])
 genP4Switch r switch kmap pmap = 
     let ?r = r in
@@ -267,7 +276,7 @@ liftConds' e =
           combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
           combineCascades' f [] es'                  = f es'
 
-mkAssignTable :: (?r::Refine, ?role::Role) => String -> Expr -> Expr -> State P4State ()
+mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
         isdyn = exprNeedsTable rhs
@@ -283,7 +292,7 @@ mkAssignTable n lhs rhs = do
                          $$
                          rbrace
         dyn = if isdyn
-                 then [P4DynAction n rhs $ Just actname]
+                 then [P4DynAction n ?role ?kmap rhs $ Just actname]
                  else []
         table = action
                 $$
@@ -303,7 +312,7 @@ mkAssignTable n lhs rhs = do
                      , p4Commands = p4Commands p4 ++ command
                      , p4DynActions = p4DynActions p4 ++ dyn})
  
-mkCondTable :: (?r::Refine, ?role::Role) => String -> Expr -> State P4State ()
+mkCondTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> State P4State ()
 mkCondTable n e = do
     let table = (pp "table" <+> pp n <+> lbrace)
                 $$
@@ -313,7 +322,7 @@ mkCondTable n e = do
                 $$
                 rbrace
         command = pp "table_set_default" <+> pp n <+> pp "no"
-        dyn = P4DynAction n e Nothing
+        dyn = P4DynAction n ?role ?kmap e Nothing
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [table]
                      , p4Commands = p4Commands p4 ++ [command]
                      , p4DynActions = p4DynActions p4 ++ [dyn]})
@@ -328,15 +337,18 @@ pktFields = fields (EPacket nopos)
 -- Generate runtime updates to P4 tables
 -----------------------------------------------------------------
 
-populateTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => P4DynAction -> [Doc]
-populateTable P4DynAction{..} = 
+populateTable :: Refine -> P4DynAction -> [Doc]
+populateTable r P4DynAction{..} = 
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk (nentries - i)
                                                  EBool _ False -> mkTableEntry p4dynTable "no"  [] msk (nentries - i)
                                                  _             -> error $ "Non-constant boolean value " ++ show val ++ "") es
          Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk (nentries - i)) es
-    where es = concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
+    where es = let ?r = r
+                   ?role = p4dynRole
+                   ?kmap = p4dynKMap in
+               concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
                $ flattenConds 
                $ liftConds 
                $ evalExpr p4dynExpr
@@ -385,7 +397,7 @@ atomToMatch e =
     case e of
          EBinOp _ Eq e1 (EInt _ _ i) -> (e1, "0x" ++ showHex i "")
          EBinOp _ Eq (EInt _ _ i) e2 -> (e2, "0x" ++ showHex i "")
-         _                           -> error $ "Not implemented: P4.aromToMatch " ++ show e
+         _                           -> error $ "Not implemented: P4.atomToMatch " ++ show e
 
 -- Convert a list of (field,value) pairs into a P4 table match clause
 -- by ordering the fields in the order required by the table and adding

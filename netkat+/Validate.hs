@@ -1,6 +1,7 @@
 {-# LANGUAGE RecordWildCards, FlexibleContexts #-}
 
-module Validate (validate) where
+module Validate ( validate
+                , validateConfig) where
 
 import Control.Monad.Except
 import qualified Data.Graph.Inductive as G
@@ -21,6 +22,15 @@ validate (Spec []) = err nopos "Empty spec"
 validate (Spec (r:rs)) = do
     combined <- liftM reverse $ foldM (\(p:rs') new -> liftM (:p:rs') (combine p new)) [r] rs
     mapM_ validate1 combined
+    return combined
+
+-- Validate configuration applied on top of a base spec
+validateConfig :: (MonadError String me) => Refine -> [Function] -> me Refine
+validateConfig base cfg = do
+    combined <- combine base (Refine nopos [] [] cfg [] [] [])
+    validate1 combined
+    -- All functions are defined
+    mapM_ (\f -> assertR combined (isJust $ funcDef f) (pos f) $ "Function " ++ name f ++ " is undefined") $ refineFuncs combined
     return combined
 
 -- Apply definitions in new on top of prev.

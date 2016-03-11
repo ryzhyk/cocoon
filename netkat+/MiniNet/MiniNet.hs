@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, TupleSections #-}
 
-module MiniNet.MiniNet (generateMininetTopology) where
+module MiniNet.MiniNet (generateMininetTopology, NodeMap) where
 
 import Text.JSON
 import Data.Maybe

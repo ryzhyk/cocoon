@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Parse (nkplusGrammar) where
+module Parse ( nkplusGrammar
+             , cfgGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
 import Text.Parsec hiding ((<|>))
@@ -91,6 +92,7 @@ data SpecItem = SpType         TypeDef
 
 
 nkplusGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
+cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many func) <* eof)
 
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 

@@ -124,6 +124,13 @@ data Function = Function { funcPos  :: Pos
                          , funcDef  :: Maybe Expr
                          }
 
+instance Eq Function where
+    (==) f1 f2 = funcName f1 == funcName f2 &&
+                 funcArgs f1 == funcArgs f2 &&
+                 funcType f1 == funcType f2 &&
+                 funcDom  f1 == funcDom  f2 &&
+                 funcDef  f1 == funcDef  f2
+
 instance WithPos Function where
     pos = funcPos
     atPos f p = f{funcPos = p}

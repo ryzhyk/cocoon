@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards, ImplicitParams #-}
+
 import System.Environment
 import Text.Parsec.Prim
 import Control.Monad
@@ -6,19 +8,29 @@ import Text.PrettyPrint
 import Data.Maybe
 import Data.List
 import System.Directory
+import System.Posix.Signals
+import System.IO.Error
 
 import Parse
 import Validate
 import P4.P4
 import Topology
 import MiniNet.MiniNet
+import Name
+import Syntax
+import NS
+import Expr
+import PP
 
 
 main = do
     args <- getArgs
     prog <- getProgName
-    when (length args /= 1) $ fail $ "Usage: " ++ prog ++ " <file>"
-    let fname = head args
+    when (length args > 2 || length args < 1) $ fail $ "Usage: " ++ prog ++ " <spec_file> [<config_file>]"
+    let fname  = head args
+        cfname = if length args >= 2
+                    then Just $ args !! 1
+                    else Nothing
         (dir, file) = splitFileName fname
         (basename,_) = splitExtension file
         workdir = dir </> basename
@@ -37,28 +49,50 @@ main = do
         (mntopology, instmap) = generateMininetTopology final topology
         p4switches = genP4Switches final topology
     writeFile (workdir </> addExtension basename "mn") mntopology
-    mapM_ (\(descr, (p4,cmd,dyn)) -> do let swname = snd $ fromJust $ find ((==descr) . fst) instmap
-                                        writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
-                                        writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
-          p4switches
+    mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap
+                                            writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
+                                            writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
+          p4switches      
+    putStrLn "Network generation complete"
+
+    maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
     return ()
 
-
---    let kmap = M.fromList [("hash", EInt nopos 1), ("hash2", EInt nopos 1)]
---        pmap = M.fromList [("CoreIn", (0,3)), ("CoreOut", (0,3))]
---    let (p4, command) = genP4Switch final (getNode final "CoreSwitch") fmap kmap pmap
---    writeFile (addExtension (addExtension basename "core") "p4") (render p4) 
---    writeFile (addExtension (addExtension basename "core") "txt") (render command) 
---
---    let kmap = M.fromList [("subnet", EInt nopos 1), ("subsubnet", EInt nopos 1)]
---        pmap = M.fromList [("PodeLowerUIn", (0,1)), ("PodLowerUOut", (0,1)), ("PodLowerLIn", (2,3)), ("PodLowerLOut", (2,3))]
---    let (p4, command) = genP4Switch final (getNode final "PodLowerSwitch") fmap kmap pmap
---    writeFile (addExtension (addExtension basename "lower") "p4") (render p4) 
---    writeFile (addExtension (addExtension basename "lower") "txt") (render command) 
---
---    let kmap = M.fromList [("subnet", EInt nopos 1), ("hash", EInt nopos 0)]
---        pmap = M.fromList [("PodeUpperUIn", (0,1)), ("PodUpperUOut", (0,1)), ("PodUpperLIn", (2,3)), ("PodUpperLOut", (2,3))]
---    let (p4, command) = genP4Switch final (getNode final "PodUpperSwitch") fmap kmap pmap
---    writeFile (addExtension (addExtension basename "upper") "p4") (render p4) 
---    writeFile (addExtension (addExtension basename "upper") "txt") (render command) 
+-- Update command files for dynamic actions modified in the new configuration.
+-- workdir  - work directory where all P4 files are stored
+-- basename - name of the spec to prepended to all filenames
+-- base     - base specification before configuration was applied to it
+-- prev     - specification with previous configuration
+-- switches - switch definitions derived from base
+-- cfname   - configuration file
+refreshTables :: String -> String -> NodeMap -> Refine -> Maybe Refine -> [P4Switch] -> String -> IO ()
+refreshTables workdir basename instmap base prev switches cfname = 
+    do cfgdata <- readFile cfname
+       cfg <- case parse cfgGrammar cfname cfgdata of
+                   Left  e    -> fail $ "Failed to parse config file: " ++ show e
+                   Right spec -> return spec
+       combined <- case validateConfig base cfg of
+                        Left e   -> fail $ "Validation error: " ++ e
+                        Right rs -> return rs
+       let modFuncs = case prev of 
+                           Nothing  -> refineFuncs combined
+                           Just old -> filter (\f -> maybe True (f /= ) $ lookupFunc old (name f)) $ refineFuncs combined
+           modFNames = map name modFuncs
+       putStrLn $ "Functions changed: " ++ (intercalate " " $ map name modFuncs)
+       let modSwitches = case prev of
+                              Nothing  -> switches
+                              Just old -> let ?r = old in 
+                                              filter (any (not . null . intersect modFNames . map name . exprFuncs . p4dynExpr) . p4DynActs) switches
+       mapM_ (\P4Switch{..} -> do let swname = fromJust $ lookup p4Descr instmap
+                                      cmds = vcat $ punctuate (pp "") $ map (vcat . populateTable combined) p4DynActs
+                                  writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmds))
+             modSwitches
+       putStrLn $ "Switches updated: " ++ (intercalate " " $ map (\sw -> fromJust $ lookup (p4Descr sw) instmap) modSwitches)
+       _ <- installHandler lostConnection {-SIGHUP-} (CatchOnce (refreshTables workdir basename instmap base (Just combined) switches cfname)) Nothing
+       return ()
+   `catchIOError` 
+       \e -> do putStrLn ("Exception: " ++ show e)
+                putStrLn ("Regenerating the entire configuration next time")
+                _ <- installHandler lostConnection (CatchOnce $ refreshTables workdir basename instmap base Nothing switches cfname) Nothing
+                return ()
 
