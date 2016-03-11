@@ -15,7 +15,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["!", "|", "=", ":=", "%", "+"]
+reservedOpNames = ["!", "|", "==", "=", ":=", "%", "+"]
 reservedNames = ["and",
                  "assume",
                  "bool",
@@ -226,7 +226,7 @@ etable = [[postf $ choice [postField]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft]
-         ,[binary "="  Eq  AssocLeft,          
+         ,[binary "==" Eq  AssocLeft,          
            binary "<"  Lt  AssocNone, 
            binary "<=" Lte AssocNone, 
            binary ">"  Gt  AssocNone, 

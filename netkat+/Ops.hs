@@ -17,7 +17,7 @@ data BOp = Eq
          deriving (Eq)
 
 instance PP BOp where
-    pp Eq     = pp "="
+    pp Eq     = pp "=="
     pp Lt     = pp "<"
     pp Gt     = pp ">"
     pp Lte    = pp "<="
