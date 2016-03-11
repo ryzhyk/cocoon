@@ -31,6 +31,7 @@ import os
 import signal
 import subprocess
 import time
+import sys
 
 _THIS_DIR = os.path.dirname(os.path.realpath(__file__))
 _THRIFT_BASE_PORT = 22222
@@ -73,19 +74,21 @@ class MyTopo(Topo):
         for link in topology['links']:
             self.addLink(link['src'], link['dest'], port1 = link['srcport'], port2 = link['destport'])
 
-def updateConfig(nkp, loadedTopology, oldts):
+def updateConfig(nkp, loadedTopology):
     # send signal to the netkat+ process
     nkp.send_signal(signal.SIGHUP)
 
     # read output until magic line appears
-    for line in nkp.stdout:
-        print "netkat+: " + line
-        if line == "Network configuration complete":
+    while True:
+        line = nkp.stdout.readline()
+        sys.stdout.write("netkat+: " + line)
+        if line == "Network configuration complete\n":
             break
 
     if nkp.poll() != None:
         raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
 
+def applyConfig(loadedTopology, netdir, netname, oldts):
     # re-apply switch configuration files whose timestamps are newer than the previous timestamp
     for sw in loadedTopology['switches']:
         hostname = sw['opts']['hostname']
@@ -112,12 +115,13 @@ def main():
 
     # Start the NetKAT+ process.  Wait for it to generate network topology,
     # and leave it running for future network updates
-    cmd = [args.nkp, args.spec]
+    cmd = [args.nkp, args.spec, args.cfg]
     print " ".join(cmd)
     nkp = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    for line in nkp.stdout:
-        print "netkat+: " + line
-        if line == "Network generation complete":
+    while True:
+        line = nkp.stdout.readline() # This blocks until it receives a newline.
+        sys.stdout.write("netkat+: " + line)
+        if line == "Network generation complete\n":
             break
 
     if nkp.poll() != None:
@@ -125,7 +129,7 @@ def main():
 
     specdir, specfname = os.path.split(args.spec)
     netname, specext = os.path.splitext(specfname)
-    netdir = os.path.join(specdir, specname)
+    netdir = os.path.join(specdir, netname)
     mnfname = os.path.join(netdir, netname+".mn")
 
     print "Loading network topology from " + mnfname 
@@ -174,11 +178,15 @@ def main():
 
     sleep(1)
 
-    while True:
-        newts = time.time()
-        updateConfig(nkp, loadedTopology, oldts)
-        oldts = newts
-        CLI( net )
+    newts = oldts
+    applyConfig(loadedTopology, netdir, netname, oldts)
+    oldts = newts
+#    while True:
+#        updateConfig(nkp, loadedTopology)
+#        newts = time.time()
+#        applyConfig(loadedTopology, netdir, netname, oldts)
+#        oldts = newts
+    CLI( net )
 
     net.stop()
 
