@@ -87,6 +87,7 @@ instance SMTPP Expr where
     smtpp (EBinOp op e1 e2) = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
     smtpp (EUnOp op e)      = parens $ smtpp op <+> smtpp e
     smtpp (ECond cs d)      = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
+    smtpp (EApply f [])     = pp f
     smtpp (EApply f as)     = parens $ pp f <+> (hsep $ map smtpp as)
 
 instance SMTPP BOp where
