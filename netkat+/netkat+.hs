@@ -58,6 +58,7 @@ main = do
     putStrLn "Network generation complete"
 
     maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
+
     return ()
 
 -- Update command files for dynamic actions modified in the new configuration.
@@ -89,15 +90,16 @@ refreshTables workdir basename instmap base prev switches cfname =
                                   writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmds))
              modSwitches
        putStrLn $ "Switches updated: " ++ (intercalate " " $ map (\sw -> fromJust $ lookup (p4Descr sw) instmap) modSwitches)
-       _ <- installHandler lostConnection {-SIGHUP-} (CatchOnce (refreshTables workdir basename instmap base (Just combined) switches cfname)) Nothing
 
        -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
        -- end of the compilation phase
        putStrLn "Network configuration complete"
-       return ()
+
+       awaitSignal (Just $ addSignal lostConnection emptySignalSet)
+       refreshTables workdir basename instmap base (Just combined) switches cfname
    `catchIOError` 
        \e -> do putStrLn ("Exception: " ++ show e)
                 putStrLn ("Regenerating the entire configuration next time")
-                _ <- installHandler lostConnection (CatchOnce $ refreshTables workdir basename instmap base Nothing switches cfname) Nothing
-                return ()
 
+                awaitSignal (Just $ addSignal lostConnection emptySignalSet)
+                refreshTables workdir basename instmap base Nothing switches cfname
