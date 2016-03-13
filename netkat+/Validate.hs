@@ -192,7 +192,7 @@ exprValidate r ctx (EApply p f as) = do
     func <- checkFunc p r f
     assertR r ((length $ funcArgs func) == length as) p "Number of arguments does not match function declaration"
     mapM_ (\(formal,actual) -> do exprValidate r ctx actual
-                                  matchType r ctx formal actual) 
+                                  matchType r ctx actual formal) 
           $ zip (funcArgs func) as
 exprValidate r ctx (EField p s f) = do
     exprValidate r ctx s
@@ -204,7 +204,7 @@ exprValidate r ctx (ELocation p rname as) = do
     role' <- checkRole p r rname
     assertR r ((length $ roleKeys role') == length as) p "Number of keys does not match role declaration"
     mapM_ (\(formal,actual) -> do exprValidate r ctx actual
-                                  matchType r ctx formal actual) 
+                                  matchType r ctx actual formal) 
           $ zip (roleKeys role') as
 
 exprValidate r ctx (EStruct p n as) = do
@@ -212,7 +212,7 @@ exprValidate r ctx (EStruct p n as) = do
     case typ' r ctx (tdefType t) of
          TStruct _ fs -> do assertR r (length as == length fs) p "Number of fields does not match struct definition"
                             mapM_ (\(field, e) -> do exprValidate r ctx e
-                                                     matchType r ctx field e)
+                                                     matchType r ctx e field)
                                   $ zip fs as
          _            -> err p $ n ++ " is not a struct type"
 exprValidate r ctx (EBinOp _ op left right) = do
