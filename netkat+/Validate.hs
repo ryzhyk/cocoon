@@ -23,6 +23,7 @@ validate (Spec []) = err nopos "Empty spec"
 validate (Spec (r:rs)) = do
     combined <- liftM reverse $ foldM (\(p:rs') new -> liftM (:p:rs') (combine p new)) [r] rs
     mapM_ validate1 combined
+    validateFinal $ last combined
     return combined
 
 -- Validate configuration applied on top of a base spec
@@ -33,6 +34,14 @@ validateConfig base cfg = do
     -- All functions are defined
     mapM_ (\f -> assertR combined (isJust $ funcDef f) (pos f) $ "Function " ++ name f ++ " is undefined") $ refineFuncs combined
     return combined
+
+-- Validate final refinement before generating topology from it
+validateFinal :: (MonadError String me) => Refine -> me ()
+validateFinal r = do
+    mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
+                        $ exprFuncs r roleKeyRange)
+          $ refineRoles r
+
 
 -- Apply definitions in new on top of prev.
 combine :: (MonadError String me) => Refine -> Refine -> me Refine
@@ -113,8 +122,6 @@ roleValidate r role@Role{..} = do
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) roleKeyRange
     _ <- statValidate r role roleBody
-    mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
-          $ exprFuncs r roleKeyRange
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
