@@ -248,7 +248,9 @@ binary n fun = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re)
 stat =  buildExpressionParser stable stat'
     <?> "statement"
 
-stat' = parens stat <|> simpleStat
+stat' =  braces stat 
+     <|> parens stat 
+     <|> simpleStat
 
 simpleStat = withPos $
               stest
