@@ -89,7 +89,7 @@ allSolutions solver q var = sortWith solToArray $ allSolutions' solver q var
 
 allSolutions' :: SMTSolver -> SMTQuery -> String -> [Expr]
 allSolutions' solver q var = 
-    -- Find one solution; block it, call solveFor recursively to find more
+    -- Find one solution; block it, call allSolutions' recursively to find more
     case smtGetModel solver q of
          Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
          Just Nothing      -> []

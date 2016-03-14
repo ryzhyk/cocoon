@@ -34,6 +34,7 @@ a definition by the user.  Given P4 restrictions, not any function definition ca
 encoded via table entries.  For example, the following definition
 
 func(pkt) = case { pkt.f1 = const: pkt.f2 }
+                 import Debug.Trace
 
 requires passing field f2 of the packet to an action defined at compile time.  This is 
 impossible, since P4 match tables do not allow actions with non-const parameters.
