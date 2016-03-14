@@ -145,8 +145,19 @@ exprs2SMTQuery role es = let ?role = role in
                                                             TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r (CtxRole ?role) f)) fs
                                                             _            -> Nothing) 
                                                 $ refineTypes ?r
-                             smtfuncs = map (func2SMT . getFunc ?r) $ nub $ concatMap (exprFuncs ?r) es
+                             smtfuncs = map (func2SMT . getFunc ?r) $ sortBy compareFuncs $ nub $ concatMap (exprFuncsRec ?r) es
                          in SMT.SMTQuery structs smtvs smtfuncs es'
+
+compareFuncs :: (?r::Refine) => String -> String -> Ordering
+compareFuncs n1 n2 = if elem n1 f2dep 
+                        then LT
+                        else if elem n2 f1dep
+                                then GT
+                                else compare n1 n2
+    where f1 = getFunc ?r n1
+          f2 = getFunc ?r n2
+          f1dep = maybe [] (exprFuncsRec ?r) $ funcDef f1
+          f2dep = maybe [] (exprFuncsRec ?r) $ funcDef f2
 
 func2SMT :: (?r::Refine) => Function -> SMT.Function
 func2SMT f@Function{..} = SMT.Function funcName 

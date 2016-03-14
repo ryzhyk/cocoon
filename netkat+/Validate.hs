@@ -15,6 +15,7 @@ import Type
 import Pos
 import Name
 import Expr
+import Refine
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -39,9 +40,11 @@ validateConfig base cfg = do
 validateFinal :: (MonadError String me) => Refine -> me ()
 validateFinal r = do
     mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
-                        $ exprFuncs r roleKeyRange)
+                        $ exprFuncsRec r roleKeyRange)
           $ refineRoles r
-
+    case grCycle (funcGraph r) of
+         Nothing -> return ()
+         Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
 
 -- Apply definitions in new on top of prev.
 combine :: (MonadError String me) => Refine -> Refine -> me Refine
