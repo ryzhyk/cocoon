@@ -1,0 +1,4 @@
+function podLinkUp(uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = true
+
+(* TODO: define nondet functions or allow leaving them undefined as long as they are not needed by switch logic ???*)
+function chooseCorePort(uint<8> subnet, Packet p): CorePort = CorePort{8'd0, 8'd0}
