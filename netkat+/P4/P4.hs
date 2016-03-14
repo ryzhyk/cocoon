@@ -13,6 +13,7 @@ import Data.List
 import Data.Bits
 import qualified Data.Map as M
 import Numeric
+import Debug.Trace
 
 import Util
 import PP
@@ -377,7 +378,7 @@ mkTableEntry table action args mask priority =
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
 exprToMasks :: (?r::Refine, ?role::Role) => Expr -> [Doc]
-exprToMasks e = map disjunctToMask $ exprToDNF e
+exprToMasks e = map disjunctToMask $ trace ("exprToDNF " ++ show e) $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?role::Role) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
@@ -387,6 +388,8 @@ exprToDNF e@(EBinOp _ Eq e1 e2)  =
          TStruct _ fs -> exprToDNF $ conj $ map (\f -> EBinOp nopos Eq (EField nopos e1 $ name f) (EField nopos e2 $ name f)) fs
          TUInt _ _    -> [[e]]
          _            -> error $ "Cannot convert expression " ++ show e ++ " to DNF" 
+exprToDNF (EBool _ True) = [[]]
+exprToDNF (EBool _ False) = []
 exprToDNF e = error $ "Cannot convert expression " ++ show e ++ " to DNF" 
 
 disjunctToMask :: (?r::Refine, ?role::Role) => [Expr] -> Doc
