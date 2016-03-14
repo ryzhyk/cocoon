@@ -14,12 +14,12 @@ function k(): uint<8>
 
 function dst(Packet p): IP4
 
-function inode(IP4): bool
+function inode(IP4 addr): bool
 
-role NodeIn[IP4 addr, uint<8> port] | inode(IP4) = (filter false)
-role NodeOut[IP4 addr, uint<8> port] | inode(IP4) = 
+role NodeIn[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 = (filter false)
+role NodeOut[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 = 
     if inode(dst(pkt)) then
-        send NodeIn[dst(Packet)]
+        send NodeIn[dst(pkt), 8'd0]
 
 refine NodeOut {
 
@@ -32,7 +32,7 @@ refine NodeOut {
         if coreLinkUp(hash, hash2, dst(pkt).ip2) then
             send CoreOut[hash, hash2, dst(pkt).ip2]
         else
-            send CoreOut[hash, hash2, (dst(pkt).ip2 + 1) % k()]
+            send CoreOut[hash, hash2, (dst(pkt).ip2 + 8'd1) % k()]
 
     role CoreOut[uint<8> hash, uint<8> hash2, uint<8> port] | icorePort(hash, hash2, port) = 
         if coreLinkUp(hash, hash2, port) then
@@ -46,23 +46,34 @@ refine NodeOut {
         if (dst(pkt).ip2 == subnet) then
             send PodLowerOut[subnet, dst(pkt).ip1, dst(pkt).ip0]
         else
-            send PodUpperOut[subnet, hash, (port+1) % k()]
+            send PodUpperOut[subnet, hash, (port+8'd1) % k()]
 
     function ilowerPort(uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = 
         subnet < k() + k() and subsubnet < k() and port < k()
 
+    typedef struct {
+        uint<8> hash,
+        uint<8> hash2
+    } CorePort
+
+    (* TODO: define chooseCorePort at the next refinement *)
+    function chooseCorePort(uint<8> subnet, Packet p): CorePort
+
+    assume(uint<8> subnet, Packet p) 
+          (not (subnet < k() + k())) or icorePort(chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet)
+
     role PodLowerIn[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
-        if (dst(pkt).ip2 == subnet) then
+        if (dst(pkt).ip2 == subnet) then {
             send PodLowerOut[subnet, dst(pkt).ip1, dst(pkt).ip0]
-        else {
-            send PodUpperOut[subnet, *, *]
+        } else {
+            send PodUpperOut[subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
         }
 
     role PodLowerOut[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
         if inode(IP4{netmask(), subnet, subsubnet, port}) then
-            send NodeIn[IP4{netmask(), subnet, subsubnet, port}, 0]
+            send NodeIn[IP4{netmask(), subnet, subsubnet, port}, 8'd0]
 
-    role NodeOut[IP4 addr, uint<8> port] | inode(IP4) = 
+    role NodeOut[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 = 
         send PodLowerIn[addr.ip2, addr.ip1, addr.ip0]
 }
 
@@ -78,12 +89,12 @@ refine PodLowerIn, PodUpperIn {
             if podLinkUp(subnet, dst(pkt).ip1, hash) then
                 send PodUpperLOut[subnet, hash, dst(pkt).ip1]
             else
-                send PodUpperLOut[subnet, hash, (dst(pkt).ip1 + 1) % k()]
+                send PodUpperLOut[subnet, hash, (dst(pkt).ip1 + 8'd1) % k()]
         } else {
             if coreLinkUp(hash, dst(pkt).ip0, subnet) then
-                send PodUpperUOut[subnet, hash, dst(pkt).ip0]
+                send PodUpperOut[subnet, hash, dst(pkt).ip0]
             else
-                send PodUpperUOut[subnet, hash, (dst(pkt).ip0+1) % k()]
+                send PodUpperOut[subnet, hash, (dst(pkt).ip0+8'd1) % k()]
         }
 
     role PodUpperLOut[uint<8> subnet, uint<8> hash, uint<8> port] | ipodPort(subnet, port, hash) = 
@@ -94,29 +105,29 @@ refine PodLowerIn, PodUpperIn {
         if dst(pkt).ip1 == subsubnet then
             send PodLowerOut[subnet, subsubnet, dst(pkt).ip0]
         else 
-            send PodLowerUOut[subnet, subsubnet, (port+1) % k()]
+            send PodLowerUOut[subnet, subsubnet, (port+8'd1) % k()]
 
     role PodLowerUOut[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ipodPort(subnet, subsubnet, port) = 
         if podLinkUp(subnet, subsubnet, port) then
             send PodUpperLIn[subnet, port, subsubnet]
 
     role PodLowerIn[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
-        if (dst(pkt).ip2 == subnet) && (dst(pkt).ip1 == subsubnet) then {
-            if ilowerPort(subnet, subsubnet, dst(pkt).ip0)
+        if (dst(pkt).ip2 == subnet) and (dst(pkt).ip1 == subsubnet) then {
+            if ilowerPort(subnet, subsubnet, dst(pkt).ip0) then
                 send PodLowerOut[subnet, subsubnet, dst(pkt).ip0]
         } else if podLinkUp(subnet, subsubnet, dst(pkt).ip0) then
-            send PodUpperOut[subnet, subsubnet, dst(pkt).ip0]
+            send PodLowerUOut[subnet, subsubnet, dst(pkt).ip0]
         else 
-            send PodUpperOut[subnet, subsubnet, (dst(pkt).ip0+1) % k()]
+            send PodLowerUOut[subnet, subsubnet, (dst(pkt).ip0+8'd1) % k()]
 
     role PodUpperIn[uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(hash, port, subnet) = 
         if (dst(pkt).ip2 == subnet) then {
             if podLinkUp(subnet, dst(pkt).ip1, hash) then
                 send PodUpperLOut[subnet, hash, dst(pkt).ip1]
             else
-                send PodUpperLOut[subnet, hash, (dst(pkt).ip1+1) % k()]
+                send PodUpperLOut[subnet, hash, (dst(pkt).ip1+8'd1) % k()]
         } else {
-            send PodUpperOut[subnet, hash, (port+1) % k()]
+            send PodUpperOut[subnet, hash, (port+8'd1) % k()]
         }
 }
 
@@ -139,7 +150,7 @@ refine {
     function k(): uint<8> = 8'd2
 
     function dst(Packet p): IP4 = p.dstip
-    function inode(IP4): bool = addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
+    function inode(IP4 addr): bool = addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
 
     function coreLinkUp(uint<8> hash, uint<8> hash2, uint<8> port): bool = true
     function podLinkUp(uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = true
