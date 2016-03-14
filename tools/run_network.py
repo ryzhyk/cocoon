@@ -143,11 +143,7 @@ def main():
                os.path.join(netdir, netname) + '.' + hostname + '.' + 'p4', 
                "--json", os.path.join(netdir, netname) + '.' + hostname + '.' + 'json']
         print " ".join(cmd)
-        try:
-            output = subprocess.check_output(cmd)
-            print output
-        except subprocess.CalledProcessError as e:
-            print e
+        subprocess.check_call(cmd)
 
     # build mininet topology
     topo = MyTopo(args.behavioral_exe, loadedTopology, netname, netdir)
