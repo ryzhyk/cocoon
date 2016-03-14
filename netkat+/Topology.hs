@@ -106,30 +106,31 @@ mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ _ pnum) -> (fromInteger pnum, mkLi
 mkLink :: (?r::Refine) => Role -> KMap -> Maybe PortInstDescr
 mkLink role kmap = let ?kmap = kmap in 
                    let ?role = role in
-                   case evalPortStatement (roleBody role) of
-                        SSend _ (ELocation _ n ks) -> Just $ PortInstDescr n ks
-                        STest _ (EBool _ False)    -> Nothing
-                        _                          -> error $ "mkLink: output port " ++ name role ++ " does not evaluate to a constant"
+                   case portSendsTo (roleBody role) of
+                        []                         -> Nothing
+                        [ELocation _ n ks]         -> Just $ PortInstDescr n ks
+                        es                         -> error $ "mkLink: output port " ++ name role ++ " sends to multiple destinations: " ++ show es
 
 -- Evaluate output port body.  Assume that it can only consist of 
 -- conditions and send statements, i.e., it cannot modify or clone packets.
-evalPortStatement :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> Statement
-evalPortStatement (SSend _ e)    = SSend nopos $ evalExpr e
-evalPortStatement (SITE _ c t e) = case evalExpr c of
-                                        EBool _ True  -> evalPortStatement t
-                                        EBool _ False -> case e of
-                                                              Nothing -> STest nopos (EBool nopos False)
-                                                              Just e' -> evalPortStatement e'
-                                        _             -> error "Topology.evalPortStatement: condition does not evaluate to a constant"
-evalPortStatement (SSeq  _ s1 s2) = case evalPortStatement s1 of
-                                         STest _ (EBool _ True)        -> evalPortStatement s2
-                                         s1'@(STest _ (EBool _ False)) -> s1'
-                                         _                             -> error "Topology.evalPortStatement: statement does not evaluate to a constant"
-evalPortStatement (STest _ cond) = STest nopos $ evalExpr cond
-evalPortStatement s              = error $ "Topology.evalPortStatement " ++ show s
+portSendsTo :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> [Expr]
+portSendsTo = nub . portSendsTo'
 
-               -- | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               -- | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
+portSendsTo' :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> [Expr]
+portSendsTo' (SSend _ e)     = [evalExpr e]
+portSendsTo' (SITE _ c t e)  = case evalExpr c of
+                                   EBool _ True  -> portSendsTo' t
+                                   EBool _ False -> case e of
+                                                         Nothing -> []
+                                                         Just e' -> portSendsTo' e'
+                                   _             -> (portSendsTo' t) ++ (maybe [] portSendsTo' e)
+portSendsTo' (SSeq  _ s1 s2) = case s1 of 
+                                    STest _ c   -> case evalExpr c of 
+                                                        EBool _ False -> []
+                                                        _             -> portSendsTo' s2
+                                    _           -> (portSendsTo' s1) ++ (portSendsTo' s2)
+portSendsTo' (STest _ _)     = []
+portSendsTo' s               = error $ "Topology.portSendsTo' " ++ show s
 
 -- Solve equation e for variable var; returns all satisfying assignments.
 solveFor :: (?r::Refine) => Role -> [Expr] -> String -> [Expr]
