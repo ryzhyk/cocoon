@@ -163,5 +163,4 @@ refine {
     function dst(Packet p): IP4 = p.ip4.dst
     function inode(IP4 addr): bool = addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
 
-    function coreLinkUp(uint<8> hash, uint<8> hash2, uint<8> port): bool = true
 }

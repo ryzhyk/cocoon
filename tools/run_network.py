@@ -185,12 +185,12 @@ def main():
     newts = oldts
     applyConfig(loadedTopology, netdir, netname, oldts)
     oldts = newts
-#    while True:
-#        updateConfig(nkp, loadedTopology)
-#        newts = time.time()
-#        applyConfig(loadedTopology, netdir, netname, oldts)
-#        oldts = newts
-    CLI( net )
+    while True:
+        CLI( net )
+        updateConfig(nkp, loadedTopology)
+        newts = time.time()
+        applyConfig(loadedTopology, netdir, netname, oldts)
+        oldts = newts
 
     net.stop()
 
