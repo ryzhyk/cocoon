@@ -89,21 +89,23 @@ instance PP P4Statement where
                                 $$
                                 (nest' $ vcat $ map (\(a, s) -> (pp a <+> lbrace) $$ (nest' $ pp s) $$ rbrace) as)
                                 $$ 
-                                (rbrace <> semi)
+                                rbrace
     pp (P4SDrop)              = pp "drop" <> semi
 
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
 printExpr :: Expr -> Doc
-printExpr (EVar _ k)        = pp k
-printExpr (EPacket _)       = pp "pkt"
-printExpr (EField _ e f)    = printExpr e <> char '.' <> pp f
-printExpr (EBool _ True)    = pp "true"
-printExpr (EBool _ False)   = pp "false"
-printExpr (EInt _ _ v)      = pp $ show v
-printExpr (EBinOp _ op l r) = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
-printExpr (EUnOp _ op e)    = parens $ printUOp op <+> printExpr e
-printExpr e                 = error $ "P4.printExpr " ++ show e
+printExpr (EVar _ k)                            = pp k
+printExpr (EPacket _)                           = pp "pkt"
+printExpr (EField _ (EPacket _) f)              = pp f
+printExpr (EField _ (EField _ (EPacket _) h) f) = pp h <> char '.' <> pp f
+printExpr (EField _ e f)                        = printExpr e <> char '_' <> pp f
+printExpr (EBool _ True)                        = pp "true"
+printExpr (EBool _ False)                       = pp "false"
+printExpr (EInt _ _ v)                          = pp $ show v
+printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
+printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
+printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 printBOp :: BOp -> Doc
 printBOp Eq    = pp "=="

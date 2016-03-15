@@ -118,7 +118,7 @@ def main():
     cmd = [args.nkp, args.spec, args.cfg]
     print " ".join(cmd)
     nkp = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    while True:
+    while nkp.poll() == None:
         line = nkp.stdout.readline() # This blocks until it receives a newline.
         sys.stdout.write("netkat+: " + line)
         if line == "Network generation complete\n":

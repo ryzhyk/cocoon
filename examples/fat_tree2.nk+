@@ -6,7 +6,11 @@ typedef struct {
 } IP4
 
 typedef struct {
-    IP4 dstip
+    IP4 dst
+} HIP4
+
+typedef struct {
+    HIP4 ip4
 } Packet
 
 function netmask(): uint<8>
@@ -149,7 +153,7 @@ refine {
     function netmask(): uint<8> = 8'd10
     function k(): uint<8> = 8'd2
 
-    function dst(Packet p): IP4 = p.dstip
+    function dst(Packet p): IP4 = p.ip4.dst
     function inode(IP4 addr): bool = addr.ip3 == netmask() and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
 
     function coreLinkUp(uint<8> hash, uint<8> hash2, uint<8> port): bool = true

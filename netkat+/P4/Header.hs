@@ -26,14 +26,14 @@ p4HeaderDecls = [str|
 |        ttl : 8;
 |        protocol : 8;
 |        hdrChecksum : 16;
-|        srcip3 : 8;
-|        srcip2 : 8;
-|        srcip1 : 8;
-|        srcip0 : 8;
-|        dstip3 : 8;
-|        dstip2 : 8;
-|        dstip1 : 8;
-|        dstip0 : 8;
+|        src_ip3 : 8;
+|        src_ip2 : 8;
+|        src_ip1 : 8;
+|        src_ip0 : 8;
+|        dst_ip3 : 8;
+|        dst_ip2 : 8;
+|        dst_ip1 : 8;
+|        dst_ip0 : 8;
 |    }
 |}
 |
@@ -53,10 +53,10 @@ p4HeaderDecls = [str|
 |    }
 |}
 |
-|header ipv4_t pkt;
+|header ipv4_t ip4;
 |
 |parser parse_ipv4 {
-|    extract(pkt);
+|    extract(ip4);
 |    return ingress;
 |}
 |action yes(){}
