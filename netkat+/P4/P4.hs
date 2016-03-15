@@ -345,10 +345,10 @@ populateTable :: Refine -> P4DynAction -> [Doc]
 populateTable r P4DynAction{..} = 
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
-                                                 EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk (nentries - i)
-                                                 EBool _ False -> mkTableEntry p4dynTable "no"  [] msk (nentries - i)
+                                                 EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
+                                                 EBool _ False -> mkTableEntry p4dynTable "no"  [] msk i
                                                  _             -> error $ "Non-constant boolean value " ++ show val) es
-         Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk (nentries - i)) es
+         Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk i) es
     where es = let ?r = r
                    ?role = p4dynRole
                    ?kmap = p4dynKMap in
@@ -356,7 +356,6 @@ populateTable r P4DynAction{..} =
                $ flattenConds 
                $ liftConds 
                $ evalExpr p4dynExpr
-          nentries = length es
 
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
