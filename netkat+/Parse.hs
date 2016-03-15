@@ -15,7 +15,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["!", "|", "==", "=", ":=", "%", "+"]
+reservedOpNames = ["!", "|", "==", "=", ":=", "%", "+", "-"]
 reservedNames = ["and",
                  "assume",
                  "bool",
@@ -225,7 +225,8 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
 etable = [[postf $ choice [postField]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
-         ,[binary "+" Plus AssocLeft]
+         ,[binary "+" Plus AssocLeft,
+           binary "-" Minus AssocLeft]
          ,[binary "==" Eq  AssocLeft,          
            binary "<"  Lt  AssocNone, 
            binary "<=" Lte AssocNone, 

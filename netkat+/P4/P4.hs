@@ -72,8 +72,8 @@ isITE _              = False
 type PMap = M.Map String (Int,Int)
 
 egressSpec, ingressPort :: Expr
-egressSpec  = EField nopos (EVar nopos "standard_metadata") "egress_spec"
-ingressPort = EField nopos (EVar nopos "standard_metadata") "ingress_port"
+egressSpec  = EField nopos (EField nopos (EPacket nopos) "standard_metadata") "egress_spec"
+ingressPort = EField nopos (EField nopos (EPacket nopos) "standard_metadata") "ingress_port"
 
 instance PP P4Statement where
     pp (P4SSeq s1 s2)         = pp s1 $$ pp s2

@@ -79,7 +79,7 @@ def updateConfig(nkp, loadedTopology):
     nkp.stdin.write("update\n")
 
     # read output until magic line appears
-    while True:
+    while nkp.poll() == None:
         line = nkp.stdout.readline()
         sys.stdout.write("netkat+: " + line)
         if line == "Network configuration complete\n":
