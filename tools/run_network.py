@@ -64,9 +64,10 @@ class MyTopo(Topo):
         for sw in topology['switches']:
             hostname = sw['opts']['hostname']
             switch = self.addSwitch(hostname,
-                                    sw_path     = sw_path,
+                                    sw_path     = " ".join([sw_path, "-L", "trace", "--log-file", os.path.join("/tmp", netname) + '.' + hostname + '.' + 'log']),
                                     json_path   = os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
                                     thrift_port = _THRIFT_BASE_PORT + sw['opts']['nodeNum'],
+                                    log_file    = os.path.join("/tmp", netname) + '.' + hostname + '.' + 'log',
                                     pcap_dump   = True,
                                     device_id   = sw['opts']['nodeNum'])
 
@@ -102,7 +103,7 @@ def applyConfig(loadedTopology, netdir, netname, oldts):
                 print " ".join(cmd)
                 try:
                     p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                    output = p.communicate("reset_state")
+                    output, err = p.communicate("reset_state")
                     print output
                     output = subprocess.check_output(cmd, stdin = f)
                     print output
@@ -123,7 +124,7 @@ def main():
     while nkp.poll() == None:
         line = nkp.stdout.readline() # This blocks until it receives a newline.
         sys.stdout.write("netkat+: " + line)
-        if line == "Network generation complete\n":
+        if line == "Network configuration complete\n":
             break
 
     if nkp.poll() != None:

@@ -94,10 +94,12 @@ refreshTables workdir basename instmap base prev switches cfname = do
            -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
            -- end of the compilation phase
            putStrLn "Network configuration complete"
+           hFlush stdout
            return $ Just combined
         `catchIOError` 
            \e -> do putStrLn ("Exception: " ++ show e)
                     putStrLn ("Regenerating the entire configuration next time")
+                    hFlush stdout
                     return Nothing
     let wait = do inp <- getLine
                   when (inp /= "update") wait
