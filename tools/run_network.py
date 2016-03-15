@@ -47,6 +47,8 @@ parser.add_argument('--cli', help='Path to BM CLI',
                     type=str, action="store", required=True)
 parser.add_argument('--nkp', help='Path to NetKAT+ compiler',
                     type=str, action="store", required=True)
+parser.add_argument('--miniedit', help='Path to the MiniEdit tool',
+                    type=str, action="store", required=False)
 parser.add_argument('--p4c', help='Path to P4C-to-json compiler',
                     type=str, action="store", required=True)
 
@@ -127,10 +129,15 @@ def main():
     if nkp.poll() != None:
         raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
 
+
     specdir, specfname = os.path.split(args.spec)
     netname, specext = os.path.splitext(specfname)
     netdir = os.path.join(specdir, netname)
     mnfname = os.path.join(netdir, netname+".mn")
+
+    if args.miniedit != None:
+        cmd = [args.miniedit, "-f", mnfname]
+    subprocess.Popen(cmd)
 
     print "Loading network topology from " + mnfname 
     mnfile = open(mnfname, "r")

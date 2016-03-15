@@ -1418,7 +1418,6 @@ class MiniEdit( Frame ):
 
     def loadTopology( self ):
         "Load command."
-        c = self.canvas
 
         myFormats = [
             ('Mininet Topology','*.mn'),
@@ -1427,6 +1426,10 @@ class MiniEdit( Frame ):
         f = tkFileDialog.askopenfile(filetypes=myFormats, mode='rb')
         if f == None:
             return
+        self.doLoadTopology(f)
+
+    def doLoadTopology ( self, f ):
+        c = self.canvas
         self.newTopology()
         loadedTopology = self.convertJsonUnicode(json.load(f))
 
@@ -3182,10 +3185,12 @@ class MiniEdit( Frame ):
 
         addDictOption( opts, TOPOS, TOPODEF, 'topo' )
         addDictOption( opts, LINKS, LINKDEF, 'link' )
-
         opts.add_option( '--custom', type='string', default=None,
                          help='read custom topo and node params from .py' +
                          'file' )
+
+        opts.add_option("-f", "--file", action="store", type="string", dest="filename",
+                       help="load topology from FILE")
 
         self.options, self.args = opts.parse_args()
         # We don't accept extra arguments after the options
@@ -3580,5 +3585,9 @@ if __name__ == '__main__':
     ### import topology if specified ###
     app.parseArgs()
     app.importTopo()
+   
+    if app.options.filename != None:
+        f = open(app.options.filename, 'r')
+        app.doLoadTopology(f)
 
     app.mainloop()

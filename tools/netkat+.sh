@@ -18,4 +18,5 @@ sudo PYTHONPATH=$PYTHONPATH:$BMV2_PATH/mininet/ python $THIS_DIR/run_network.py 
     --spec $1 \
     --cfg $2 \
     --cli $CLI_PATH \
-    --p4c $P4C_BM_SCRIPT
+    --p4c $P4C_BM_SCRIPT \
+    --miniedit $MINIEDIT_PATH

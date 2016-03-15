@@ -20,6 +20,7 @@ function dst(Packet p): IP4
 
 function inode(IP4 addr): bool
 
+(* Because P4 does not support %.  Assumes v < 2*m *)
 function mod(uint<8> v, uint<8> m): uint<8> = 
     case {
         v < m:   v;
