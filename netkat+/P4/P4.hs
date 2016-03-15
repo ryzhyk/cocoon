@@ -347,7 +347,7 @@ populateTable r P4DynAction{..} =
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk (nentries - i)
                                                  EBool _ False -> mkTableEntry p4dynTable "no"  [] msk (nentries - i)
-                                                 _             -> error $ "Non-constant boolean value " ++ show val ++ "") es
+                                                 _             -> error $ "Non-constant boolean value " ++ show val) es
          Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk (nentries - i)) es
     where es = let ?r = r
                    ?role = p4dynRole
@@ -360,12 +360,15 @@ populateTable r P4DynAction{..} =
 
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
-flattenConds :: Expr -> [(Expr, Expr)]
+flattenConds :: (?r::Refine, ?role::Role) => Expr -> [(Expr, Expr)]
 flattenConds = flattenConds' []
 
-flattenConds' :: [Expr] -> Expr -> [(Expr, Expr)]
+flattenConds' :: (?r::Refine, ?role::Role) => [Expr] -> Expr -> [(Expr, Expr)]
 flattenConds' es (ECond _ cs d) = (concatMap (\(c,e) -> flattenConds' (es ++ [c]) e) cs) ++ (flattenConds' es d)
-flattenConds' es e              = [(conj es, e)]
+flattenConds' es e              = case typ' ?r (CtxRole ?role) e of 
+                                       TBool _ -> [ (conj $ es++[e], EBool nopos True)
+                                                  , (conj es       , EBool nopos False)]
+                                       _       -> [(conj es, e)]
 
 --mkDefaultEntry :: String -> String -> [Doc] -> Doc
 --mkDefaultEntry table action args = 
@@ -380,7 +383,7 @@ mkTableEntry table action args mask priority =
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
 exprToMasks :: (?r::Refine, ?role::Role) => Expr -> [Doc]
-exprToMasks e = map disjunctToMask $ trace ("exprToDNF " ++ show e) $ exprToDNF e
+exprToMasks e = map disjunctToMask $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?role::Role) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
