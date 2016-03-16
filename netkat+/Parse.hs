@@ -146,7 +146,10 @@ node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost
                             <*> identifier 
                             <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
-arg = withPos $ (flip $ Field nopos) <$> typeSpecSimple <*> identifier
+arg = withPos $ mkField <$> typeSpecSimple <*> optionMaybe (reservedOp "?") <*> identifier
+
+mkField :: Type -> Maybe () -> String -> Field
+mkField tspec opt name = Field nopos name tspec (isJust opt)
 
 typeSpec = withPos $ 
             uintType 

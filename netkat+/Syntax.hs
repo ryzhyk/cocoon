@@ -28,6 +28,7 @@ import Pos
 import Name
 import Ops
 import PP
+import Util
 
 pktVar = "pkt"
 
@@ -46,11 +47,6 @@ instance WithPos Refine where
     pos = refinePos
     atPos r p = r{refinePos = p}
 
-data Field = Field { fieldPos  :: Pos 
-                   , fieldName :: String 
-                   , fieldType :: Type
-                   }
-
 errR :: (MonadError String me) => Refine -> Pos -> String -> me a
 errR r p e = throwError $ spos p ++ ": " ++ e ++ " (when processing refinement at " ++ (spos $ pos r) ++ ")"
 
@@ -60,8 +56,14 @@ assertR r b p m =
        then return ()
        else errR r p m
 
+data Field = Field { fieldPos  :: Pos 
+                   , fieldName :: String 
+                   , fieldType :: Type
+                   , fieldOpt  :: Bool
+                   }
+
 instance Eq Field where
-    (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2
+    (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2 && fieldOpt f1 == fieldOpt f2
 
 instance WithPos Field where
     pos = fieldPos
@@ -71,7 +73,7 @@ instance WithName Field where
     name = fieldName
 
 instance PP Field where
-    pp (Field _ n t) = pp t <+> pp n
+    pp (Field _ n t o) = pp t <+> (if' o empty (char '?')) <> pp n
 
 instance Show Field where
     show = render . pp
