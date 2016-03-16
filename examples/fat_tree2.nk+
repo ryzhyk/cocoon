@@ -32,7 +32,25 @@ role NodeOut[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 =
     if inode(dst(pkt)) then
         send NodeIn[dst(pkt), 8'd0]
 
+refine {
+    function ilowerPort(uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = 
+        subnet < k() + k() and subsubnet < k() and port < k()
+
+    role PodLowerIn[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
+        if inode(dst(pkt)) then
+            send PodLowerOut[dst(pkt).ip2, dst(pkt).ip1, dst(pkt).ip0]
+
+    role PodLowerOut[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
+        if inode(IP4{netmask(), subnet, subsubnet, port}) then
+            send NodeIn[IP4{netmask(), subnet, subsubnet, port}, 8'd0]
+}
+
 refine NodeOut {
+    role NodeOut[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 = 
+        send PodLowerIn[addr.ip2, addr.ip1, addr.ip0]
+}
+
+refine PodLowerIn {
 
     function icorePort(uint<8> hash, uint<8> hash2, uint<8> port): bool = 
         hash < k() and hash2 < k() and port < k() + k()
@@ -59,15 +77,11 @@ refine NodeOut {
         else
             send PodUpperOut[subnet, hash, mod(port+8'd1, k())]
 
-    function ilowerPort(uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = 
-        subnet < k() + k() and subsubnet < k() and port < k()
-
     typedef struct {
         uint<8> hash,
         uint<8> hash2
     } CorePort
 
-    (* TODO: define chooseCorePort at the next refinement *)
     function chooseCorePort(uint<8> subnet, Packet p): CorePort
 
     assume(uint<8> subnet, Packet p) 
@@ -79,13 +93,6 @@ refine NodeOut {
         } else {
             send PodUpperOut[subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
         }
-
-    role PodLowerOut[uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(subnet, subsubnet, port) = 
-        if inode(IP4{netmask(), subnet, subsubnet, port}) then
-            send NodeIn[IP4{netmask(), subnet, subsubnet, port}, 8'd0]
-
-    role NodeOut[IP4 addr, uint<8> port] | inode(addr) and port == 8'd0 = 
-        send PodLowerIn[addr.ip2, addr.ip1, addr.ip0]
 }
 
 refine PodLowerIn, PodUpperIn {
