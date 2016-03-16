@@ -6,27 +6,35 @@ typedef struct {
 } IP4
 
 typedef struct {
-    IP4 dst
-} HIP4
+    uint<8> ip3,
+    uint<8> ip2,
+    uint<8> ip1,
+    uint<8> ip0
+} IP4
 
 typedef struct {
-    HIP4 ip4
+    uint<16> tag
+} VLANTag
+
+typedef struct {
+    HIP4     ip4,
+    VLANTag  ?vlan
 } Packet
 
 (* true: host with the given IP exists *)
-function ihost(IP4): bool
+function ihost(IP4 addr): bool
 function dst(Packet p): IP4
 
 role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
     if ihost(dst(pkt)) then
-        send HostIn[dst(pkt)]
+        send HostIn[dst(pkt), 8'd0]
 
-role HostIn[IP4 addr, uint<8> port] | ihost(addr) and port = 8'd0 = 
+role HostIn[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
     filter false
 
 refine HostOut {
     function nports(): uint<8> = 8'd16
-    typedef uint<8> SiteId;
+    typedef uint<8> SiteId
     typedef struct {
         SiteId site,
         uint<8> port
@@ -36,14 +44,14 @@ refine HostOut {
     function isite(SiteId site): bool
 
     (* WAN port is connected *)
-    function wpConnected(SiteID site, uint<8> port): bool
+    function wpConnected(SiteId site, uint<8> port): bool
 
-    function iwanPort(SiteID site, uint<8> port): bool = isite(site) and port <= nports()
+    function iwanPort(SiteId site, uint<8> port): bool = isite(site) and port < nports()
  
     (* Port on the other end of WAN link *)
-    function wanLink(SiteID site, uint<8> port): WANPort
+    function wanLink(SiteId site, uint<8> port): WANPort
 
-    assume(SiteID site, uint<8> port) (not (iwanPort(site, port) and wpConnected(site,port))) || iwanPort(wanLink(site,port).site, wanLink(site,port).port)
+    assume(SiteId site, uint<8> port) (not (iwanPort(site, port) and wpConnected(site,port))) or iwanPort(wanLink(site,port).site, wanLink(site,port).port)
 
     (* maps host to site it belongs to, e.g., based on subnet *)   
     function hostSite(IP4 addr): SiteId
@@ -52,38 +60,39 @@ refine HostOut {
 
     function tunnel(SiteId src, SiteId dst, Packet p): TunnelId
 
-    function nexthop(TunnelID tun, SiteId site): uint<8>
+    function nexthop(TunnelId tun, SiteId site): uint<8>
     assume(SiteId src, SiteId dst, Packet p, TunnelId tid, SiteId next)
-           (not (tid == tunnel(src, dst, p) && next == wanLink(src, nexthop(tid, src)).site)) or 
-           (wpConnected(src,nexthop(tid,src)) and (next == dst || wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
+           (not (tid == tunnel(src, dst, p) and next == wanLink(src, nexthop(tid, src)).site)) or 
+           (wpConnected(src,nexthop(tid,src)) and (next == dst or wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
 
     assume(uint<8> addr) (not ihost(addr)) or isite(hostSite(addr))
 
     role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
         if hostSite(dst(pkt)) == hostSite(addr) then {
-            if ihost(dst(pkt))
+            if ihost(dst(pkt)) then
                 send HostIn[dst(pkt), 8'd0]
         } else 
             send WANSwitchLIn[hostSite(addr), 8'd0]
     
     role WANSwitchLIn[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
-        pkt.ip4.tag := tunnel(site, hostSite(dst(pkt)), pkt);
+        add_header(pkt.vlan);
+        pkt.vlan.tag := tunnel(site, hostSite(dst(pkt)), pkt);
         send WANSwitchGOut[site, nexthop(tunnel(site, hostSite(dst(pkt)), pkt), site)]
 
     role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
         if ihost(dst(pkt)) and hostSite(dst(pkt)) == site then
             send HostIn[dst(pkt), 8'd0]
 
-    role WANSwitchGOut[SiteID site, uint<8> port] | iwanPort(site, port) = 
+    role WANSwitchGOut[SiteId site, uint<8> port] | iwanPort(site, port) = 
         if (wpConnected(site,port)) then
             send WANSwitchGIn[wanLink(site,port).site, wanLink(site,port).port]
 
-    role WANSwitchGIn[SiteID site, uint<8> port] | iwanPort(site, port) =
+    role WANSwitchGIn[SiteId site, uint<8> port] | iwanPort(site, port) =
         if (hostSite(dst(pkt)) == site) then {
-            if ihost(dst(pkt))
+            if ihost(dst(pkt)) then
                 send WANSwitchLOut[site,0]
         } else {
-            send WANSwitchGOut[site, nexthop(pkt.ip4.tag,site)]
+            send WANSwitchGOut[site, nexthop(pkt.vlan.tag,site)]
         }
 }
 
@@ -96,7 +105,7 @@ refine HostOut, WANSwitchLOut {
     function ldst(SiteId site, Packet p): IP4 = 
         case {
             hostSite(dst(p)).ip3 == site: dst(p);
-            default: wanSwAddr(site)
+            default: wanSwAddr(site);
         }
 
     function ilowerPort(SideId site, uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = 
@@ -106,7 +115,7 @@ refine HostOut, WANSwitchLOut {
         send PodLowerOut[site, ldst(site, pkt).ip2, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
 
     role PodLowerOut[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
-        if IP4{site, subnet, subsubnet, port} == wanSwAddr(site) {
+        if IP4{site, subnet, subsubnet, port} == wanSwAddr(site) then {
             send WANSwitchLIn[site, 8'd0]
         } else if ihost(IP4{site, subnet, subsubnet, port}) then {
             send NodeIn[IP4{site, subnet, subsubnet, port}, 8'd0]
@@ -239,5 +248,5 @@ refine {
     function k(): uint<8> = 8'd2
 
     function dst(Packet p): IP4 = p.ip4.dst
-    function inode(IP4 addr): bool = isite(hostSite(addr)) and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
+    function ihost(IP4 addr): bool = isite(hostSite(addr)) and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
 }
