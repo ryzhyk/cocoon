@@ -108,8 +108,10 @@ mkLink role kmap = let ?kmap = kmap in
                    let ?role = role in
                    case portSendsTo (roleBody role) of
                         []                         -> Nothing
-                        [ELocation _ n ks]         -> Just $ PortInstDescr n ks
-                        es                         -> error $ "mkLink: output port " ++ name role ++ " sends to multiple destinations: " ++ show es
+                        [ELocation _ n ks]         -> if all (\k -> (null $ exprFuncs ?r k) && (not $ exprRefersToPkt k)) ks
+                                                         then Just $ PortInstDescr n ks
+                                                         else error $ "mkLink: output port " ++ name role ++ " cannot be statically evaluated"
+                        es                         -> error $ "mkLink: output port " ++ name role ++ " " ++ show kmap ++ " sends to multiple destinations: " ++ show es
 
 -- Evaluate output port body.  Assume that it can only consist of 
 -- conditions and send statements, i.e., it cannot modify or clone packets.

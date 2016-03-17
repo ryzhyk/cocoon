@@ -63,6 +63,7 @@ data P4Statement = P4SSeq   P4Statement P4Statement
                  | P4SITE   Expr P4Statement (Maybe P4Statement)
                  | P4SApply String (Maybe [(String, P4Statement)])
                  | P4SDrop
+                 | P4SNop
 
 isITE :: P4Statement -> Bool
 isITE (P4SITE _ _ _) = True
@@ -91,6 +92,7 @@ instance PP P4Statement where
                                 $$ 
                                 rbrace
     pp (P4SDrop)              = pp "drop" <> semi
+    pp (P4SNop)               = pp "{}"
 
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
@@ -201,28 +203,23 @@ mkStatement (SPar  _ _ _)   = error "Not implemented: P4.mkStatement: SPar"
 
 mkStatement (SITE  _ c t e) = do
     let c' = liftConds $ evalExpr c
-    case c' of
-         EBool _ True  -> mkStatement t
-         EBool _ False -> maybe (return P4SDrop) mkStatement e
-         _             -> do t' <- mkStatement t
-                             e' <- maybe (return Nothing) (liftM Just . mkStatement) e 
-                             if exprNeedsTable c'
-                                then do tableid <- incTableCnt
-                                        let tablename = "cond" ++ show tableid
-                                        mkCondTable tablename c'
-                                        return $ P4SApply tablename $ Just $ ("yes", t'):(maybe [] (return . ("no",)) e')
-                                else return $ P4SITE c' t' e'
+    if exprNeedsTable c'
+       then do t' <- mkStatement t
+               e' <- maybe (return Nothing) (liftM Just . mkStatement) e
+               tableid <- incTableCnt
+               let tablename = "cond" ++ show tableid
+               mkCondTable tablename c'
+               return $ P4SApply tablename $ Just $ ("yes", t'):(maybe [] (return . ("no",)) e')
+       else iteFromCascade (Right t) (fmap Right e) c'
 
 mkStatement (STest _ e)     = do
-    let e' = liftConds $ evalExpr e
-    case e' of
-         EBool _ False -> return P4SDrop
-         _             -> if exprNeedsTable e'
-                             then do tableid <- incTableCnt
-                                     let tablename = "test" ++ show tableid
-                                     mkCondTable tablename e'
-                                     return $ P4SApply tablename $ Just [("miss", P4SDrop)]
-                             else return $ P4SITE (EUnOp nopos Not e') P4SDrop Nothing
+    let e' = liftConds $ evalExpr $ EUnOp nopos Not e
+    if exprNeedsTable e'
+       then do tableid <- incTableCnt
+               let tablename = "test" ++ show tableid
+               mkCondTable tablename e'
+               return $ P4SApply tablename $ Just [("hit", P4SDrop)]
+       else iteFromCascade (Left P4SDrop) Nothing e'
 
 -- Make sure that assignment statements do not contain case-expressions in the RHS.
 mkStatement (SSet  _ lhs rhs) = do
@@ -252,6 +249,25 @@ mkStatement (SSend _ dst) = do
                            let tablename = "send" ++ show tableid
                            mkAssignTable tablename egressSpec portnum
                            return $ P4SApply tablename Nothing
+
+iteFromCascade :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
+iteFromCascade t e (ECond _ [] d)                 = iteFromCascade t e d
+iteFromCascade t e (ECond _ ((c,v):cs) d)         = do t' <- iteFromCascade t e v
+                                                       e' <- iteFromCascade t e (ECond nopos cs d)
+                                                       return $ P4SITE c t' $ Just e'
+iteFromCascade (Left t) _ (EBool _ True)          = return t
+iteFromCascade (Right t) _ (EBool _ True)         = mkStatement t
+iteFromCascade _ Nothing (EBool _ False)          = return P4SNop
+iteFromCascade _ (Just (Left e)) (EBool _ False)  = return e
+iteFromCascade _ (Just (Right e)) (EBool _ False) = mkStatement e
+iteFromCascade t e v                              = do t' <- case t of
+                                                                  Left s  -> return s
+                                                                  Right s -> mkStatement s
+                                                       e' <- case e of 
+                                                                  Nothing        -> return Nothing
+                                                                  Just (Left s)  -> return $ Just s
+                                                                  Just (Right s) -> liftM Just $ mkStatement s
+                                                       return $ P4SITE v t' e'
 
 -- convert expression into a cascade of ECond's, such
 -- that their leaf expressions do not contain any EConds

@@ -82,6 +82,9 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                Minus -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
                                                Mod   -> EInt  nopos w1 (v1 `mod` v2)
                                                _     -> error $ "Eval.evalExpr " ++ show e
+            (EStruct _ _ fs1, EStruct _ _ fs2) -> case op of 
+                                                       Eq -> evalExpr $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
+                                                       _  -> error $ "Eval.evalExpr " ++ show e
             _                          -> EBinOp nopos op lhs' rhs'
 evalExpr (EUnOp _ op e)                = 
     let e' = evalExpr e
