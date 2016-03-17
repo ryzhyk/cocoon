@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 
-module Type( typ', typ''
+module Type( WithType(..) 
+           , typ', otyp', typ'', otyp''
            , isBool, isUInt, isLocation
            , matchType) where
 
@@ -26,8 +27,9 @@ instance WithType Expr where
     typ _ ctx  (EVar _ v)         = fieldType $ getVar ctx v
     typ r _    (EPacket _)        = tdefType $ getType r packetTypeName
     typ r _    (EApply _ f _)     = funcType $ getFunc r f
-    typ r ctx  (EField _ e f)     = let TStruct _ fs = typ' r ctx e
-                                     in fieldType $ fromJust $ find ((== f) . name) fs
+    typ _ _    (EField _ _ f) | f == "valid"  = TBool nopos
+    typ r ctx  (EField _ e f)     = let TStruct _ fs = otyp' r ctx e  in
+                                    fieldType $ fromJust $ find ((== f) . name) fs
     typ _ _    (ELocation _ _ _)  = TLocation nopos
     typ _ _    (EBool _ _)        = TBool nopos
     typ _ _    (EInt _ w _)       = TUInt nopos w
@@ -44,37 +46,55 @@ instance WithType Expr where
                                          Plus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          Minus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          Mod   -> t1
-        where t1 = typ' r ctx e1
-              t2 = typ' r ctx e2
+        where t1 = otyp' r ctx e1
+              t2 = otyp' r ctx e2
     typ _ _   (EUnOp _ Not _)     = TBool nopos
     typ r ctx (ECond _ _ d)       = typ r ctx d
 
 -- Unwrap typedef's down to actual type definition
 typ' :: (WithType a) => Refine -> ECtx -> a -> Type
 typ' r ctx x = case typ r ctx x of
-                   TUser _ n -> typ' r ctx $ tdefType $ getType r n
-                   t         -> t
+                    TOption _ t -> TOption nopos $ typ' r ctx t
+                    TUser _ n   -> typ' r ctx $ tdefType $ getType r n
+                    t           -> t
+
+-- Similar to typ', but unwraps TOptions as well
+otyp' :: (WithType a) => Refine -> ECtx -> a -> Type
+otyp' r ctx x = case typ r ctx x of
+                    TOption _ t -> otyp' r ctx t
+                    TUser _ n   -> otyp' r ctx $ tdefType $ getType r n
+                    t           -> t
 
 -- Similar to typ', but does not unwrap the last typedef if it is a struct
 typ'' :: (WithType a) => Refine -> ECtx -> a -> Type
 typ'' r ctx x = case typ r ctx x of
+                    TOption _ t    -> TOption nopos $ typ'' r ctx t
                     t'@(TUser _ n) -> case tdefType $ getType r n of
                                            TStruct _ _ -> t'
                                            t           -> typ'' r ctx t
                     t         -> t
 
+-- Similar to typ'', but unwraps TOptions as well
+otyp'' :: (WithType a) => Refine -> ECtx -> a -> Type
+otyp'' r ctx x = case typ r ctx x of
+                      TOption _ t    -> otyp'' r ctx t
+                      t'@(TUser _ n) -> case tdefType $ getType r n of
+                                             TStruct _ _ -> t'
+                                             t           -> otyp'' r ctx t
+                      t         -> t
+
 isBool :: (WithType a) => Refine -> ECtx -> a -> Bool
-isBool r ctx a = case typ' r ctx a of
+isBool r ctx a = case otyp' r ctx a of
                      TBool _ -> True
                      _       -> False
 
 isUInt :: (WithType a) => Refine -> ECtx -> a -> Bool
-isUInt r ctx a = case typ' r ctx a of
+isUInt r ctx a = case otyp' r ctx a of
                        TUInt _ _ -> True
                        _         -> False
 
 isLocation :: (WithType a) => Refine -> ECtx -> a -> Bool
-isLocation r ctx a = case typ' r ctx a of
+isLocation r ctx a = case otyp' r ctx a of
                            TLocation _ -> True
                            _           -> False
 
@@ -87,6 +107,7 @@ matchType' r ctx x y =
          (TLocation _, TLocation _)     -> True
          (TBool _, TBool _)             -> True
          (TUInt _ w1, TUInt _ w2)       -> w1==w2
+         (TOption _ o1, TOption _ o2)   -> matchType' r ctx o1 o2
          (TStruct _ fs1, TStruct _ fs2) -> (length fs1 == length fs2) &&
                                            (all (uncurry $ matchType' r ctx) $ zip fs1 fs2)
          _                              -> False

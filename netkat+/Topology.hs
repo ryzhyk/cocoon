@@ -67,7 +67,7 @@ nodeFromPort r (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
 portFromNode :: Refine -> InstanceDescr -> String -> Int -> PortInstDescr
 portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt nopos w $ fromIntegral pnum])
     where prole = getRole r pname
-          TUInt _ w = typ' r (CtxRole prole) $ last $ roleKeys prole
+          TUInt _ w = otyp' r (CtxRole prole) $ last $ roleKeys prole
 
 generateTopology :: Refine -> Topology
 generateTopology r = let ?r = r in 
@@ -140,10 +140,10 @@ solveFor role es var = map exprFromSMT $ SMT.allSolutions solver (exprs2SMTQuery
 exprs2SMTQuery :: (?r::Refine) => Role -> [Expr] -> SMT.SMTQuery
 exprs2SMTQuery role es = let ?role = role in
                          let es' = map expr2SMT es
-                             smtvs = (SMT.Var pktVar (typ2SMT $ typ'' ?r (CtxRole role) $ TUser nopos packetTypeName)) : 
-                                     (map (\k -> SMT.Var (name k) (typ2SMT $ typ'' ?r (CtxRole role) k)) $ roleKeys role)
+                             smtvs = (SMT.Var pktVar (typ2SMT (CtxRole role) $ TUser nopos packetTypeName)) : 
+                                     (map (\k -> SMT.Var (name k) (typ2SMT (CtxRole role) k)) $ roleKeys role)
                              structs = mapMaybe (\d -> case tdefType d of
-                                                            TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT $ typ'' ?r (CtxRole ?role) f)) fs
+                                                            TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT (CtxRole ?role) f)) fs
                                                             _            -> Nothing) 
                                                 $ refineTypes ?r
                              smtfuncs = map (func2SMT . getFunc ?r) $ sortBy compareFuncs $ nub $ concatMap (exprFuncsRec ?r) es
@@ -162,16 +162,17 @@ compareFuncs n1 n2 = if elem n1 f2dep
 
 func2SMT :: (?r::Refine) => Function -> SMT.Function
 func2SMT f@Function{..} = SMT.Function funcName 
-                                       (map (\a -> (name a, typ2SMT $ typ'' ?r (CtxFunc f) a)) funcArgs) 
-                                       (typ2SMT $ typ'' ?r (CtxFunc f) funcType)
+                                       (map (\a -> (name a, typ2SMT (CtxFunc f) a)) funcArgs) 
+                                       (typ2SMT (CtxFunc f) funcType)
                                        (expr2SMT $ fromJust funcDef)
 
-typ2SMT :: (?r::Refine) => Type -> SMT.Type
-typ2SMT (TBool _)     = SMT.TBool
-typ2SMT (TUInt _ w)   = SMT.TUInt w
-typ2SMT (TUser _ n)   = SMT.TStruct n
-typ2SMT (TLocation _) = SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
-typ2SMT t             = error $ "Topology.typ2SMT " ++ show t
+typ2SMT :: (?r::Refine, WithType a) => ECtx -> a -> SMT.Type
+typ2SMT ctx x = case otyp'' ?r ctx x of
+                     TBool _     -> SMT.TBool
+                     TUInt _ w   -> SMT.TUInt w
+                     TUser _ n   -> SMT.TStruct n
+                     TLocation _ -> SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+                     t           -> error $ "Topology.typ2SMT " ++ show t
 
 expr2SMT :: (?r::Refine) => Expr -> SMT.Expr
 expr2SMT (EVar _ k)          = SMT.EVar k

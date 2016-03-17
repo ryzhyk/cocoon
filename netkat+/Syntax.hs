@@ -28,7 +28,6 @@ import Pos
 import Name
 import Ops
 import PP
-import Util
 
 pktVar = "pkt"
 
@@ -59,11 +58,10 @@ assertR r b p m =
 data Field = Field { fieldPos  :: Pos 
                    , fieldName :: String 
                    , fieldType :: Type
-                   , fieldOpt  :: Bool
                    }
 
 instance Eq Field where
-    (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2 && fieldOpt f1 == fieldOpt f2
+    (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2
 
 instance WithPos Field where
     pos = fieldPos
@@ -73,7 +71,7 @@ instance WithName Field where
     name = fieldName
 
 instance PP Field where
-    pp (Field _ n t o) = pp t <+> (if' o empty (char '?')) <> pp n
+    pp (Field _ n t) = pp t <+> pp n
 
 instance Show Field where
     show = render . pp
@@ -145,6 +143,7 @@ data Type = TLocation {typePos :: Pos}
           | TUInt     {typePos :: Pos, typeWidth :: Int}
           | TStruct   {typePos :: Pos, typeFields :: [Field]}
           | TUser     {typePos :: Pos, typeName :: String}
+          | TOption   {typePos :: Pos, typeType :: Type}
 
 instance Eq Type where
     (==) (TLocation _)   (TLocation _)   = True
@@ -152,6 +151,7 @@ instance Eq Type where
     (==) (TUInt _ w1)    (TUInt _ w2)    = w1 == w2
     (==) (TStruct _ fs1) (TStruct _ fs2) = fs1 == fs2
     (==) (TUser _ n1)    (TUser _ n2)    = n1 == n2
+    (==) (TOption _ t1)  (TOption _ t2)  = t1 == t2
     (==) _               _               = False
 
 instance WithPos Type where
@@ -164,6 +164,7 @@ instance PP Type where
     pp (TUInt _ w)    = pp "uint<" <> pp w <> pp ">" 
     pp (TStruct _ fs) = pp "struct" <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (TUser _ n)    = pp n
+    pp (TOption _ t)  = pp "?" <> pp t
 
 instance Show Type where
     show = render . pp

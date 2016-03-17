@@ -146,25 +146,25 @@ node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost
                             <*> identifier 
                             <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
-arg = withPos $ mkField <$> typeSpecSimple <*> optionMaybe (reservedOp "?") <*> identifier
-
-mkField :: Type -> Maybe () -> String -> Field
-mkField tspec opt name = Field nopos name tspec (isJust opt)
+arg = withPos $ flip (Field nopos) <$> typeSpecSimple <*> identifier
 
 typeSpec = withPos $ 
             uintType 
         <|> boolType 
         <|> userType 
         <|> structType 
+        <|> optType
         
 typeSpecSimple = withPos $ 
                   uintType 
               <|> boolType 
               <|> userType 
+              <|> optType
 
 uintType   = TUInt   nopos <$ reserved "uint" <*> (fromIntegral <$> angles decimal)
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
+optType    = TOption nopos <$ reservedOp "?" <*> typeSpecSimple
 structType = TStruct nopos <$  reserved "struct" <*> (braces $ commaSep1 arg)
 
 

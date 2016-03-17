@@ -104,6 +104,7 @@ typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
 typeValidate r (TStruct _ fs) = do uniqNames (\f -> "Multiple definitions of field " ++ f) fs
                                    mapM_ (typeValidate r . fieldType) fs
+                                   mapM_ (\f -> assertR r (name f /= "valid") (pos f) "field declaration with reserved name \"valid\" not allowed") fs
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
@@ -199,9 +200,13 @@ exprValidate r ctx (EApply p f as) = do
           $ zip (funcArgs func) as
 exprValidate r ctx (EField p s f) = do
     exprValidate r ctx s
-    case typ' r ctx s of
-         TStruct _ fs -> assertR r (isJust $ find ((==f) . fieldName) fs) p $ "Unknown field " ++ f
-         _            -> err p $ "Expression is not of struct type"
+    if f == "valid" 
+       then case typ' r ctx s of
+                 TOption _ _ -> return ()
+                 _           -> err p $ show s ++ " is not an option type"
+       else case otyp' r ctx s of
+                 TStruct _ fs -> assertR r (isJust $ find ((==f) . fieldName) fs) p $ "Unknown field " ++ f
+                 _            -> err p $ "Expression is not of struct type"
 
 exprValidate r ctx (ELocation p rname as) = do
     role' <- checkRole p r rname
