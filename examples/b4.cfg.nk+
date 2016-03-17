@@ -1,0 +1,47 @@
+function tunnel(SiteId src, SiteId dst, Packet p): TunnelId = 
+    case {
+        src == 8'd0 and dst == 8'd1: 16'd0;
+        src == 8'd0 and dst == 8'd2: 16'd1;
+        src == 8'd1 and dst == 8'd0: 16'd2;
+        src == 8'd1 and dst == 8'd2: 16'd3;
+        src == 8'd2 and dst == 8'd0: 16'd4;
+        src == 8'd2 and dst == 8'd1: 16'd5;
+        default: 16'd100;
+    }
+
+
+function nexthop(TunnelId tun, SiteId site): uint<8> = 
+   case {
+        tun == 16'd0: case { site == 8'd0: 8'd1;
+                             site == 8'd2: 8'd1;
+                             default:      8'd10;
+                           };
+        tun == 16'd1: case { site == 8'd0: 8'd0;
+                             site == 8'd1: 8'd1;
+                             default:      8'd10;
+                           };
+        tun == 16'd2: case { site == 8'd1: 8'd1;
+                             site == 8'd2: 8'd0;
+                             default:      8'd10;
+                           };
+        tun == 16'd3: case { site == 8'd1: 8'd0;
+                             site == 8'd0: 8'd1;
+                             default:      8'd10;
+                           };
+        tun == 16'd4: case { site == 8'd2: 8'd1;
+                             site == 8'd1: 8'd0;
+                             default:      8'd10;
+                           };
+        tun == 16'd5: case { site == 8'd2: 8'd0;
+                             site == 8'd0: 8'd0;
+                             default:      8'd10;
+                           };
+        default: 8'd10;
+   }
+
+
+function coreLinkUp(SiteId site, uint<8> hash, uint<8> hash2, uint<8> port): bool = true
+function podLinkUp(SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = true
+
+
+function chooseCorePort(uint<8> subnet, Packet p): CorePort = CorePort{8'd0, 8'd0}
