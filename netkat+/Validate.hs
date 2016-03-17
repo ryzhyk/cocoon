@@ -16,6 +16,7 @@ import Pos
 import Name
 import Expr
 import Refine
+import Statement
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -45,6 +46,10 @@ validateFinal r = do
     case grCycle (funcGraph r) of
          Nothing -> return ()
          Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
+    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 
+                  $ statFuncsRec r $ roleBody rl)
+          $ concatMap (map (getRole r . snd) . nodePorts) 
+          $ refineNodes r
 
 -- Apply definitions in new on top of prev.
 combine :: (MonadError String me) => Refine -> Refine -> me Refine
