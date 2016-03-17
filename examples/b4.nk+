@@ -236,9 +236,6 @@ refine PodLowerIn, PodUpperIn {
 }
 
 refine {
-    role WANSwitch[SiteId site] | isite(site) = filter false
-    switch WANSwitch( (WANSwitchLIn, WANSwitchLOut), (WANSwitchGIn, WANSwitchGOut) )
-
     role CoreSwitch[SiteId site, uint<8> hash, uint<8> hash2] | isite(site) and hash < k() and hash2 < k() = (filter false)
     switch CoreSwitch( (CoreIn, CoreOut) )
 
@@ -250,6 +247,9 @@ refine {
 
     role Host[IP4 addr] | ihost(addr) = (filter false)
     host Host((HostIn, HostOut))
+
+    role WANSwitch[SiteId site] | isite(site) = filter false
+    switch WANSwitch( (WANSwitchLIn, WANSwitchLOut), (WANSwitchGIn, WANSwitchGOut) )
 }
 
 refine {
