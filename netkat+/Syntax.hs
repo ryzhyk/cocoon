@@ -17,6 +17,7 @@ module Syntax( pktVar
              , Expr(..)
              , ECtx(..)
              , conj
+             , disj
              , Statement(..)
              , statSendsTo) where
 
@@ -223,7 +224,7 @@ instance PP Expr where
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op  <> pp e
-    pp (ECond _ cs d)      = pp "case" <+> (braces $ hsep $ (map (\(c,v) -> pp c <> colon <+> pp v) cs) ++ [pp "default" <> colon <+> pp d])
+    pp (ECond _ cs d)      = pp "case" <+> (braces $ hsep $ (map (\(c,v) -> pp c <> colon <+> pp v <> semi) cs) ++ [pp "default" <> colon <+> pp d <> semi])
 
 instance Show Expr where
     show = render . pp
@@ -232,6 +233,13 @@ conj :: [Expr] -> Expr
 conj []     = EBool nopos True
 conj [e]    = e
 conj (e:es) = EBinOp nopos And e (conj es)
+
+disj :: [Expr] -> Expr
+disj []     = EBool nopos False
+disj [e]    = e
+disj (e:es) = EBinOp nopos Or e (disj es)
+
+
 
 data ECtx = CtxRole   Role
           | CtxAssume Assume

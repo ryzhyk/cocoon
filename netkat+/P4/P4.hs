@@ -287,14 +287,19 @@ liftConds' e =
          EStruct _ s fs    -> combineCascades (EStruct nopos s) $ map liftConds' fs
          EBinOp _ op e1 e2 -> combineCascades (\[e1', e2'] -> EBinOp nopos op e1' e2') [liftConds' e1, liftConds' e2]
          EUnOp _ op v      -> combineCascades (EUnOp nopos op . head) [liftConds' v]
-         ECond _ cs d      -> let d' =liftConds' d in
+         ECond _ cs d      -> let d' = liftConds' d in
                               case d' of  
-                                   ECond _ dcs dd -> ECond nopos ((map (\(c,v) -> (liftConds' c, liftConds' v)) cs)++dcs) dd
-                                   _              -> ECond nopos (map (\(c,v) -> (liftConds' c, liftConds' v)) cs)        d'
+                                   ECond _ dcs dd -> ECond nopos ((map (\(c,v) -> (cascadeToDisj $ liftConds' c, liftConds' v)) cs)++dcs) dd
+                                   _              -> ECond nopos (map (\(c,v) -> (cascadeToDisj $ liftConds' c, liftConds' v)) cs)        d'
     where combineCascades f es  = combineCascades' f es [] 
           combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
           combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
           combineCascades' f [] es'                  = f es'
+          
+          -- XXX: this assumes that case conditions are mutually exclusive
+          cascadeToDisj (ECond _ cs d) = disj $ (map (\(c,v) -> conj [cascadeToDisj c, cascadeToDisj v]) cs) ++ 
+                                                [conj $ (map (EUnOp nopos Not . fst) cs) ++ [cascadeToDisj d]]
+          cascadeToDisj x              = x
 
 mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
@@ -358,7 +363,7 @@ pktFields = fields (EPacket nopos)
 -----------------------------------------------------------------
 
 populateTable :: Refine -> P4DynAction -> [Doc]
-populateTable r P4DynAction{..} = 
+populateTable r P4DynAction{..} = trace ("populateTable " ++ show p4dynExpr) $ 
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -376,7 +381,7 @@ populateTable r P4DynAction{..} =
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
 flattenConds :: (?r::Refine, ?role::Role) => Expr -> [(Expr, Expr)]
-flattenConds = flattenConds' []
+flattenConds e = trace ("flattenConds " ++ show e) $ flattenConds' [] e
 
 flattenConds' :: (?r::Refine, ?role::Role) => [Expr] -> Expr -> [(Expr, Expr)]
 flattenConds' es (ECond _ cs d) = (concatMap (\(c,e) -> flattenConds' (es ++ [c]) e) cs) ++ (flattenConds' es d)
