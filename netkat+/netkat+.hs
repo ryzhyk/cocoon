@@ -40,13 +40,15 @@ main = do
                  Left  e    -> fail $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
     combined <- case validate spec of
-                      Left e   -> fail $ "Validation error: " ++ e
-                      Right rs -> return rs
+                     Left e   -> fail $ "Validation error: " ++ e
+                     Right rs -> return rs
     let final = last combined
     putStrLn "Validation successful"
 
-    let topology = generateTopology final
-        (mntopology, instmap) = generateMininetTopology final topology
+    topology <- case generateTopology final of
+                     Left e  -> fail $ "Error generating network topology: " ++ e
+                     Right t -> return t
+    let (mntopology, instmap) = generateMininetTopology final topology
         p4switches = genP4Switches final topology
     writeFile (workdir </> addExtension basename "mn") mntopology
     mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap

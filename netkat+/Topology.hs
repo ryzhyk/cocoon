@@ -1,8 +1,9 @@
-{-# LANGUAGE ImplicitParams, RecordWildCards #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
 
 -- Managing physical network topology induced by a NetKAT+ spec
 
 module Topology ( Topology
+                , topologyLinks
                 , InstanceDescr(..)
                 , PortInstDescr(..)
                 , InstanceMap(..)
@@ -18,6 +19,7 @@ import Data.Maybe
 import Data.List
 import Data.Tuple.Select
 import Control.Monad.State
+import Control.Monad.Except
 
 import Eval
 import Syntax
@@ -26,6 +28,7 @@ import NS
 import Pos
 import Type
 import Expr
+import Util
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.SMTLib2   as SMT
 
@@ -45,7 +48,15 @@ type PortLinks = [((String, String), (Int, Int), [(Int, Maybe PortInstDescr)])]
 data InstanceDescr = InstanceDescr {idescNode::String, idescKeys::[Expr]} deriving (Eq, Show)
 data PortInstDescr = PortInstDescr {pdescPort::String, pdescKeys::[Expr]} deriving (Eq, Show)
 
+instLinks :: (?r::Refine) => (InstanceDescr, PortLinks) -> [(PortInstDescr, PortInstDescr)]
+instLinks (node, plinks) = 
+    concatMap (\((_,o), _, links) -> mapMaybe (\(pnum, mpdescr) -> fmap (portFromNode ?r node o pnum,) mpdescr) links) 
+              plinks
+
 type Topology = [(Node, InstanceMap)]
+
+topologyLinks :: (?r::Refine) => Topology -> [(PortInstDescr, PortInstDescr)]
+topologyLinks = concatMap (\(n, imap) -> concatMap instLinks $ instMapFlatten n imap)
 
 getInstPortMap :: Topology -> InstanceDescr -> PortLinks
 getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (snd $ fromJust $ find ((==ndname) . name . fst) t) keys
@@ -69,9 +80,31 @@ portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt 
     where prole = getRole r pname
           TUInt _ w = otyp' r (CtxRole prole) $ last $ roleKeys prole
 
-generateTopology :: Refine -> Topology
-generateTopology r = let ?r = r in 
-                     map (\n -> (n, mkNodeInstMap n)) $ refineNodes r
+generateTopology :: (MonadError String me) => Refine -> me Topology
+generateTopology r = do 
+    let ?r = r 
+    let t = map (\n -> (n, mkNodeInstMap n)) $ refineNodes r 
+    validateTopology t
+    return t
+                 
+-- swap input/output port    
+flipPort :: (?r::Refine) => PortInstDescr -> PortInstDescr
+flipPort p = p{pdescPort = pname}
+    where pname = head 
+                  $ mapMaybe (\(i,o) -> if' (i == pdescPort p) (Just o) $ if' (o == pdescPort p) (Just i) Nothing) 
+                  $ nodePorts 
+                  $ getNode ?r 
+                  $ idescNode 
+                  $ nodeFromPort ?r p
+
+validateTopology :: (?r::Refine, MonadError String me) => Topology -> me ()
+validateTopology t = do
+    let links = topologyLinks t
+    mapM_ (\(s,d) -> assert (not $ null $ filter (\(s',d') -> s' == flipPort d && d' == flipPort s) links) nopos 
+                            $ "Link " ++ show s ++ "->" ++ show d ++ " does not have a reverse") links
+    mapM_ (\(s,_) -> case filter (\(s',_) -> s' == s) links of
+                          [_] -> return ()
+                          ls  -> err nopos $ "Found multiple outgoing links from port " ++ show s ++ ": " ++ show ls) links
 
 mkNodeInstMap :: (?r::Refine) => Node -> InstanceMap
 mkNodeInstMap nd = mkNodeInstMap' nd M.empty (roleKeys $ getRole ?r (name nd))

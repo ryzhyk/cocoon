@@ -27,8 +27,7 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
           -- render links
           links = let ?r = r in
                   let ?t = topology in
-                  mapMaybe (renderLink nmap)
-                  $ concatMap (\(n, imap) -> concatMap instLinks $ instMapFlatten n imap) topology
+                  mapMaybe (renderLink nmap) $ topologyLinks topology
           attrs = [ ("controllers", JSArray [])
                   , ("hosts"      , JSArray hs)
                   , ("switches"   , JSArray sws)
@@ -66,11 +65,6 @@ renderNode voffset node ((descr, _), hoffset) = do
 formatIP :: Expr -> String
 formatIP (EStruct _ _ fs) = intercalate "." $ map (show . exprIVal) fs
 formatIP e                = error $ "MiniNet.formatIP " ++ show e
-
-instLinks :: (?t::Topology,?r::Refine) => (InstanceDescr, PortLinks) -> [(PortInstDescr, PortInstDescr)]
-instLinks (node, plinks) = 
-    concatMap (\((_,o), _, links) -> mapMaybe (\(pnum, mpdescr) -> fmap (portFromNode ?r node o pnum,) mpdescr) links) 
-              plinks
 
 renderLink :: (?t::Topology,?r::Refine) => NodeMap -> (PortInstDescr, PortInstDescr) -> Maybe JSValue
 renderLink nmap (srcport, dstport) = if (srcndname, srcpnum) < (dstndname,dstpnum)
