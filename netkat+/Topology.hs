@@ -83,7 +83,7 @@ portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt 
 generateTopology :: (MonadError String me) => Refine -> me Topology
 generateTopology r = do 
     let ?r = r 
-    let t = map (\n -> (n, mkNodeInstMap n)) $ refineNodes r 
+    t <- mapM (\n -> liftM (n,) $ mkNodeInstMap n) $ refineNodes r 
     validateTopology t
     return t
                  
@@ -106,28 +106,29 @@ validateTopology t = do
                           [_] -> return ()
                           ls  -> err nopos $ "Found multiple outgoing links from port " ++ show s ++ ": " ++ show ls) links
 
-mkNodeInstMap :: (?r::Refine) => Node -> InstanceMap
+mkNodeInstMap :: (?r::Refine, MonadError String me) => Node -> me InstanceMap
 mkNodeInstMap nd = mkNodeInstMap' nd M.empty (roleKeys $ getRole ?r (name nd))
 
-mkNodeInstMap' :: (?r::Refine) => Node -> KMap -> [Field] -> InstanceMap
-mkNodeInstMap' nd kmap []     = InstanceMap $ Right $ mkNodePortLinks nd kmap
-mkNodeInstMap' nd kmap (f:fs) = InstanceMap $ Left $ map (\e -> (e, mkNodeInstMap' nd (M.insert (name f) e kmap) fs)) $ solveFor ndrole fConstr (name f)
+mkNodeInstMap' :: (?r::Refine, MonadError String me) => Node -> KMap -> [Field] -> me InstanceMap
+mkNodeInstMap' nd kmap []     = liftM (InstanceMap . Right) $ mkNodePortLinks kmap (nodePorts nd) 0
+mkNodeInstMap' nd kmap (f:fs) = liftM (InstanceMap . Left) 
+                                $ mapM (\e -> liftM (e,) $ mkNodeInstMap' nd (M.insert (name f) e kmap) fs) 
+                                $ solveFor ndrole fConstr (name f)
     -- Equation to compute possible values of f from:
     where fConstr = (roleKeyRange ndrole):keyVals
           ndrole = getRole ?r $ nodeName nd
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EVar nopos k) v) $ M.toList kmap
 
-mkNodePortLinks :: (?r::Refine) => Node -> KMap -> PortLinks
-mkNodePortLinks nd kmap = evalState (mapM (\ports -> do let links = mkNodePortLinks' kmap ports 
-                                                            lastport = maximum $ map fst links
-                                                        base <- get
-                                                        put $ base + lastport + 1
-                                                        return (ports, (base, base+lastport), links)) $ nodePorts nd)
-                                    0
+mkNodePortLinks :: (?r::Refine, MonadError String me) => KMap -> [(String,String)] -> Int -> me PortLinks
+mkNodePortLinks kmap (ports:ps) base = do 
+    links <- mkNodePortLinks' kmap ports 
+    let lastport = maximum $ map fst links
+    liftM ((ports, (base, base+lastport), links):) $ mkNodePortLinks kmap ps (base+lastport+1)
+mkNodePortLinks _ [] _ = return []
 
-mkNodePortLinks' :: (?r::Refine) => KMap -> (String, String) -> [(Int, Maybe PortInstDescr)]
-mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ _ pnum) -> (fromInteger pnum, mkLink outrole (M.insert portKey e kmap))) 
-                                  $ solveFor inrole pConstr portKey 
+mkNodePortLinks' :: (?r::Refine, MonadError String me) => KMap -> (String, String) -> me [(Int, Maybe PortInstDescr)]
+mkNodePortLinks' kmap (i,o) = mapM (\e@(EInt _ _ pnum) -> liftM (fromInteger pnum,) $ mkLink outrole (M.insert portKey e kmap))
+                                   $ solveFor inrole pConstr portKey 
     -- Equation to compute possible values of port index (last key of the port role):
     where pConstr = (roleKeyRange inrole):keyVals
           inrole = getRole ?r i
@@ -136,15 +137,16 @@ mkNodePortLinks' kmap (i,o) = map (\e@(EInt _ _ pnum) -> (fromInteger pnum, mkLi
           keyVals = map (\(k,v) -> EBinOp nopos Eq (EVar nopos k) v) $ M.toList kmap
 
 -- Compute remote port role is connected to.  Role must be an output port of a switch.
-mkLink :: (?r::Refine) => Role -> KMap -> Maybe PortInstDescr
-mkLink role kmap = let ?kmap = kmap in 
-                   let ?role = role in
-                   case portSendsTo (roleBody role) of
-                        []                         -> Nothing
-                        [ELocation _ n ks]         -> if all (\k -> (null $ exprFuncs ?r k) && (not $ exprRefersToPkt k)) ks
-                                                         then Just $ PortInstDescr n ks
-                                                         else error $ "mkLink: output port " ++ name role ++ " cannot be statically evaluated"
-                        es                         -> error $ "mkLink: output port " ++ name role ++ " " ++ show kmap ++ " sends to multiple destinations: " ++ show es
+mkLink :: (?r::Refine, MonadError String me) => Role -> KMap -> me (Maybe PortInstDescr)
+mkLink role kmap = do
+    let ?kmap = kmap
+        ?role = role
+    case portSendsTo (roleBody role) of
+         []                         -> return Nothing
+         [ELocation _ n ks]         -> if all (\k -> (null $ exprFuncs ?r k) && (not $ exprRefersToPkt k)) ks
+                                          then return $ Just $ PortInstDescr n ks
+                                          else err nopos $ "mkLink: output port " ++ name role ++ " cannot be statically evaluated"
+         es                         -> err nopos $ "mkLink: output port " ++ name role ++ " " ++ show kmap ++ " sends to multiple destinations: " ++ show es
 
 -- Evaluate output port body.  Assume that it can only consist of 
 -- conditions and send statements, i.e., it cannot modify or clone packets.
