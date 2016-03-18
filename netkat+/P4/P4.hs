@@ -25,6 +25,7 @@ import Eval
 import Topology
 import Type
 import P4.Header
+import Expr
 
 {-
 
@@ -41,7 +42,6 @@ requires passing field f2 of the packet to an action defined at compile time.  T
 impossible, since P4 match tables do not allow actions with non-const parameters.
 
 -} 
-
 
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
@@ -99,6 +99,7 @@ instance PP P4Statement where
 printExpr :: Expr -> Doc
 printExpr (EVar _ k)                            = pp k
 printExpr (EPacket _)                           = pp "pkt"
+printExpr (EField _ e f) | f == "valid"         = pp "valid" <> (parens $ printExpr e)
 printExpr (EField _ (EPacket _) f)              = pp f
 printExpr (EField _ (EField _ (EPacket _) h) f) = pp h <> char '.' <> pp f
 printExpr (EField _ e f)                        = printExpr e <> char '_' <> pp f
@@ -222,6 +223,17 @@ mkStatement (STest _ e)     = do
        else iteFromCascade (Left P4SDrop) Nothing e'
 
 -- Make sure that assignment statements do not contain case-expressions in the RHS.
+mkStatement s@(SSet  _ lhs rhs) | exprIsValidFlag lhs = do
+    let lhs' = evalExpr lhs
+        rhs' = evalExpr rhs
+    tableid <- incTableCnt
+    let tablename = "set" ++ show tableid
+    mkAssignTable tablename lhs' rhs'
+    case rhs' of 
+         EBool _ True  -> return $ P4SITE (EUnOp nopos Not lhs') (P4SApply tablename Nothing) Nothing
+         EBool _ False -> return $ P4SITE lhs' (P4SApply tablename Nothing) Nothing
+         _             -> error $ "mkStatement " ++ show s
+
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
         rhs' = liftConds $ evalExpr rhs
@@ -305,6 +317,7 @@ mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> Exp
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
         isdyn = exprNeedsTable rhs
+        EField _ h _ = lhs
         action = if isdyn
                     then (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
                          $$
@@ -313,7 +326,13 @@ mkAssignTable n lhs rhs = do
                          rbrace
                     else (pp "action" <+> pp actname <> parens empty <+> lbrace)
                          $$
-                         (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi)
+                         (nest'
+                          $ if exprIsValidFlag lhs
+                               then case rhs of
+                                         EBool _ True  -> pp "add_header" <> (parens $ printExpr h) <> semi
+                                         EBool _ False -> pp "remove_header" <> (parens $ printExpr h) <> semi
+                                         _             -> error $ "mkAssignTable: " ++ show lhs ++ " " ++ show rhs
+                               else nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi)
                          $$
                          rbrace
         dyn = if isdyn
@@ -363,7 +382,7 @@ pktFields = fields (EPacket nopos)
 -----------------------------------------------------------------
 
 populateTable :: Refine -> P4DynAction -> [Doc]
-populateTable r P4DynAction{..} = trace ("populateTable " ++ show p4dynExpr) $ 
+populateTable r P4DynAction{..} = 
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -381,7 +400,7 @@ populateTable r P4DynAction{..} = trace ("populateTable " ++ show p4dynExpr) $
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
 flattenConds :: (?r::Refine, ?role::Role) => Expr -> [(Expr, Expr)]
-flattenConds e = trace ("flattenConds " ++ show e) $ flattenConds' [] e
+flattenConds e = flattenConds' [] e
 
 flattenConds' :: (?r::Refine, ?role::Role) => [Expr] -> Expr -> [(Expr, Expr)]
 flattenConds' es (ECond _ cs d) = (concatMap (\(c,e) -> flattenConds' (es ++ [c]) e) cs) ++ (flattenConds' es d)

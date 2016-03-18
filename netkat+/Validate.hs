@@ -303,6 +303,9 @@ statValidate r role (SSet _ lval rval) = do
     exprValidate r (CtxRole role) rval
     lexprValidate r (CtxRole role) lval
     matchType r (CtxRole role) lval rval
+    when (exprIsValidFlag lval) $ case rval of
+                                       EBool _ _ -> return ()
+                                       _         -> errR r (pos rval) $ "Not a boolean constant"
     return False
 
 statValidate r role (SSend _ dst) = do

@@ -257,7 +257,14 @@ refine {
     function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 or site == 8'd2
 
     function dst(Packet p): IP4 = p.ip4.dst
-    function ihost(IP4 addr): bool = isite(hostSite(addr)) and addr.ip2 < k()+k() and addr.ip1 < k() and addr.ip0 < k()
+    function ihost(IP4 addr): bool = (not (    addr.ip3 == wanSwAddr(hostSite(addr)).ip3 
+                                           and addr.ip2 == wanSwAddr(hostSite(addr)).ip2
+                                           and addr.ip1 == wanSwAddr(hostSite(addr)).ip1 
+                                           and addr.ip0 == wanSwAddr(hostSite(addr)).ip0)) 
+                                     and isite(hostSite(addr)) 
+                                     and addr.ip2 < k()+k() 
+                                     and addr.ip1 < k() 
+                                     and addr.ip0 < k()
 
     function wpConnected(SiteId site, uint<8> port): bool = 
         (site == 8'd0 and port == 8'd0) or

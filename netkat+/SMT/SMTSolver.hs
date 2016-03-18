@@ -38,6 +38,9 @@ data Function = Function { funcName :: String
                          , funcDef  :: Expr
                          }
 
+instance WithName Function where
+    name = funcName
+
 data Expr = EVar    String
           | EApply  String [Expr]
           | EField  Expr String
@@ -64,6 +67,7 @@ typ q (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                         | elem op [Plus, Minus, Mod] = typ q e1
 typ _ (EUnOp Not _)     = TBool 
 typ q (ECond _ d)       = typ q d
+typ q (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
 typ _ e                 = error $ "SMTSolver.typ " ++ show e
 
 data SMTQuery = SMTQuery { smtStructs :: [Struct]

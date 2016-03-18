@@ -44,6 +44,10 @@ p4HeaderDecls = [str|
 |    }
 |}
 |
+|header ethernet_t ethernet;
+|header vlan_tag_t vlan;
+|header ipv4_t ip4;
+|
 |parser start {
 |    return parse_ethernet;
 |}
@@ -51,10 +55,9 @@ p4HeaderDecls = [str|
 |#define ETHERTYPE_VLAN 0x8100, 0x9100, 0x9200, 0x9300
 |#define ETHERTYPE_IPV4 0x0800
 |
-|header ethernet_t ethernet;
 |
 |parser parse_vlan {
-|    extract(vlan_tag);
+|    extract(vlan);
 |    return select(latest.etherType) {
 |        ETHERTYPE_IPV4 : parse_ipv4;
 |    }
@@ -68,12 +71,12 @@ p4HeaderDecls = [str|
 |    }
 |}
 |
-|header ipv4_t ip4;
-|
 |parser parse_ipv4 {
 |    extract(ip4);
 |    return ingress;
 |}
 |action yes(){}
 |action no(){}
+|
 |]
+

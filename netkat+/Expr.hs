@@ -1,11 +1,18 @@
 {-# LANGUAGE ImplicitParams #-}
 
-module Expr (exprFuncs, exprFuncsRec, exprRefersToPkt) where
+module Expr ( exprIsValidFlag
+            , exprFuncs
+            , exprFuncsRec
+            , exprRefersToPkt) where
 
 import Data.List
 
 import Syntax
 import NS
+
+exprIsValidFlag e = case e of 
+                         EField _ _ f -> f == "valid"
+                         _            -> False
 
 -- Non-recursively enumerate all functions invoked by the expression
 exprFuncs :: Refine -> Expr -> [String]
