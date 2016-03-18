@@ -1,6 +1,6 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module P4.Header (p4HeaderDecls) where
+module P4.Header (p4HeaderDecls, p4DefaultDecls) where
 
 import Text.Heredoc
 
@@ -78,5 +78,26 @@ p4HeaderDecls = [str|
 |action yes(){}
 |action no(){}
 |
+|action a_add_vlan() {
+|    add_header(vlan);
+|    modify_field(ethernet.etherType, 0x8100);
+|    modify_field(vlan.etherType, ETHERTYPE_IPV4);
+|}
+|table add_vlan {
+|    actions {a_add_vlan;}
+|}
+|
+|action a_rm_vlan() {
+|    remove_header(vlan);
+|    modify_field(ethernet.etherType, ETHERTYPE_IPV4);
+|}
+|table rm_vlan {
+|    actions {a_rm_vlan;}
+|}
 |]
 
+p4DefaultDecls::String
+p4DefaultDecls = [str|
+|table_set_default add_vlan a_add_vlan
+|table_set_default rm_vlan a_rm_vlan
+|]

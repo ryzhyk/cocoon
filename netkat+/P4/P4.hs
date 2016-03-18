@@ -167,7 +167,7 @@ genP4Switch :: Refine -> Node -> KMap -> PMap -> (Doc, Doc, [P4DynAction])
 genP4Switch r switch kmap pmap = 
     let ?r = r in
     let ?pmap = pmap in
-    let (controlstat, P4State _ tables commands dynacts) = runState (mkSwitch kmap switch) (P4State 0 [] [] []) 
+    let (controlstat, P4State _ tables commands dynacts) = runState (mkSwitch kmap switch) (P4State 0 [] [pp p4DefaultDecls] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
                   (nest' $ pp controlstat)
@@ -226,12 +226,10 @@ mkStatement (STest _ e)     = do
 mkStatement s@(SSet  _ lhs rhs) | exprIsValidFlag lhs = do
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-    tableid <- incTableCnt
-    let tablename = "set" ++ show tableid
-    mkAssignTable tablename lhs' rhs'
+        EField _ h _ = lhs'
     case rhs' of 
-         EBool _ True  -> return $ P4SITE (EUnOp nopos Not lhs') (P4SApply tablename Nothing) Nothing
-         EBool _ False -> return $ P4SITE lhs' (P4SApply tablename Nothing) Nothing
+         EBool _ True  -> return $ P4SITE (EUnOp nopos Not lhs') (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
+         EBool _ False -> return $ P4SITE lhs' (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
          _             -> error $ "mkStatement " ++ show s
 
 mkStatement (SSet  _ lhs rhs) = do
@@ -317,7 +315,6 @@ mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> Exp
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
         isdyn = exprNeedsTable rhs
-        EField _ h _ = lhs
         action = if isdyn
                     then (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
                          $$
@@ -326,13 +323,7 @@ mkAssignTable n lhs rhs = do
                          rbrace
                     else (pp "action" <+> pp actname <> parens empty <+> lbrace)
                          $$
-                         (nest'
-                          $ if exprIsValidFlag lhs
-                               then case rhs of
-                                         EBool _ True  -> pp "add_header" <> (parens $ printExpr h) <> semi
-                                         EBool _ False -> pp "remove_header" <> (parens $ printExpr h) <> semi
-                                         _             -> error $ "mkAssignTable: " ++ show lhs ++ " " ++ show rhs
-                               else nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi)
+                         (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> printExpr rhs) <> semi)
                          $$
                          rbrace
         dyn = if isdyn
