@@ -68,7 +68,7 @@ class MyTopo(Topo):
                                     json_path   = os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
                                     thrift_port = _THRIFT_BASE_PORT + sw['opts']['nodeNum'],
                                     log_file    = os.path.join("/tmp", netname) + '.' + hostname + '.' + 'log',
-                                    pcap_dump   = True,
+                                    pcap_dump   = False,
                                     device_id   = sw['opts']['nodeNum'])
 
         for h in topology['hosts']:
@@ -135,6 +135,13 @@ def main():
     netname, specext = os.path.splitext(specfname)
     netdir = os.path.join(specdir, netname)
     mnfname = os.path.join(netdir, netname+".mn")
+
+    with open(mnfname, 'r') as handle:
+        parsed = json.load(handle)
+        indented = json.dumps(parsed, indent=4)
+
+    with open(mnfname, 'w') as handle:
+        handle.write(indented)
 
     if args.miniedit != None:
         cmd = [args.miniedit, "-f", mnfname]
