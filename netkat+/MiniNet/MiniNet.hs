@@ -21,7 +21,7 @@ type NodeMap  = [(InstanceDescr, String)]
 generateMininetTopology :: Refine -> Topology -> (String, NodeMap)
 generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
     where -- max number of nodes in a layer
-          width = maximum $ map (length . (uncurry instMapFlatten)) topology
+          width = (maximum $ map (length . (uncurry instMapFlatten)) topology) * hstep
           -- render nodes
           (sws, hs, nmap) = execState (mapIdxM (renderNodes width) topology) ([],[],[])
           -- render links
@@ -40,8 +40,9 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
 renderNodes :: Int -> (Node, InstanceMap) -> Int -> State (Switches, Hosts, NodeMap) ()
 renderNodes w (n, imap) voffset = do 
     let nodes = instMapFlatten n imap
-        offset = (w - length nodes) `div` 2
-        nodeoff = zip nodes [offset..]
+        offset = (w `div` length nodes) `div` 2
+        step = w `div` length nodes
+        nodeoff = mapIdx (\nd i -> (nd, offset + i * step)) nodes
     mapM_ (renderNode voffset n) nodeoff
 
 renderNode :: Int -> Node -> ((InstanceDescr, PortLinks), Int) -> State (Switches, Hosts, NodeMap) ()
@@ -56,7 +57,7 @@ renderNode voffset node ((descr, _), hoffset) = do
                if' (nodeType node == NodeHost) [("ip4", JSString $ toJSString $ formatIP (head $ idescKeys descr))] []
         attrs = [ ("number", JSString $ toJSString $ show number)
                 , ("opts"  , JSObject $ toJSObject opts)
-                , ("x"     , JSString $ toJSString $ show $ (hoffset + 1) * hstep)
+                , ("x"     , JSString $ toJSString $ show $ hoffset)
                 , ("y"     , JSString $ toJSString $ show $ (voffset + 1) * vstep)]
         n = JSObject $ toJSObject attrs 
         nmap' = (descr, ndname):nmap
