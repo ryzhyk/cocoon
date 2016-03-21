@@ -55,6 +55,8 @@ combine :: (MonadError String me) => Refine -> Refine -> me Refine
 combine prev new = do 
     prev' <- foldM (\r role -> do assertR r (isJust $ find ((==role) . roleName) (refineRoles r)) (pos new) 
                                           $ "Role " ++ role ++ " is undefined in this context"
+                                  assertR r (isJust $ find ((==role) . roleName) (refineRoles new)) (pos new) 
+                                          $ "Role " ++ role ++ " is not re-defined by the refinement"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
     let types   = refineTypes prev'   ++ refineTypes new
         roles   = refineRoles prev'   ++ refineRoles new
