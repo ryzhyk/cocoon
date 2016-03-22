@@ -113,6 +113,7 @@ typeValidate r (TStruct _ fs) = do uniqNames (\f -> "Multiple definitions of fie
                                    mapM_ (\f -> assertR r (name f /= "valid") (pos f) "field declaration with reserved name \"valid\" not allowed") fs
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
+typeValidate r (TOption _ t)  = typeValidate r t
 typeValidate _ _              = return ()
 
 funcValidate :: (MonadError String me) => Refine -> Function -> me ()
