@@ -11,7 +11,8 @@ import Syntax
 -- Prepended to generated Boogie files
 headerDecls :: String
 headerDecls = [str|
-|type finite WithValidity t;
+|type {:datatype} Maybe t;
+|function {:constructor} Maybe<t>(valid: bool, value: t): Maybe t;
 |]
 
 refinementToBoogie :: Maybe Refine -> Refine -> ([(String, Doc)], [(String, Doc)])
@@ -28,8 +29,8 @@ assumeToBoogie1 :: Maybe Refine -> Refine -> Assume -> Maybe Doc
 
 type RMap = M.Map String String
 
-refinementToBoogie :: Refine -> Refine -> String -> Doc
-refinementToBoogie abst conc rname = vcat $ punctuate "" [types, funcs, aroles, croles, assums, check]
+refinementToBoogie1 :: Refine -> Refine -> String -> Doc
+refinementToBoogie1 abst conc rname = vcat $ punctuate "" [types, funcs, aroles, croles, assums, check]
     where tgts   = refineTarget conc
           armap  = M.fromList $ map (\n -> (n, "a_" ++ n) tgts
           crmap  = M.fromList $ map (\n -> (n, "c_" ++ n) tgts
@@ -52,10 +53,12 @@ mkRoleName n = case M.lookup n ?rmap of
 mkTypeDef :: Refine -> TypeDef -> Doc
 mkTypeDef r TypeDef{..} = 
    case tdefType of
-        TStruct   _ fs        -> (pp "type" <+> pp "finite" <+> char '_' <> tdefName (hsep $ map (pp . name) fs) <> semi)
+        TStruct   _ fs        -> (pp "type" <+> pp "{:datatype}" <+> pp tdefName <> semi)
                                  $$
-                                 (pp "type" <+> pp tdefName <+> char '=' <+> char '_' <> tdefName <> (hsep $ map (mkType . fieldType) fs) <> semi)
-        TOption   _ t         -> pp "type" <+> pp tdefName <+> char '=' <+> pp "WithValidity" <+> mkType t <> semi
+                                 (pp "function" <+> pp "{:constructor}" <+> pp tdefName       
+                                  <> (parens $ hsep $ punctuate comma $ map (\f -> (pp $ name f) <> colon <+> (mkType $ fieldType f)) fs) 
+                                  <> colon <+> pp tdefName <> semi)
+        TOption   _ t         -> pp "type" <+> pp tdefName <+> char '=' <+> pp "Maybe" <+> mkType t <> semi
         _                     -> pp "type" <+> pp tdefName <+> char '=' <+> mkType tdefType <> semi
         
 mkType :: Type -> Doc 
@@ -67,22 +70,108 @@ mkType t             = error $ "Boogie.mkType " ++ show t
 
 mkFunction :: Refine -> Function -> Doc
 mkFunction r f@Function{..} = maybe (decl <> semi) 
-                                    (\e -> decl <+> lbrace $$ nest' (mkExpr r e) $$ rbrace) 
+                                    (\e -> decl <+> lbrace $$ nest' (mkExpr r (CtxFunc f) e) $$ rbrace) 
                                     funcDef
     where decl  = pp "function" <+> (pp $ name f) 
-              <>  (parens $ hsep $ punctuate comma $ map (\a -> (pp $ name a) <> colon <+> (mkType $ fieldType a)) funcArgs)
-              <+> pp "returns" <> (parens $ mkType funcType)
+              <>  (parens $ hsep $ punctuate comma $ map mkField funcArgs)
+              <> colon <+> (mkType funcType)
 
 mkRole :: (?ovar::String, ?rmap::RMap) => Refine -> Role -> Doc
-mkRole r Role{..} = (pp "procedure" <+> mkRoleName roleName <+> (parens $ hsep $ punctuate comma args))
-                    $$
-                    (pp "requires" <+> mkExpr r roleKeyRange <> semi)
-                    $$
-                    (pp "modifies" <+> ?ovar <> semi <> lbrace)
-                    $$
-                    (nest' $ mkStatement r roleBody)
-                    $$
-                    rbrace
-    where args = (map (\k -> (pp $ name k) <> colon <+> (mkType $ fieldType k)) roleKeys)
+mkRole r rl@Role{..} = (pp "procedure" <+> mkRoleName roleName <+> (parens $ hsep $ punctuate comma args))
+                       $$
+                       (pp "requires" <+> mkExpr r (CtxRole rl) roleKeyRange <> semi)
+                       $$
+                       (pp "modifies" <+> pp ?ovar <> semi <> lbrace)
+                       $$
+                       (nest' $ mkStatement r roleBody)
+                       $$
+                       rbrace
+    where args = (map mkField roleKeys)
                  ++
                  [Field nopos pktVar $ tdefType $ getType r packetTypeName]
+
+mkField :: Field -> Doc
+mkField f = (pp $ name f) <> colon <+> (mkType $ fieldType f))
+
+mkAssume :: Refine -> Assume -> Doc
+mkAssume r a@Assume{..} = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> mkExpr r (CtxAssume a) assExpr) <> semi
+    where args = hsep $ punctuate comma $ map mkField assVars
+
+mkExpr :: Refine -> ECtx -> Expr -> Doc
+mkExpr _ _ (EVar _ v)           = pp $ name v
+mkExpr _ _ (EPacket _)          = pp pktVar
+mkExpr r _ (EApply _ f as)      = pp f <> (parens $ hsep $ punctuate comma $ map (mkExpr r) as)
+mkExpr r c (EField _ e f)       = let TUser _ tn = otyp'' r c e
+                                  if f == "valid"
+                                     then pp "valid#Maybe" <> (parens $ mkExpr r c e)
+                                     else case typ' r c e of
+                                               TStruct _ _ -> pp f <> char '#' <> tn <> (parens $ mkExpr r e)
+                                               TOption _ _ -> pp f <> char '#' <> tn <> (parens $ pp "value#Maybe" <> (parens $ mkExpr r c e))
+mkExpr _ _ (ELocation _ _ _)    = error "Not implemented: Boogie.mkExpr ELocation"
+mkExpr _ _ (EBool _ True)       = pp "true"
+mkExpr _ _ (EBool _ False)      = pp "false"
+mkExpr _ _ (EInt _ w v)         = pp v <> text "bv" <> pp w
+mkExpr r c (EStruct _ n fs)     = pp n <> (parens $ hsep $ punctuate comma $ map (mkExpr r c) fs)
+mkExpr r c (EBinOp _ And e1 e2) = parens $ mkExpr r c e1 <+> text "&&" <+> mkExpr r c e2
+mkExpr r c (EBinOp _ Or e1 e2)  = parens $ mkExpr r c e1 <+> text "||" <+> mkExpr r c e2
+mkExpr r c (EBinOp _ op e1 e2)  = bvbop r c op e1 e2
+mkExpr r c (EUnOp _ Not e)      = parens $ char '!' <> mkExpr r c e
+mkExpr r c (ECond _ cs d)       = mkCond r c cs d 
+
+mkCond r c [] d             = mkExpr r c d
+mkCond r c ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr r c cond) <+> pp "then" <+> mkExpr r c e
+                                                                             <+> pp "else" <+> mkCond r c cs d
+
+bvbop r c op e1 e2 = text ("BV"++(show $ typeWidth $ otyp' r c e1)++"_"++bvbopname op) <> (parens $ mkExpr r c e1 <> comma <+> mkExpr r c e2)
+
+bvbopname Lt       = "ULT"
+bvbopname Gt       = "UGT"
+bvbopname Lte      = "ULEQ"
+bvbopname Gte      = "UGEQ"
+bvbopname BAnd     = "AND"
+bvbopname BOr      = "OR"
+bvbopname BXor     = "XOR"
+bvbopname Plus     = "ADD"
+bvbopname BinMinus = "SUB"
+bvbopname Mul      = "MULT"
+bvbopname op       = error $ "Not implemented: Boogie.bvbopname " ++ show op
+
+mkStatement :: Refine -> Role -> Statement -> Doc
+mkStatement r _  (SSeq _ s1 s2) = mkStatement r s1 $$ mkStatement r s2
+mkStatement r _  (SPar _ _ _)   = error "Not implemented: Boogie.mkStatement SPar" {- run in sequence, copying packet -}
+mkStatement r rl (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r (CtxRole rl) c) <+> lbrace)
+                                  $$
+                                  (nest' $ mkStatement r rl t)
+                                  $$
+                                  (maybe rbrace
+                                         (\s -> (rbrace <+> pp "else" <+> lbrace) 
+                                                $$
+                                                (nest' $ mkStatement r rl s)
+                                                $$
+                                                rbrace)
+                                         e)
+mkStatement r rl (STest _ c)    = pp "if" <> (parens $ mkExpr r (CtxRole rl) (EUnOp nopos Not c)) <+> (braces $ "return" <> semi)
+mkStatement r rl (SSet _ l r)   = mkAssign r rl l [] r
+
+SSend {statPos :: Pos, statDst :: Expr} -- call or global variable access
+
+mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
+mkAssign rf rl (EField e f) fs r = mkAssign rf rl e (fs ++ [f]) r
+mkAssign rf rl l fs r            = mkExpr rf (CtxRole rl) l <+> text ":=" <+> mkAssignRHS rf rl l fs r <> semi 
+
+mkAssignRHS :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
+mkAssignRHS rf rl _ []     r                = mkExpr rf (CtxRole role) r
+mkAssignRHS rf rl l [f]    r | f == "valid" = pp "Maybe" <> (parens $ hsep $ punctuate comma 
+                                                                    $ [ mkExpr rf (CtxRole rl) r
+                                                                      , pp "value#Maybe" <> (parens $ mkExpr rf (CtxRole rl) e)])
+mkAssignRHS rf rl l (f:fs) r                = 
+    case typ' rf (CtxRole rl) l of
+         TOption _ _ -> pp "Maybe" <> (parens $ hsep $ punctuate comma 
+                                       $ [ pp "valid#Maybe" <> (parens $ mkExpr rf (CtxRole rl) e)
+                                         , val])
+         TStruct _ _ -> val
+    where l' = EField nopos l f
+          fns = map name $ typeFields $ otyp' rf (CtxRole rl) l
+          n = typeName $ otyp'' rf (CtxRole rl) l
+          val = pp n <> (parens $ hsep $ punctuate comma 
+                         $ map (\fn -> if' (fn == f) (mkAssignRHS rf rl l' fs r) (mkExpr rf (CtxRole rl) $ EField nopos l fn)) fns)

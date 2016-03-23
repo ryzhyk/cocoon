@@ -61,9 +61,9 @@ typ' r ctx x = case typ r ctx x of
 -- Similar to typ', but unwraps TOptions as well
 otyp' :: (WithType a) => Refine -> ECtx -> a -> Type
 otyp' r ctx x = case typ r ctx x of
-                    TOption _ t -> otyp' r ctx t
-                    TUser _ n   -> otyp' r ctx $ tdefType $ getType r n
-                    t           -> t
+                     TOption _ t -> otyp' r ctx t
+                     TUser _ n   -> otyp' r ctx $ tdefType $ getType r n
+                     t           -> t
 
 -- Similar to typ', but does not unwrap the last typedef if it is a struct
 typ'' :: (WithType a) => Refine -> ECtx -> a -> Type
