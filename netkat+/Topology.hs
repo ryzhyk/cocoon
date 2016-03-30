@@ -78,7 +78,7 @@ nodeFromPort r (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
 portFromNode :: Refine -> InstanceDescr -> String -> Int -> PortInstDescr
 portFromNode r (InstanceDescr _ ks) pname pnum = PortInstDescr pname (ks++[EInt nopos w $ fromIntegral pnum])
     where prole = getRole r pname
-          TUInt _ w = otyp' r (CtxRole prole) $ last $ roleKeys prole
+          TUInt _ w = typ' r (CtxRole prole) $ last $ roleKeys prole
 
 generateTopology :: (MonadError String me) => Refine -> me Topology
 generateTopology r = do 
@@ -204,7 +204,7 @@ func2SMT f@Function{..} = SMT.Function funcName
                                        (expr2SMT $ fromJust funcDef)
 
 typ2SMT :: (?r::Refine, WithType a) => ECtx -> a -> SMT.Type
-typ2SMT ctx x = case otyp'' ?r ctx x of
+typ2SMT ctx x = case typ'' ?r ctx x of
                      TBool _     -> SMT.TBool
                      TUInt _ w   -> SMT.TUInt w
                      TUser _ n   -> SMT.TStruct n

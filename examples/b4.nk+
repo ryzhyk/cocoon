@@ -10,12 +10,13 @@ typedef struct {
 } HIP4
 
 typedef struct {
+    bool valid,
     uint<16> tag
 } VLANTag
 
 typedef struct {
     HIP4     ip4,
-    ?VLANTag vlan
+    VLANTag  vlan
 } Packet
 
 (* Because P4 does not support %.  Assumes v < 2*m *)
@@ -96,7 +97,8 @@ refine HostOut {
             if ihost(dst(pkt)) then
                 send WANSwitchLOut[site,8'd0]
         } else {
-            send WANSwitchGOut[site, nexthop(pkt.vlan.tag,site)]
+            if (pkt.vlan.valid) then
+                send WANSwitchGOut[site, nexthop(pkt.vlan.tag,site)]
         }
 }
 

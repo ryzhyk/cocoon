@@ -43,8 +43,8 @@ evalExpr (EStruct _ s fs)              = EStruct nopos s $ map evalExpr fs
 evalExpr e@(EBinOp _ op lhs rhs)       = 
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-        TUInt _ w1 = otyp' ?r (CtxRole ?role) lhs'
-        TUInt _ w2 = otyp' ?r (CtxRole ?role) rhs'
+        TUInt _ w1 = typ' ?r (CtxRole ?role) lhs'
+        TUInt _ w2 = typ' ?r (CtxRole ?role) rhs'
         w = max w1 w2
     in case (lhs', rhs') of
             (EBool _ v1, EBool _ v2)   -> case op of

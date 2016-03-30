@@ -153,18 +153,15 @@ typeSpec = withPos $
         <|> boolType 
         <|> userType 
         <|> structType 
-        <|> optType
         
 typeSpecSimple = withPos $ 
                   uintType 
               <|> boolType 
               <|> userType 
-              <|> optType
 
 uintType   = TUInt   nopos <$ reserved "uint" <*> (fromIntegral <$> angles decimal)
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
-optType    = TOption nopos <$ reservedOp "?" <*> typeSpecSimple
 structType = TStruct nopos <$  reserved "struct" <*> (braces $ commaSep1 arg)
 
 

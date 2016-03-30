@@ -95,6 +95,7 @@ def applyConfig(loadedTopology, netdir, netname, oldts):
     # re-apply switch configuration files whose timestamps are newer than the previous timestamp
     for sw in loadedTopology['switches']:
         hostname = sw['opts']['hostname']
+        sleep(0.3)
         cmd = [args.cli, "--json", os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
                "--thrift-port", str(_THRIFT_BASE_PORT + sw['opts']['nodeNum'])]
         swcfgpath = os.path.join(netdir, netname) + '.' + hostname + '.' + 'txt'

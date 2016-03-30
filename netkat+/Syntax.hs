@@ -144,7 +144,6 @@ data Type = TLocation {typePos :: Pos}
           | TUInt     {typePos :: Pos, typeWidth :: Int}
           | TStruct   {typePos :: Pos, typeFields :: [Field]}
           | TUser     {typePos :: Pos, typeName :: String}
-          | TOption   {typePos :: Pos, typeType :: Type}
 
 instance Eq Type where
     (==) (TLocation _)   (TLocation _)   = True
@@ -152,7 +151,6 @@ instance Eq Type where
     (==) (TUInt _ w1)    (TUInt _ w2)    = w1 == w2
     (==) (TStruct _ fs1) (TStruct _ fs2) = fs1 == fs2
     (==) (TUser _ n1)    (TUser _ n2)    = n1 == n2
-    (==) (TOption _ t1)  (TOption _ t2)  = t1 == t2
     (==) _               _               = False
 
 instance WithPos Type where
@@ -165,7 +163,6 @@ instance PP Type where
     pp (TUInt _ w)    = pp "uint<" <> pp w <> pp ">" 
     pp (TStruct _ fs) = pp "struct" <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (TUser _ n)    = pp n
-    pp (TOption _ t)  = pp "?" <> pp t
 
 instance Show Type where
     show = render . pp

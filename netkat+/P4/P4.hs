@@ -364,8 +364,9 @@ mkCondTable n e = do
 
 pktFields :: (?r::Refine, ?role::Role) => [Expr]
 pktFields = fields (EPacket nopos)
-    where fields e = case otyp' ?r (CtxRole ?role) e of
-                          TStruct _ fs -> concatMap (\f -> fields (EField nopos e $ name f)) fs
+    where fields e = case typ' ?r (CtxRole ?role) e of
+                          TStruct _ fs -> concatMap (\f -> fields (EField nopos e $ name f)) 
+                                          $ filter ((/= "valid") . name) fs
                           _            -> [e]
 
 -----------------------------------------------------------------
@@ -395,7 +396,7 @@ flattenConds e = flattenConds' [] e
 
 flattenConds' :: (?r::Refine, ?role::Role) => [Expr] -> Expr -> [(Expr, Expr)]
 flattenConds' es (ECond _ cs d) = (concatMap (\(c,e) -> flattenConds' (es ++ [c]) e) cs) ++ (flattenConds' es d)
-flattenConds' es e              = case otyp' ?r (CtxRole ?role) e of 
+flattenConds' es e              = case typ' ?r (CtxRole ?role) e of 
                                        TBool _ -> [ (conj $ es++[e], EBool nopos True)
                                                   , (conj es       , EBool nopos False)]
                                        _       -> [(conj es, e)]
@@ -419,7 +420,7 @@ exprToDNF :: (?r::Refine, ?role::Role) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
 exprToDNF (EBinOp _ Or e1 e2)  = exprToDNF e1 ++ exprToDNF e2
 exprToDNF e@(EBinOp _ Eq e1 e2)  = 
-    case otyp' ?r (CtxRole ?role) e1 of
+    case typ' ?r (CtxRole ?role) e1 of
          TStruct _ fs -> exprToDNF $ conj $ map (\f -> EBinOp nopos Eq (EField nopos e1 $ name f) (EField nopos e2 $ name f)) fs
          TUInt _ _    -> [[e]]
          _            -> error $ "Cannot convert expression " ++ show e ++ " to DNF" 
@@ -442,7 +443,7 @@ atomToMatch e =
 -- by ordering the fields in the order required by the table and adding
 -- don't care masks for all other fields.
 mkMatch :: (?r::Refine, ?role::Role) => [(Expr,String)] -> Doc
-mkMatch atoms = hsep $ map (\e -> let TUInt _ w = otyp' ?r (CtxRole ?role) e in
+mkMatch atoms = hsep $ map (\e -> let TUInt _ w = typ' ?r (CtxRole ?role) e in
                                   case lookup e atoms of
                                        Nothing -> pp "0x0" <> pp "&&&" <> pp "0x0"
                                        Just v  -> pp v  <> pp "&&&" <> pp "0x" <> pp (showHex (mask w) "")) pktFields
