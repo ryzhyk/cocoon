@@ -35,6 +35,10 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
                                | otherwise   = Just $
     (pp "/*" <+> pp asm <+> pp "*/")
     $$ 
+    (vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc])
+    $$
+    (vcat $ map (mkFunction conc . getFunc conc) fs)
+    $$ 
     (pp "procedure" <+> pp "main" <+> parens empty <+> lbrace)
     $$
     (nest' body)
@@ -45,7 +49,7 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
           abstdef = maybe False
                           (\abst -> all (maybe False (isJust . funcDef) . lookupFunc abst) fs)
                           mabst
-          body = (vcat $ map ((<> semi) . mkField) $ assVars asm)
+          body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ assVars asm)
                  $$
                  (vcat $ map (\f -> pp "havoc" <+> (pp $ name f) <> semi) $ assVars asm)
                  $$
@@ -80,7 +84,7 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty <+> lbrace)
                      $$
                      rbrace
     where role = getRole conc rname
-          body = (vcat $ map ((<> semi) . mkField) $ roleKeys role)
+          body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleKeys role)
                  $$
                  (vcat $ map (\f -> pp "havoc" <+> (pp $ name f) <> semi) $ roleKeys role)
                  $$
@@ -103,11 +107,12 @@ mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
               $$
               (vcat $ map mkLocConstructor $ refineRoles r)
               $$
-              (pp "function" <+> pp "{:constructor}" <+> pp "Dropped" <> (parens $ empty) <> semi)
+              (pp "function" <+> pp "{:constructor}" <+> pp "Dropped" <> (parens $ empty) <> colon <+> pp locTypeName <>  semi)
 
 mkLocConstructor :: Role -> Doc
 mkLocConstructor rl = pp "function" <+> pp "{:constructor}" <+> pp (name rl)
-                   <> (parens $ hsep $ punctuate comma $ (map mkField $ roleKeys rl)) <> semi
+                   <> (parens $ hsep $ punctuate comma $ (map mkField $ roleKeys rl)) 
+                   <> colon <+> pp locTypeName <> semi
 
 mkOutputType :: Doc
 mkOutputType = (pp "type" <+> pp "{:datatype}" <+> pp outputTypeName <> semi)
@@ -177,6 +182,7 @@ mkExpr _ _ (EBool _ True)       = pp "true"
 mkExpr _ _ (EBool _ False)      = pp "false"
 mkExpr _ _ (EInt _ w v)         = pp v <> text "bv" <> pp w
 mkExpr r c (EStruct _ n fs)     = pp n <> (parens $ hsep $ punctuate comma $ map (mkExpr r c) fs)
+mkExpr r c (EBinOp _ Eq e1 e2)  = parens $ mkExpr r c e1 <+> text "==" <+> mkExpr r c e2
 mkExpr r c (EBinOp _ And e1 e2) = parens $ mkExpr r c e1 <+> text "&&" <+> mkExpr r c e2
 mkExpr r c (EBinOp _ Or e1 e2)  = parens $ mkExpr r c e1 <+> text "||" <+> mkExpr r c e2
 mkExpr r c (EBinOp _ op e1 e2)  = bvbop r c op e1 e2
