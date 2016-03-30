@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, RecordWildCards #-}
 
 module Syntax( pktVar
              , Spec(..)
@@ -116,6 +116,9 @@ data Assume = Assume { assPos  :: Pos
 instance WithPos Assume where
     pos = assPos
     atPos a p = a{assPos = p}
+
+instance PP Assume where 
+    pp Assume{..} = pp "assume" <> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
 
 data Function = Function { funcPos  :: Pos
                          , funcName :: String

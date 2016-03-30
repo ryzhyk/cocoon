@@ -21,6 +21,8 @@ import Syntax
 import NS
 import Expr
 import PP
+import Boogie.Boogie
+import Util
 
 
 main = do
@@ -45,6 +47,19 @@ main = do
     let final = last combined
     putStrLn "Validation successful"
 
+    let ps = pairs combined
+    let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined)) :
+                      map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2)) ps
+        boogiedir = workdir </> "boogie"
+    createDirectoryIfMissing False boogiedir
+    mapIdxM_ (\(_, (asms, mroles)) i -> do mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_asm" ++ show j) "bpl") (render b)) asms
+                                           maybe (return ())
+                                                 (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_" ++ rl) "bpl") (render b)))
+                                                 mroles)
+             boogieSpecs
+    
+    putStrLn "Verification successful"
+
     topology <- case generateTopology final of
                      Left e  -> fail $ "Error generating network topology: " ++ e
                      Right t -> return t
@@ -61,6 +76,10 @@ main = do
     hFlush stdout
 
     maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
+
+pairs :: [a] -> [(a,a)]
+pairs (x:y:xs) = (x,y) : pairs (y:xs)
+pairs _        = []
 
 -- Update command files for dynamic actions modified in the new configuration.
 -- workdir  - work directory where all P4 files are stored
