@@ -6,6 +6,13 @@ typedef struct {
 } IP4
 
 typedef struct {
+    uint<48> dstAddr,
+    uint<48> srcAddr
+} HEth
+
+typedef struct {
+    uint<8> protocol,
+    IP4 src,
     IP4 dst
 } HIP4
 
@@ -15,9 +22,17 @@ typedef struct {
 } VLANTag
 
 typedef struct {
+    HEth     ethernet,
     HIP4     ip4,
     VLANTag  vlan
 } Packet
+
+typedef struct {
+    IP4 src,
+    IP4 dst
+} FlowId
+
+function flowid(Packet p):  FlowId = FlowId{p.ip4.src, p.ip4.dst}
 
 (* Because P4 does not support %.  Assumes v < 2*m *)
 function mmod(uint<8> v, uint<8> m): uint<8> = 
@@ -28,9 +43,9 @@ function mmod(uint<8> v, uint<8> m): uint<8> =
 
 (* true: host with the given IP exists *)
 function ihost(IP4 addr): bool
-function dst(Packet p): IP4
+function dst(Packet p): IP4 = p.ip4.dst
 
-role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
+role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
     if ihost(dst(pkt)) then
         send HostIn[dst(pkt), 8'd0]
 
@@ -63,18 +78,19 @@ refine HostOut {
 
     typedef uint<16> TunnelId
 
-    function tunnel(SiteId src, SiteId dst, Packet p): TunnelId
+    function tunnel(SiteId src, SiteId dst, FlowId f): TunnelId
 
     function nexthop(TunnelId tun, SiteId site): uint<8>
     assume(SiteId src, SiteId dst, Packet p, TunnelId tid, SiteId next)
-           (not (tid == tunnel(src, dst, p) and next == wanLink(src, nexthop(tid, src)).site)) or 
+           (not (tid == tunnel(src, dst, flowid(p)) and next == wanLink(src, nexthop(tid, src)).site)) or 
            (wpConnected(src,nexthop(tid,src)) and (next == dst or wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
 
     assume(SiteId site, TunnelId tid) (not isite(site)) or iwanPort(site, nexthop(tid, site))
+    assume(SiteId site, TunnelId tid) (not isite(site)) or wpConnected(site, nexthop(tid,site))
 
     assume(IP4 addr) (not ihost(addr)) or isite(hostSite(addr))
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
         if hostSite(dst(pkt)) == hostSite(addr) then {
             if ihost(dst(pkt)) then
                 send HostIn[dst(pkt), 8'd0]
@@ -83,8 +99,8 @@ refine HostOut {
     
     role WANSwitchLIn[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
         pkt.vlan.valid := true;
-        pkt.vlan.tag := tunnel(site, hostSite(dst(pkt)), pkt);
-        send WANSwitchGOut[site, nexthop(tunnel(site, hostSite(dst(pkt)), pkt), site)]
+        pkt.vlan.tag := tunnel(site, hostSite(dst(pkt)), flowid(pkt));
+        send WANSwitchGOut[site, nexthop(tunnel(site, hostSite(dst(pkt)), flowid(pkt)), site)]
 
     role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
         if ihost(dst(pkt)) and hostSite(dst(pkt)) == site then
@@ -96,8 +112,11 @@ refine HostOut {
 
     role WANSwitchGIn[SiteId site, uint<8> port] | iwanPort(site, port) =
         if (hostSite(dst(pkt)) == site) then {
-            if ihost(dst(pkt)) then
+            if ihost(dst(pkt)) then {
+                pkt.vlan.valid := false;
+                pkt.vlan.tag := 16'd0;
                 send WANSwitchLOut[site,8'd0]
+            }
         } else {
             if (pkt.vlan.valid) then
                 send WANSwitchGOut[site, nexthop(pkt.vlan.tag,site)]
@@ -131,7 +150,7 @@ refine HostOut, WANSwitchLOut {
             send HostIn[IP4{site, subnet, subsubnet, port}, 8'd0]
         }
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
         send PodLowerIn[hostSite(addr), addr.ip2, addr.ip1, addr.ip0]
 
 
@@ -260,7 +279,6 @@ refine {
 
     function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 or site == 8'd2
 
-    function dst(Packet p): IP4 = p.ip4.dst
     function ihost(IP4 addr): bool = (not (    addr.ip3 == wanSwAddr(hostSite(addr)).ip3 
                                            and addr.ip2 == wanSwAddr(hostSite(addr)).ip2
                                            and addr.ip1 == wanSwAddr(hostSite(addr)).ip1 

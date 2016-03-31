@@ -1,4 +1,4 @@
-function tunnel(SiteId src, SiteId dst, Packet p): TunnelId = 
+function tunnel(SiteId src, SiteId dst, FlowId f): TunnelId = 
     case {
         src == 8'd0 and dst == 8'd1: 16'd0;
         src == 8'd0 and dst == 8'd2: 16'd1;
