@@ -130,6 +130,7 @@ roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) roleKeyRange
+    exprValidate r (CtxRole role) rolePktGuard
     _ <- statValidate r role roleBody
     return ()
 

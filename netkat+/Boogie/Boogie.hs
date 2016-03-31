@@ -99,6 +99,8 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (pp "havoc" <+> pp "inppkt" <> semi)
                  $$
+                 (pp "assume" <+> (mkExprP "inppkt" conc (CtxRole role) $ rolePktGuard role) <> semi)
+                 $$
                  (pp "abs" =: (pp "Dropped" <> (parens $ empty)))
                  $$
                  (pp "conc" =: (pp "Dropped" <> (parens $ empty)))
@@ -164,6 +166,8 @@ mkRole r rl@Role{..} = (pp "procedure" <+> mkRoleName roleName <+> (parens $ hse
                        $$
                        (pp "requires" <+> mkExpr r (CtxRole rl) roleKeyRange <> semi)
                        $$
+                       (pp "requires" <+> mkExprP "_pkt" r (CtxRole rl) rolePktGuard <> semi)
+                       $$
                        (modifies $pp ?ovar)
                        $$
                        lbrace
@@ -185,22 +189,28 @@ mkAssume r a@Assume{..} = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "
     where args = hsep $ punctuate comma $ map mkField assVars
 
 mkExpr :: Refine -> ECtx -> Expr -> Doc
-mkExpr _ _ (EVar _ v)           = pp $ name v
-mkExpr _ _ (EPacket _)          = pp pktVar
-mkExpr r c (EApply _ f as)      = pp f <> (parens $ hsep $ punctuate comma $ map (mkExpr r c) as)
-mkExpr r c (EField _ e f)       = let TUser _ tn = typ'' r c e
-                                  in pp f <> char '#' <> pp tn <> (parens $ mkExpr r c e)
-mkExpr _ _ (ELocation _ _ _)    = error "Not implemented: Boogie.mkExpr ELocation"
-mkExpr _ _ (EBool _ True)       = pp "true"
-mkExpr _ _ (EBool _ False)      = pp "false"
-mkExpr _ _ (EInt _ w v)         = pp v <> text "bv" <> pp w
-mkExpr r c (EStruct _ n fs)     = pp n <> (parens $ hsep $ punctuate comma $ map (mkExpr r c) fs)
-mkExpr r c (EBinOp _ Eq e1 e2)  = parens $ mkExpr r c e1 <+> text "==" <+> mkExpr r c e2
-mkExpr r c (EBinOp _ And e1 e2) = parens $ mkExpr r c e1 <+> text "&&" <+> mkExpr r c e2
-mkExpr r c (EBinOp _ Or e1 e2)  = parens $ mkExpr r c e1 <+> text "||" <+> mkExpr r c e2
-mkExpr r c (EBinOp _ op e1 e2)  = bvbop r c op e1 e2
-mkExpr r c (EUnOp _ Not e)      = parens $ char '!' <> mkExpr r c e
-mkExpr r c (ECond _ cs d)       = mkCond r c cs d 
+mkExpr r c e = mkExprP pktVar r c e
+
+mkExprP :: String -> Refine -> ECtx -> Expr -> Doc
+mkExprP p r c e = let ?p = p in mkExpr' r c e
+
+mkExpr' :: (?p::String) => Refine -> ECtx -> Expr -> Doc
+mkExpr' _ _ (EVar _ v)           = pp $ name v
+mkExpr' _ _ (EPacket _)          = pp ?p
+mkExpr' r c (EApply _ f as)      = pp f <> (parens $ hsep $ punctuate comma $ map (mkExpr' r c) as)
+mkExpr' r c (EField _ e f)       = let TUser _ tn = typ'' r c e
+                                  in pp f <> char '#' <> pp tn <> (parens $ mkExpr' r c e)
+mkExpr' _ _ (ELocation _ _ _)    = error "Not implemented: Boogie.mkExpr' ELocation"
+mkExpr' _ _ (EBool _ True)       = pp "true"
+mkExpr' _ _ (EBool _ False)      = pp "false"
+mkExpr' _ _ (EInt _ w v)         = pp v <> text "bv" <> pp w
+mkExpr' r c (EStruct _ n fs)     = pp n <> (parens $ hsep $ punctuate comma $ map (mkExpr' r c) fs)
+mkExpr' r c (EBinOp _ Eq e1 e2)  = parens $ mkExpr' r c e1 <+> text "==" <+> mkExpr' r c e2
+mkExpr' r c (EBinOp _ And e1 e2) = parens $ mkExpr' r c e1 <+> text "&&" <+> mkExpr' r c e2
+mkExpr' r c (EBinOp _ Or e1 e2)  = parens $ mkExpr' r c e1 <+> text "||" <+> mkExpr' r c e2
+mkExpr' r c (EBinOp _ op e1 e2)  = bvbop r c op e1 e2
+mkExpr' r c (EUnOp _ Not e)      = parens $ char '!' <> mkExpr' r c e
+mkExpr' r c (ECond _ cs d)       = mkCond r c cs d 
 
 mkCond r c [] d             = mkExpr r c d
 mkCond r c ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr r c cond) <+> pp "then" <+> mkExpr r c e
@@ -275,6 +285,7 @@ collectOps r@Refine{..} = let ?r = r in
                           nub $ concatMap (\f -> maybe [] (exprCollectOps (CtxFunc f)) $ funcDef f) refineFuncs ++
                                 concatMap (\a -> exprCollectOps (CtxAssume a) $ assExpr a) refineAssumes ++
                                 concatMap (\rl -> exprCollectOps (CtxRole rl) $ roleKeyRange rl) refineRoles ++
+                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ rolePktGuard rl) refineRoles ++
                                 concatMap (\rl -> statCollectOps rl $ roleBody rl) refineRoles
 
 statCollectOps :: (?r::Refine) => Role -> Statement -> [(Either UOp BOp, Int)]

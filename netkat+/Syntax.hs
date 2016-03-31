@@ -81,6 +81,7 @@ data Role = Role { rolePos       :: Pos
                  , roleName      :: String
                  , roleKeys      :: [Field]
                  , roleKeyRange  :: Expr
+                 , rolePktGuard  :: Expr
                  , roleBody      :: Statement
                  }
 

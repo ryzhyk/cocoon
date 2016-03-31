@@ -45,7 +45,7 @@ function mmod(uint<8> v, uint<8> m): uint<8> =
 function ihost(IP4 addr): bool
 function dst(Packet p): IP4 = p.ip4.dst
 
-role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
     if ihost(dst(pkt)) then
         send HostIn[dst(pkt), 8'd0]
 
@@ -90,7 +90,7 @@ refine HostOut {
 
     assume(IP4 addr) (not ihost(addr)) or isite(hostSite(addr))
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
         if hostSite(dst(pkt)) == hostSite(addr) then {
             if ihost(dst(pkt)) then
                 send HostIn[dst(pkt), 8'd0]
@@ -150,7 +150,7 @@ refine HostOut, WANSwitchLOut {
             send HostIn[IP4{site, subnet, subsubnet, port}, 8'd0]
         }
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 and pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
         send PodLowerIn[hostSite(addr), addr.ip2, addr.ip1, addr.ip0]
 
 
