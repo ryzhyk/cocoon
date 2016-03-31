@@ -243,7 +243,7 @@ mkStatement r rl (SSend _ dst)  = let ELocation _ rname ks = dst in
                                                   (parens $ hsep $ punctuate comma $ map (mkExpr r (CtxRole rl)) $ ks ++ [EPacket nopos]) <> semi
 
 mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
-mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (fs ++ [f]) r
+mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (f:fs) r
 mkAssign rf rl l fs r              = mkExpr rf (CtxRole rl) l =: mkAssignRHS rf rl l fs r
 
 mkAssignRHS :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
