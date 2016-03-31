@@ -20,7 +20,7 @@ typedef struct {
 } Packet
 
 (* Because P4 does not support %.  Assumes v < 2*m *)
-function mod(uint<8> v, uint<8> m): uint<8> = 
+function mmod(uint<8> v, uint<8> m): uint<8> = 
     case {
         v < m:   v;
         default: v - m;
@@ -149,7 +149,7 @@ refine PodLowerIn {
         if coreLinkUp(site, hash, hash2, ldst(site, pkt).ip2) then
             send CoreOut[site, hash, hash2, ldst(site, pkt).ip2]
         else
-            send CoreOut[site, hash, hash2, mod(ldst(site, pkt).ip2 + 8'd1, k())]
+            send CoreOut[site, hash, hash2, mmod(ldst(site, pkt).ip2 + 8'd1, k())]
 
     role CoreOut[SiteId site, uint<8> hash, uint<8> hash2, uint<8> port] | icorePort(site, hash, hash2, port) = 
         if coreLinkUp(site, hash, hash2, port) then
@@ -163,7 +163,7 @@ refine PodLowerIn {
         if ldst(site, pkt).ip2 == subnet then
             send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
         else
-            send PodUpperOut[site, subnet, hash, mod(port+8'd1, k())]
+            send PodUpperOut[site, subnet, hash, mmod(port+8'd1, k())]
 
     typedef struct {
         uint<8> hash,
@@ -195,12 +195,12 @@ refine PodLowerIn, PodUpperIn {
             if podLinkUp(site, subnet, ldst(site, pkt).ip1, hash) then
                 send PodUpperLOut[site, subnet, hash, ldst(site, pkt).ip1]
             else
-                send PodUpperLOut[site, subnet, hash, mod(ldst(site, pkt).ip1 + 8'd1, k())]
+                send PodUpperLOut[site, subnet, hash, mmod(ldst(site, pkt).ip1 + 8'd1, k())]
         } else {
             if coreLinkUp(site, hash, ldst(site, pkt).ip0, subnet) then
                 send PodUpperOut[site, subnet, hash, ldst(site, pkt).ip0]
             else
-                send PodUpperOut[site, subnet, hash, mod(ldst(site, pkt).ip0+8'd1, k())]
+                send PodUpperOut[site, subnet, hash, mmod(ldst(site, pkt).ip0+8'd1, k())]
         }
 
     role PodUpperLOut[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | ipodPort(site, subnet, port, hash) = 
@@ -211,7 +211,7 @@ refine PodLowerIn, PodUpperIn {
         if ldst(site, pkt).ip1 == subsubnet then
             send PodLowerOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
         else 
-            send PodLowerUOut[site, subnet, subsubnet, mod(port+8'd1, k())]
+            send PodLowerUOut[site, subnet, subsubnet, mmod(port+8'd1, k())]
 
     role PodLowerUOut[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ipodPort(site, subnet, subsubnet, port) = 
         if podLinkUp(site, subnet, subsubnet, port) then
@@ -224,16 +224,16 @@ refine PodLowerIn, PodUpperIn {
         } else if podLinkUp(site, subnet, subsubnet, ldst(site, pkt).ip0) then
             send PodLowerUOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
         else 
-            send PodLowerUOut[site, subnet, subsubnet, mod(ldst(site, pkt).ip0+8'd1, k())]
+            send PodLowerUOut[site, subnet, subsubnet, mmod(ldst(site, pkt).ip0+8'd1, k())]
 
     role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) = 
         if (ldst(site, pkt).ip2 == subnet) then {
             if podLinkUp(site, subnet, ldst(site, pkt).ip1, hash) then
                 send PodUpperLOut[site, subnet, hash, ldst(site, pkt).ip1]
             else
-                send PodUpperLOut[site, subnet, hash, mod(ldst(site, pkt).ip1+8'd1, k())]
+                send PodUpperLOut[site, subnet, hash, mmod(ldst(site, pkt).ip1+8'd1, k())]
         } else {
-            send PodUpperOut[site, subnet, hash, mod(port+8'd1, k())]
+            send PodUpperOut[site, subnet, hash, mmod(port+8'd1, k())]
         }
 }
 
