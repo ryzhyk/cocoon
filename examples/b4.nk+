@@ -70,6 +70,8 @@ refine HostOut {
            (not (tid == tunnel(src, dst, p) and next == wanLink(src, nexthop(tid, src)).site)) or 
            (wpConnected(src,nexthop(tid,src)) and (next == dst or wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
 
+    assume(SiteId site, TunnelId tid) (not isite(site)) or iwanPort(site, nexthop(tid, site))
+
     assume(IP4 addr) (not ihost(addr)) or isite(hostSite(addr))
 
     role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 = 
