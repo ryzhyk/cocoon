@@ -33,17 +33,16 @@ assumeToBoogie1 :: Maybe Refine -> Refine -> Assume -> Maybe Doc
 assumeToBoogie1 mabst conc asm | not concdef = Nothing
                                | abstdef     = Nothing
                                | otherwise   = Just $
-    (pp "/*" <+> pp asm <+> pp "*/")
-    $$ 
-    (vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc])
-    $$
-    (vcat $ map (mkFunction conc . getFunc conc) fs)
-    $$ 
-    (pp "procedure" <+> pp "main" <+> parens empty <+> lbrace)
-    $$
-    (nest' body)
-    $$
-    rbrace
+    vcat $ punctuate (pp " ") $ 
+    [ pp "/*" <+> pp asm <+> pp "*/"
+    , mkBVOps conc
+    , vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc]
+    , vcat $ map (mkFunction conc . getFunc conc) fs
+    , pp "procedure" <+> pp "main" <+> parens empty <+> lbrace
+      $$
+      (nest' body)
+      $$
+      rbrace]
     where fs = exprFuncsRec conc $ assExpr asm
           concdef = all (isJust . funcDef . getFunc conc) fs
           abstdef = maybe False
@@ -58,8 +57,9 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 type RMap = M.Map String String
 
 refinementToBoogie1 :: Refine -> Refine -> String -> Doc
-refinementToBoogie1 abst conc rname = vcat $ punctuate (pp "") [types, gvars, funcs, aroles, croles, assums, check]
-    where tgts   = refineTarget conc
+refinementToBoogie1 abst conc rname = vcat $ punctuate (pp "") [ops, types, gvars, funcs, aroles, croles, assums, check]
+    where ops    = mkBVOps conc
+          tgts   = refineTarget conc
           new    = tgts ++ (map name (refineRoles conc) \\ map name (refineRoles abst))
           armap  = M.fromList $ map (\n -> (n, "a_" ++ n)) tgts
           crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
@@ -162,7 +162,7 @@ mkRole r rl@Role{..} = (pp "procedure" <+> mkRoleName roleName <+> (parens $ hse
                        (nest' $ mkStatement r rl roleBody)
                        $$
                        rbrace
-    where args = map mkField $ roleKeys ++ [Field nopos pktVar $ tdefType $ getType r packetTypeName]
+    where args = map mkField $ roleKeys ++ [Field nopos pktVar $ TUser nopos packetTypeName]
 
 mkField :: Field -> Doc
 mkField f = (pp $ name f) <> colon <+> (mkType $ fieldType f)
@@ -221,14 +221,13 @@ mkStatement r rl (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r (CtxRole rl) c)
                                          e)
 mkStatement r rl (STest _ c)    = pp "if" <> (parens $ mkExpr r (CtxRole rl) (EUnOp nopos Not c)) <+> (braces $ pp "return" <> semi)
 mkStatement r rl (SSet _ l rhs) = mkAssign r rl l [] rhs
-mkStatement r _  (SSend _ dst)  = let ELocation _ rname ks = dst 
-                                      rl' = getRole r rname in
-                                  case M.lookup rname ?rmap of
-                                       Nothing -> pp ?ovar =: (pp outputTypeName <> 
-                                                               (parens $ pp pktVar <> comma <+>
-                                                                        (pp rname <> (parens $ hsep $ punctuate comma $ map (mkExpr r (CtxRole rl')) ks))))
-                                       Just _  -> mkRoleName rname <> (parens $ hsep $ punctuate comma 
-                                                                       $ map (mkExpr r (CtxRole rl')) $ ks ++ [EPacket nopos]) <> semi
+mkStatement r rl  (SSend _ dst)  = let ELocation _ rname ks = dst in
+                                   case M.lookup rname ?rmap of
+                                        Nothing -> pp ?ovar =: (pp outputTypeName <> 
+                                                                (parens $ pp pktVar <> comma <+>
+                                                                         (pp rname <> (parens $ hsep $ punctuate comma $ map (mkExpr r (CtxRole rl)) ks))))
+                                        Just _  -> mkRoleName rname <> (parens $ hsep $ punctuate comma 
+                                                                        $ map (mkExpr r (CtxRole rl)) $ ks ++ [EPacket nopos]) <> semi
 
 mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
 mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (fs ++ [f]) r
@@ -242,7 +241,51 @@ mkAssignRHS rf rl l (f:fs) r                = pp n <> (parens $ hsep $ punctuate
           fns = map name $ typeFields $ typ' rf (CtxRole rl) l
           n = typeName $ typ'' rf (CtxRole rl) l
 
--- Boogie syntac helpers
+mkBVOps :: Refine -> Doc
+mkBVOps r = vcat $ map mkOpDecl $ collectOps r
+
+mkOpDecl :: (Either UOp BOp, Int) -> Doc
+mkOpDecl (Right Lt   , w) = mkBOpDecl "bvult" (bvbopname Lt)    w "bool" 
+mkOpDecl (Right Gt   , w) = mkBOpDecl "bvugt" (bvbopname Gt)    w "bool" 
+mkOpDecl (Right Lte  , w) = mkBOpDecl "bvule" (bvbopname Lte)   w "bool" 
+mkOpDecl (Right Gte  , w) = mkBOpDecl "bvuge" (bvbopname Gte)   w "bool" 
+mkOpDecl (Right Plus , w) = mkBOpDecl "bvadd" (bvbopname Plus)  w (bvtname w)
+mkOpDecl (Right Minus, w) = mkBOpDecl "bvsub" (bvbopname Minus) w (bvtname w)
+mkOpDecl _                = empty
+
+mkBOpDecl builtin opname w retname = pp $ "function {:bvbuiltin \"" ++ builtin ++ "\"} BV" ++ show w ++ "_" ++ opname ++ "(x:" ++ bvtname w ++ ", " ++ "y:" ++ bvtname w ++ ")" ++ " returns (" ++ retname ++ ");"
+bvtname w = "bv" ++ show w
+
+
+collectOps :: Refine -> [(Either UOp BOp, Int)]
+collectOps r@Refine{..} = let ?r = r in
+                          nub $ concatMap (\f -> maybe [] (exprCollectOps (CtxFunc f)) $ funcDef f) refineFuncs ++
+                                concatMap (\a -> exprCollectOps (CtxAssume a) $ assExpr a) refineAssumes ++
+                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ roleKeyRange rl) refineRoles ++
+                                concatMap (\rl -> statCollectOps rl $ roleBody rl) refineRoles
+
+statCollectOps :: (?r::Refine) => Role -> Statement -> [(Either UOp BOp, Int)]
+statCollectOps rl (SSeq _ l r)    = statCollectOps rl l ++ statCollectOps rl r
+statCollectOps rl (SPar  _ l r)   = statCollectOps rl l ++ statCollectOps rl r
+statCollectOps rl (SITE _ c t me) = exprCollectOps (CtxRole rl) c ++ statCollectOps rl t ++ maybe [] (statCollectOps rl) me
+statCollectOps rl (STest _ c)     = exprCollectOps (CtxRole rl) c
+statCollectOps rl (SSet _ l r)    = exprCollectOps (CtxRole rl) l ++ exprCollectOps (CtxRole rl) r
+statCollectOps rl (SSend _ d)     = exprCollectOps (CtxRole rl) d
+
+exprCollectOps :: (?r::Refine) => ECtx -> Expr -> [(Either UOp BOp, Int)]
+exprCollectOps c (EApply _ _ as)      = concatMap (exprCollectOps c) as
+exprCollectOps c (EField _ s _)       = exprCollectOps c s
+exprCollectOps c (ELocation _ _ as)   = concatMap (exprCollectOps c) as
+exprCollectOps c (EStruct _ _ fs)     = concatMap (exprCollectOps c) fs
+exprCollectOps c (EBinOp _ op l r)    = (exprCollectOps c l ++ exprCollectOps c r) ++ 
+                                        case typ' ?r c l of
+                                              TUInt _ w -> [(Right op, w)]
+                                              _         -> []
+exprCollectOps c (EUnOp _ _ e)        = exprCollectOps c e
+exprCollectOps c (ECond _ cs d)       = concatMap (\(e, v) -> exprCollectOps c e ++ exprCollectOps c v) cs ++ exprCollectOps c d
+exprCollectOps _ _ = []
+
+-- Boogie syntax helpers
 
 (=:) :: Doc -> Doc -> Doc
 (=:) l r = l <+> text ":=" <+> r <> semi

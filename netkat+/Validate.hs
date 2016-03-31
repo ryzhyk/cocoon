@@ -63,7 +63,7 @@ combine prev new = do
         assumes = refineAssumes prev' ++ refineAssumes new 
         nodes   = refineNodes prev'   ++ refineNodes new 
     funcs <- mergeFuncs $ refineFuncs prev'  ++ refineFuncs new
-    return $ Refine (pos new) [] types funcs roles assumes nodes
+    return $ Refine (pos new) (refineTarget new) types funcs roles assumes nodes
 
 mergeFuncs :: (MonadError String me) => [Function] -> me [Function]
 mergeFuncs []     = return []

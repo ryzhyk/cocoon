@@ -25,7 +25,7 @@ instance WithType Field where
 
 instance WithType Expr where
     typ _ ctx  (EVar _ v)         = fieldType $ getVar ctx v
-    typ r _    (EPacket _)        = tdefType $ getType r packetTypeName
+    typ _ _    (EPacket _)        = TUser nopos packetTypeName
     typ r _    (EApply _ f _)     = funcType $ getFunc r f
     typ r ctx  (EField _ e f)     = let TStruct _ fs = typ' r ctx e  in
                                     fieldType $ fromJust $ find ((== f) . name) fs

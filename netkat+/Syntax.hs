@@ -120,6 +120,9 @@ instance WithPos Assume where
 instance PP Assume where 
     pp Assume{..} = pp "assume" <> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
 
+instance Show Assume where
+    show = render . pp
+
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
                          , funcArgs :: [Field]
@@ -244,7 +247,12 @@ disj (e:es) = EBinOp nopos Or e (disj es)
 data ECtx = CtxRole   Role
           | CtxAssume Assume
           | CtxFunc   Function
-          
+     
+instance Show ECtx where
+    show (CtxRole r)   = "role " ++ name r
+    show (CtxAssume a) = "assume " ++ show a
+    show (CtxFunc f)   = "function " ++ name f
+
 data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Maybe Statement}

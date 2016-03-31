@@ -52,7 +52,8 @@ main = do
                       map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2)) ps
         boogiedir = workdir </> "boogie"
     createDirectoryIfMissing False boogiedir
-    mapIdxM_ (\(_, (asms, mroles)) i -> do mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_asm" ++ show j) "bpl") (render b)) asms
+    mapIdxM_ (\(_, (asms, mroles)) i -> do putStrLn $ "Verifying refinement " ++ show i ++ " with " ++ (show $ length asms) ++ " verifiable assumptions , " ++ (maybe "_" (show . length) mroles) ++ " roles" 
+                                           mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_asm" ++ show j) "bpl") (render b)) asms
                                            maybe (return ())
                                                  (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_" ++ rl) "bpl") (render b)))
                                                  mroles)
