@@ -136,6 +136,7 @@ roleValidate r role@Role{..} = do
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
 assumeValidate r a@Assume{..} = do
     uniqNames (\v -> "Multiple definitions of variable " ++ v) assVars
+    mapM_ (typeValidate r . fieldType) assVars
     exprValidate r (CtxAssume a) assExpr
     assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a boolean expression"
     return ()
