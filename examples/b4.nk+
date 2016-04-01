@@ -178,10 +178,12 @@ refine PodLowerIn {
     function coreLinkUp(SiteId site, uint<8> hash, uint<8> hash2, uint<8> port): bool
 
     role CoreIn[SiteId site, uint<8> hash, uint<8> hash2, uint<8> port] | icorePort(site, hash, hash2, port) = 
-        if coreLinkUp(site, hash, hash2, ldst(site, pkt).ip2) then
-            send CoreOut[site, hash, hash2, ldst(site, pkt).ip2]
-        else
-            send CoreOut[site, hash, hash2, mmod(ldst(site, pkt).ip2 + 8'd1, k())]
+        if ldst(site,pkt).ip2 < k() + k() then {
+            if coreLinkUp(site, hash, hash2, ldst(site, pkt).ip2) then
+                send CoreOut[site, hash, hash2, ldst(site, pkt).ip2]
+            else
+                send CoreOut[site, hash, hash2, mmod(ldst(site, pkt).ip2 + 8'd1, k() + k())]
+        }
 
     role CoreOut[SiteId site, uint<8> hash, uint<8> hash2, uint<8> port] | icorePort(site, hash, hash2, port) = 
         if coreLinkUp(site, hash, hash2, port) then
@@ -205,12 +207,16 @@ refine PodLowerIn {
     function chooseCorePort(uint<8> subnet, Packet p): CorePort
 
     assume(SiteId site, uint<8> subnet, Packet p) 
-          (not (isite(site) and subnet < k() + k())) or icorePort(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet)
-
+          (not (isite(site) and subnet < k() + k())) or 
+          (icorePort(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet) and
+           coreLinkUp(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet))
+    
     role PodLowerIn[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
         if not (dst(pkt) == wanSwAddr(site)) then {
             if (ldst(site, pkt).ip2 == subnet) then {
-                send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+                if ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
+                    send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+                }
             } else {
                 send PodUpperOut[site, subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
             }
