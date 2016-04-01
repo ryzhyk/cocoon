@@ -199,7 +199,7 @@ mkExpr' _ _ (EVar _ v)           = pp $ name v
 mkExpr' _ _ (EPacket _)          = pp ?p
 mkExpr' r c (EApply _ f as)      = pp f <> (parens $ hsep $ punctuate comma $ map (mkExpr' r c) as)
 mkExpr' r c (EField _ e f)       = let TUser _ tn = typ'' r c e
-                                  in pp f <> char '#' <> pp tn <> (parens $ mkExpr' r c e)
+                                   in pp f <> char '#' <> pp tn <> (parens $ mkExpr' r c e)
 mkExpr' _ _ (ELocation _ _ _)    = error "Not implemented: Boogie.mkExpr' ELocation"
 mkExpr' _ _ (EBool _ True)       = pp "true"
 mkExpr' _ _ (EBool _ False)      = pp "false"
@@ -212,11 +212,13 @@ mkExpr' r c (EBinOp _ op e1 e2)  = bvbop r c op e1 e2
 mkExpr' r c (EUnOp _ Not e)      = parens $ char '!' <> mkExpr' r c e
 mkExpr' r c (ECond _ cs d)       = mkCond r c cs d 
 
-mkCond r c [] d             = mkExpr r c d
-mkCond r c ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr r c cond) <+> pp "then" <+> mkExpr r c e
-                                                                             <+> pp "else" <+> mkCond r c cs d
+mkCond :: (?p::String) => Refine -> ECtx -> [(Expr,Expr)] -> Expr -> Doc
+mkCond r c [] d             = mkExpr' r c d
+mkCond r c ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' r c cond) <+> pp "then" <+> mkExpr' r c e
+                                                                              <+> pp "else" <+> mkCond r c cs d
 
-bvbop r c op e1 e2 = text ("BV"++(show $ typeWidth $ typ' r c e1)++"_"++bvbopname op) <> (parens $ mkExpr r c e1 <> comma <+> mkExpr r c e2)
+bvbop :: (?p::String) => Refine -> ECtx -> BOp -> Expr -> Expr -> Doc
+bvbop r c op e1 e2 = text ("BV"++(show $ typeWidth $ typ' r c e1)++"_"++bvbopname op) <> (parens $ mkExpr' r c e1 <> comma <+> mkExpr' r c e2)
 
 bvbopname Lt    = "ULT"
 bvbopname Gt    = "UGT"

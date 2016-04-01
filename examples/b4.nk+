@@ -198,11 +198,9 @@ refine PodLowerIn {
         if coreLinkUp(site, hash, port, subnet) then
             send CoreIn[site, hash, port, subnet]
 
-    role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) = 
+    role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) / ldst(site, pkt).ip2 < k() + k() and ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() =
         if ldst(site, pkt).ip2 == subnet then {
-            if ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
-                send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
-            }
+            send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
         } else {
             send PodUpperOut[site, subnet, hash, mmod(port+8'd1, k())]
         }
@@ -212,21 +210,21 @@ refine PodLowerIn {
         uint<8> hash2
     } CorePort
 
-    function chooseCorePort(uint<8> subnet, Packet p): CorePort
+    function chooseCorePort(uint<8> site, uint<8> subnet, uint<8> subsubnet, Packet p): CorePort
 
-    assume(SiteId site, uint<8> subnet, Packet p) 
-          (not (isite(site) and subnet < k() + k())) or 
-          (icorePort(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet) and
-           coreLinkUp(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet))
+    assume(SiteId site, uint<8> subnet, uint<8> subsubnet, Packet p) 
+          (not (isite(site) and subnet < k() + k() and subsubnet < k())) or 
+          (icorePort(site, chooseCorePort(site, subnet, subsubnet, p).hash, chooseCorePort(site, subnet, subsubnet, p).hash2, subnet) and
+           coreLinkUp(site, chooseCorePort(site, subnet, subsubnet, p).hash, chooseCorePort(site, subnet, subsubnet, p).hash2, subnet))
     
     role PodLowerIn[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
         if not (dst(pkt) == wanSwAddr(site)) then {
-            if (ldst(site, pkt).ip2 == subnet) then {
-                if ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
+            if ldst(site, pkt).ip2 < k() + k() and ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
+                if (ldst(site, pkt).ip2 == subnet) then {
                     send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+                } else {
+                    send PodUpperOut[site, subnet, chooseCorePort(site, subnet, subsubnet, pkt).hash, chooseCorePort(site, subnet, subsubnet, pkt).hash2]
                 }
-            } else {
-                send PodUpperOut[site, subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
             }
         }
 }
@@ -236,7 +234,28 @@ refine PodLowerIn, PodUpperIn {
     function ipodPort(SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port): bool = 
         isite(site) and subnet < k() + k() and subsubnet < k() and port < k()
 
+
+    function chooseCorePort(uint<8> site, uint<8> subnet, uint<8> subsubnet, Packet p): CorePort = 
+        case {
+            podLinkUp(site, subnet, subsubnet, ldst(site, p).ip0): 
+                case {
+                    coreLinkUp(site, ldst(site, p).ip0, ldst(site, p).ip0, subnet): CorePort{ldst(site, p).ip0, ldst(site, p).ip0};
+                    default:                                                        CorePort{ldst(site, p).ip0, mmod(ldst(site, p).ip0+8'd1, k())};
+                };
+            default:
+                case {
+                    coreLinkUp(site, mmod(ldst(site, p).ip0+8'd1, k()), ldst(site, p).ip0, subnet):
+                                                                                  CorePort{mmod(ldst(site, p).ip0+8'd1, k()), ldst(site, p).ip0};
+                    default:                                                      CorePort{mmod(ldst(site, p).ip0+8'd1, k()), mmod(ldst(site, p).ip0+8'd1, k())};
+                };
+        }
+
+
     function podLinkUp(SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port): bool
+    (* tolerate one link failure per pod *)
+    assume (SiteId site, uint<8> subnet, uint<8> subsubnet_1, uint<8> subsubnet_2, uint<8> port_1, uint<8> port_2)
+        (not (not podLinkUp(site, subnet, subsubnet_1, port_1) and (not (subsubnet_1 == subsubnet_2 and port_1 == port_2))))
+        or podLinkUp(site, subnet, subsubnet_2, port_2)
 
     role PodUpperLIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | ipodPort(site, subnet, port, hash) = 
         if ldst(site, pkt).ip2 == subnet then {
@@ -266,15 +285,19 @@ refine PodLowerIn, PodUpperIn {
             send PodUpperLIn[site, subnet, port, subsubnet]
 
     role PodLowerIn[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
-        if (ldst(site, pkt).ip2 == subnet) and (ldst(site, pkt).ip1 == subsubnet) then {
-            if ilowerPort(site, subnet, subsubnet, ldst(site, pkt).ip0) then
-                send PodLowerOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
-        } else if podLinkUp(site, subnet, subsubnet, ldst(site, pkt).ip0) then
-            send PodLowerUOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
-        else 
-            send PodLowerUOut[site, subnet, subsubnet, mmod(ldst(site, pkt).ip0+8'd1, k())]
+        if not ((dst(pkt).ip3 == wanSwAddr(site).ip3) and (dst(pkt).ip2 == wanSwAddr(site).ip2) and (dst(pkt).ip1 == wanSwAddr(site).ip1) and (dst(pkt).ip0 == wanSwAddr(site).ip0)) then {
+            if ldst(site, pkt).ip2 < k() + k() and ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
+                if (ldst(site, pkt).ip2 == subnet) and (ldst(site, pkt).ip1 == subsubnet) then {
+                    if ilowerPort(site, subnet, subsubnet, ldst(site, pkt).ip0) then
+                        send PodLowerOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
+                } else if podLinkUp(site, subnet, subsubnet, ldst(site, pkt).ip0) then
+                    send PodLowerUOut[site, subnet, subsubnet, ldst(site, pkt).ip0]
+                else 
+                    send PodLowerUOut[site, subnet, subsubnet, mmod(ldst(site, pkt).ip0+8'd1, k())]
+            }
+        }
 
-    role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) = 
+    role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) / ldst(site, pkt).ip2 < k() + k() and ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() =
         if (ldst(site, pkt).ip2 == subnet) then {
             if podLinkUp(site, subnet, ldst(site, pkt).ip1, hash) then
                 send PodUpperLOut[site, subnet, hash, ldst(site, pkt).ip1]
@@ -304,8 +327,20 @@ refine {
 
 refine {
 
-    function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 or site == 8'd2
+    function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 (* or site == 8'd2 *)
 
+    function wpConnected(SiteId site, uint<8> port): bool = 
+        (site == 8'd0 and port == 8'd0) or
+        (site == 8'd1 and port == 8'd0)
+
+    function wanLink(SiteId site, uint<8> port): WANPort = 
+        case {
+            (site == 8'd0 and port == 8'd0): WANPort{8'd1, 8'd0};
+            (site == 8'd1 and port == 8'd0): WANPort{8'd0, 8'd0};
+            default: WANPort{8'd10, 8'd10};
+        }
+
+(*
     function wpConnected(SiteId site, uint<8> port): bool = 
         (site == 8'd0 and port == 8'd0) or
         (site == 8'd0 and port == 8'd1) or
@@ -324,4 +359,5 @@ refine {
             (site == 8'd2 and port == 8'd1): WANPort{8'd1, 8'd1};
             default: WANPort{8'd10, 8'd10};
         }
+*)
 }
