@@ -102,7 +102,7 @@ refine HostOut {
         pkt.vlan.tag := tunnel(site, hostSite(dst(pkt)), flowid(pkt));
         send WANSwitchGOut[site, nexthop(tunnel(site, hostSite(dst(pkt)), flowid(pkt)), site)]
 
-    role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
+    role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 / hostSite(dst(pkt)) == site = 
         if ihost(dst(pkt)) and hostSite(dst(pkt)) == site then
             send HostIn[dst(pkt), 8'd0]
 
@@ -127,6 +127,15 @@ refine HostOut, WANSwitchLOut {
 
     function k(): uint<8> = 8'd2
 
+    function ihost(IP4 addr): bool = (not (    addr.ip3 == wanSwAddr(hostSite(addr)).ip3 
+                                           and addr.ip2 == wanSwAddr(hostSite(addr)).ip2
+                                           and addr.ip1 == wanSwAddr(hostSite(addr)).ip1 
+                                           and addr.ip0 == wanSwAddr(hostSite(addr)).ip0)) 
+                                     and isite(hostSite(addr)) 
+                                     and addr.ip2 < k()+k() 
+                                     and addr.ip1 < k() 
+                                     and addr.ip0 < k()
+
     function wanSwAddr(SiteId site): IP4 = IP4{site, 8'd0, 8'd0, 8'd0}
 
     function hostSite(IP4 addr): SiteId = addr.ip3
@@ -141,7 +150,9 @@ refine HostOut, WANSwitchLOut {
         isite(site) and subnet < k() + k() and subsubnet < k() and port < k()
 
     role PodLowerIn[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
-        send PodLowerOut[site, ldst(site, pkt).ip2, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+        if not (dst(pkt) == wanSwAddr(site)) then 
+            if ilowerPort(site, ldst(site, pkt).ip2, ldst(site, pkt).ip1, ldst(site, pkt).ip0) then
+                send PodLowerOut[site, ldst(site, pkt).ip2, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
 
     role PodLowerOut[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
         if IP4{site, subnet, subsubnet, port} == wanSwAddr(site) then {
@@ -154,7 +165,7 @@ refine HostOut, WANSwitchLOut {
         send PodLowerIn[hostSite(addr), addr.ip2, addr.ip1, addr.ip0]
 
 
-    role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
+    role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 / hostSite(dst(pkt)) == site = 
         send PodLowerIn[wanSwAddr(site).ip3, wanSwAddr(site).ip2, wanSwAddr(site).ip1, wanSwAddr(site).ip0]
 
 }
@@ -197,10 +208,12 @@ refine PodLowerIn {
           (not (isite(site) and subnet < k() + k())) or icorePort(site, chooseCorePort(subnet, p).hash, chooseCorePort(subnet, p).hash2, subnet)
 
     role PodLowerIn[SiteId site, uint<8> subnet, uint<8> subsubnet, uint<8> port] | ilowerPort(site, subnet, subsubnet, port) = 
-        if (ldst(site, pkt).ip2 == subnet) then {
-            send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
-        } else {
-            send PodUpperOut[site, subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
+        if not (dst(pkt) == wanSwAddr(site)) then {
+            if (ldst(site, pkt).ip2 == subnet) then {
+                send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+            } else {
+                send PodUpperOut[site, subnet, chooseCorePort(subnet, pkt).hash, chooseCorePort(subnet, pkt).hash2]
+            }
         }
 }
 
@@ -278,15 +291,6 @@ refine {
 refine {
 
     function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 or site == 8'd2
-
-    function ihost(IP4 addr): bool = (not (    addr.ip3 == wanSwAddr(hostSite(addr)).ip3 
-                                           and addr.ip2 == wanSwAddr(hostSite(addr)).ip2
-                                           and addr.ip1 == wanSwAddr(hostSite(addr)).ip1 
-                                           and addr.ip0 == wanSwAddr(hostSite(addr)).ip0)) 
-                                     and isite(hostSite(addr)) 
-                                     and addr.ip2 < k()+k() 
-                                     and addr.ip1 < k() 
-                                     and addr.ip0 < k()
 
     function wpConnected(SiteId site, uint<8> port): bool = 
         (site == 8'd0 and port == 8'd0) or
