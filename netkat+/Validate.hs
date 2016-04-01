@@ -203,6 +203,12 @@ exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 exprValidate _ ctx (EVar p v) = do 
    _ <- checkVar p ctx v
    return ()
+exprValidate r ctx (EPacket p) = do 
+   case ctx of
+        CtxAssume _ -> errR r p "Assumptions cannot refer to pkt"
+        CtxFunc _   -> errR r p "Functions cannot refer to pkt"
+        CtxRole _   -> return ()
+   return ()
 exprValidate r ctx (EApply p f as) = do
     func <- checkFunc p r f
     assertR r ((length $ funcArgs func) == length as) p "Number of arguments does not match function declaration"
