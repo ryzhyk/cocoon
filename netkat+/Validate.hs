@@ -57,6 +57,10 @@ combine prev new = do
                                           $ "Role " ++ role ++ " is undefined in this context"
                                   assertR r (isJust $ find ((==role) . roleName) (refineRoles new)) (pos new) 
                                           $ "Role " ++ role ++ " is not re-defined by the refinement"
+                                  assertR r ((roleKeyRange $ getRole prev role) == (roleKeyRange $ getRole new role)) (pos new) 
+                                          $ "Role " ++ role ++ " is re-defined with a different key range"
+                                  assertR r ((rolePktGuard $ getRole prev role) == (rolePktGuard $ getRole new role)) (pos new) 
+                                          $ "Role " ++ role ++ " is re-defined with a different guard"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
     let types   = refineTypes prev'   ++ refineTypes new
         roles   = refineRoles prev'   ++ refineRoles new
