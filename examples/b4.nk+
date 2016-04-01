@@ -177,6 +177,11 @@ refine PodLowerIn {
 
     function coreLinkUp(SiteId site, uint<8> hash, uint<8> hash2, uint<8> port): bool
 
+    (* At most one core link failure per site *)
+    assume(SiteId site, uint<8> hash_1, uint<8> hash_2, uint<8> hash2_1, uint<8> hash2_2, uint<8> port_1, uint<8> port_2) 
+        (not ((not coreLinkUp(site, hash_1, hash2_1, port_1)) and (not (port_1 == port_2 and hash_1 == hash_2 and hash2_1 == hash2_2)))) 
+        or coreLinkUp(site, hash_2, hash2_2, port_2)
+
     role CoreIn[SiteId site, uint<8> hash, uint<8> hash2, uint<8> port] | icorePort(site, hash, hash2, port) = 
         if ldst(site,pkt).ip2 < k() + k() then {
             if coreLinkUp(site, hash, hash2, ldst(site, pkt).ip2) then
@@ -194,10 +199,13 @@ refine PodLowerIn {
             send CoreIn[site, hash, port, subnet]
 
     role PodUpperIn[SiteId site, uint<8> subnet, uint<8> hash, uint<8> port] | icorePort(site, hash, port, subnet) = 
-        if ldst(site, pkt).ip2 == subnet then
-            send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
-        else
+        if ldst(site, pkt).ip2 == subnet then {
+            if ldst(site, pkt).ip1 < k() and ldst(site, pkt).ip0 < k() then {
+                send PodLowerOut[site, subnet, ldst(site, pkt).ip1, ldst(site, pkt).ip0]
+            }
+        } else {
             send PodUpperOut[site, subnet, hash, mmod(port+8'd1, k())]
+        }
 
     typedef struct {
         uint<8> hash,
