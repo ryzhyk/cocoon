@@ -60,7 +60,7 @@ data P4State = P4State { p4TableCnt   :: Int   -- table counter
                        }
 
 data P4Statement = P4SSeq   P4Statement P4Statement
-                 | P4SITE   Expr P4Statement (Maybe P4Statement)
+                 | P4SITE   Doc P4Statement (Maybe P4Statement)
                  | P4SApply String (Maybe [(String, P4Statement)])
                  | P4SDrop
                  | P4SNop
@@ -78,7 +78,7 @@ ingressPort = EField nopos (EField nopos (EPacket nopos) "standard_metadata") "i
 
 instance PP P4Statement where
     pp (P4SSeq s1 s2)         = pp s1 $$ pp s2
-    pp (P4SITE c t e)         = (pp "if" <+> (parens $ printExpr c) <+> lbrace)
+    pp (P4SITE c t e)         = (pp "if" <+> (parens c) <+> lbrace)
                                 $$
                                 (nest' $ pp t)
                                 $$
@@ -96,8 +96,12 @@ instance PP P4Statement where
 
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
-printExpr :: Expr -> Doc
-printExpr (EVar _ k)                            = pp k
+printExpr :: (?role::Role, ?pmap::PMap) => Expr -> Doc
+printExpr (EVar _ k)                            = if k == name pkey 
+                                                     then printExpr $ EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)
+                                                     else pp k
+    where pkey = last $ roleKeys ?role
+          (first, _) = ?pmap M.! (name ?role) 
 printExpr (EPacket _)                           = pp "pkt"
 printExpr (EField _ e f) | f == "valid"         = pp "valid" <> (parens $ printExpr e)
 printExpr (EField _ (EPacket _) f)              = pp f
@@ -179,19 +183,15 @@ mkSwitch :: (?r::Refine, ?pmap::PMap) => KMap -> Node -> State P4State P4Stateme
 mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
     let portranges = map (\(port,_) -> ?pmap M.! port) $ nodePorts switch
-    stats <- mapM (\(port,_) -> let ?role = getRole ?r port in 
-                                let (first, _) = ?pmap M.! port 
-                                    pkey = last $ roleKeys ?role in
-                                let -- P4 ingress port numbers are 32-bit
-                                    ?kmap = M.insert (name pkey) (EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)) kmap in 
-                                mkStatement (roleBody ?role))
+    stats <- mapM (\(port,_) -> do let ?role = getRole ?r port
+                                   let ?kmap = kmap 
+                                   mkStatement (roleBody ?role))
              $ nodePorts switch
     let groups = zip stats portranges
     -- If there are multiple port groups, generate a top-level switch
-    return $ foldl' (\st (st', (first, lst)) -> let bound1 = EBinOp nopos Gte ingressPort (EInt nopos 32 $ fromIntegral first)
-                                                    bound2 = EBinOp nopos Lte ingressPort (EInt nopos 32 $ fromIntegral lst)
-                                                    cond = EBinOp nopos And bound1 bound2
-                                                 in P4SITE cond st' (Just st)) 
+    return $ foldl' (\st (st', (first, lst)) -> let cond = parens $ pp "standard_metadata.ingress_port >=" <+> pp first <+> pp "and" <+> 
+                                                                    pp "standard_metadata.ingress_port <=" <+> pp lst
+                                                in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
 
 mkStatement :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
@@ -203,7 +203,7 @@ mkStatement (SSeq  _ s1 s2) = do
 mkStatement (SPar  _ _ _)   = error "Not implemented: P4.mkStatement: SPar"
 
 mkStatement (SITE  _ c t e) = do
-    let c' = liftConds $ evalExpr c
+    let c' = liftConds True $ evalExpr c
     if exprNeedsTable c'
        then do t' <- mkStatement t
                e' <- maybe (return Nothing) (liftM Just . mkStatement) e
@@ -214,7 +214,7 @@ mkStatement (SITE  _ c t e) = do
        else iteFromCascade (Right t) (fmap Right e) c'
 
 mkStatement (STest _ e)     = do
-    let e' = liftConds $ evalExpr $ EUnOp nopos Not e
+    let e' = liftConds True $ evalExpr $ EUnOp nopos Not e
     if exprNeedsTable e'
        then do tableid <- incTableCnt
                let tablename = "test" ++ show tableid
@@ -228,13 +228,13 @@ mkStatement s@(SSet  _ lhs rhs) | exprIsValidFlag lhs = do
         rhs' = evalExpr rhs
         EField _ h _ = lhs'
     case rhs' of 
-         EBool _ True  -> return $ P4SITE (EUnOp nopos Not lhs') (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
-         EBool _ False -> return $ P4SITE lhs' (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
+         EBool _ True  -> return $ P4SITE (printExpr $ EUnOp nopos Not lhs') (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
+         EBool _ False -> return $ P4SITE (printExpr lhs') (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
          _             -> error $ "mkStatement " ++ show s
 
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
-        rhs' = liftConds $ evalExpr rhs
+        rhs' = liftConds True $ evalExpr rhs
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
         assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
@@ -246,7 +246,7 @@ mkStatement (SSet  _ lhs rhs) = do
                            return $ P4SApply tablename Nothing
 
 mkStatement (SSend _ dst) = do
-    let dst' = liftConds $ evalExpr dst
+    let dst' = liftConds True $ evalExpr dst
     let sendToCascade (ECond _ [] d)         = sendToCascade d
         sendToCascade (ECond _ ((c,v):cs) d) = SITE nopos c (sendToCascade v) (Just $ sendToCascade (ECond nopos cs d))
         sendToCascade v                      = SSend nopos v
@@ -264,7 +264,7 @@ iteFromCascade :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Either 
 iteFromCascade t e (ECond _ [] d)                 = iteFromCascade t e d
 iteFromCascade t e (ECond _ ((c,v):cs) d)         = do t' <- iteFromCascade t e v
                                                        e' <- iteFromCascade t e (ECond nopos cs d)
-                                                       return $ P4SITE c t' $ Just e'
+                                                       return $ P4SITE (printExpr c) t' $ Just e'
 iteFromCascade (Left t) _ (EBool _ True)          = return t
 iteFromCascade (Right t) _ (EBool _ True)         = mkStatement t
 iteFromCascade _ Nothing (EBool _ False)          = return P4SNop
@@ -277,15 +277,30 @@ iteFromCascade t e v                              = do t' <- case t of
                                                                   Nothing        -> return Nothing
                                                                   Just (Left s)  -> return $ Just s
                                                                   Just (Right s) -> liftM Just $ mkStatement s
-                                                       return $ P4SITE v t' e'
+                                                       return $ P4SITE (printExpr v) t' e'
+
 
 -- convert expression into a cascade of ECond's, such
 -- that their leaf expressions do not contain any EConds
-liftConds :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
-liftConds = evalExpr . liftConds'
+liftConds :: (?r::Refine, ?role::Role, ?kmap::KMap) => Bool -> Expr -> Expr
+liftConds todisj e = let ?todisj = (not $ exprNeedsTable e) && todisj
+                     in evalExpr $ liftConds' e
 
-liftConds' :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
-liftConds' e = 
+-- If e is a boolean expression, the cascade can be much more compactly
+-- represented as a boolean expression.  However, this transformation 
+-- introduces negations, which we cannot encode in P4 tables yet.  The ?todisj
+-- flag signals when the transformation is safe, i.e., when its result is not
+-- going to be programmed into a P4 table match entry.
+liftConds' :: (?r::Refine, ?role::Role, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
+liftConds' e = case typ' ?r (CtxRole ?role) e' of
+                    TBool _ -> if ?todisj 
+                                  then cascadeToDisj e'
+                                  else e'
+                    _       -> e'
+    where e' = liftConds'' e
+                  
+liftConds'' :: (?r::Refine, ?role::Role, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
+liftConds'' e = 
     case e of 
          EVar _ _          -> e
          EPacket _         -> e
@@ -305,13 +320,14 @@ liftConds' e =
           combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
           combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
           combineCascades' f [] es'                  = f es'
-          
-          -- XXX: this assumes that case conditions are mutually exclusive
-          cascadeToDisj (ECond _ cs d) = disj $ (map (\(c,v) -> conj [cascadeToDisj c, cascadeToDisj v]) cs) ++ 
-                                                [conj $ (map (EUnOp nopos Not . fst) cs) ++ [cascadeToDisj d]]
-          cascadeToDisj x              = x
 
-mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> Expr -> State P4State ()
+-- XXX: this assumes that case conditions are mutually exclusive
+cascadeToDisj :: Expr -> Expr
+cascadeToDisj (ECond _ cs d) = disj $ (map (\(c,v) -> conj [cascadeToDisj c, cascadeToDisj v]) cs) ++ 
+                                      [conj $ (map (EUnOp nopos Not . fst) cs) ++ [cascadeToDisj d]]
+cascadeToDisj x              = x
+
+mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
         isdyn = exprNeedsTable rhs
@@ -347,7 +363,7 @@ mkAssignTable n lhs rhs = do
                      , p4Commands = p4Commands p4 ++ command
                      , p4DynActions = p4DynActions p4 ++ dyn})
  
-mkCondTable :: (?r::Refine, ?role::Role, ?kmap::KMap) => String -> Expr -> State P4State ()
+mkCondTable :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => String -> Expr -> State P4State ()
 mkCondTable n e = do
     let table = (pp "table" <+> pp n <+> lbrace)
                 $$
@@ -386,7 +402,7 @@ populateTable r P4DynAction{..} =
                    ?kmap = p4dynKMap in
                concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
                $ flattenConds 
-               $ liftConds 
+               $ liftConds False
                $ evalExpr p4dynExpr
 
 -- Flatten cascading cases into a sequence of (condition, value) pairs
