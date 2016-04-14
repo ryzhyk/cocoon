@@ -1,0 +1,117 @@
+We would like to evaluate <language_name> on a series of realistic 
+case studies.  Ideally, these case studies should be based on the 
+main SDN killer apps: network virtualization and service chaining. 
+
+This note is an attempt to understand how <language_name> can be 
+applied in the network virtualization domain.  The focus here is 
+not on how network virtualization can be formalized and verified 
+in <language_name>, but rather on understanding the value that 
+such a formalization, if successful, will offer to network 
+virtualization providers and network operators.
+
+----
+
+Modern network virtualization frameworks, such as OpenStack's 
+Neutron and VMWare NSX, are built around programmable virtual 
+hardware: virtual NICs, switches, and routers.  These software 
+abstractions are managed by a logically centralized SDN 
+controller.  This programmable infrastructure enables SDN 
+applications to implement arbitrary virtual network topologies and 
+routing logic.  However, the complexity of creating such 
+applications is beyond reach of most network operators.  In 
+practice, network operators deploy pre-packaged SDN applications 
+distributed with the virtualization framework or by third-party 
+vendors.  These applications implement a set of features 
+sufficient for the majority of networks, including:
+
+- creation of virtual L2 and L3 network segments
+- virtual routing between virtual and physical networks
+- virtual firewalls
+- load balancing
+- service chaining
+
+These off-the-shelf solutions encapsulate most of the complexity 
+of flow table programming behind a high-level management 
+interface.  They can be seen as compilers translating high-level 
+user intents ("create a virtual network segment", "define a 
+firewall rule", "send a group of flows via a service chain", etc.) 
+into low-level flow rules.
+
+Given this state of the network virtualization market,
+<language_name> can benefit both network virtualization platform 
+providers and network operators.
+
+Network virtualization platform providers
+-----------------------------------------
+
+A high-level SDN language and verification framework may help 
+virtualization platform developers to ensure correctness of their 
+expanding SDN application ecosystem.  Striving to cater for the 
+needs of many customers, this ecosystem supports a variety of 
+features and configuration options, leading to an explosion in the 
+number of possible network configurations.  Features interact in 
+complex ways, making their exhaustive testing infeasible.  For 
+instance, virtual routing logic interacts with the interposition 
+mechanism used to implement firewalling, which in turn may 
+interfere with service chaining across different virtual network 
+segments.
+
+Under these circumstances, scalable formal verification is the 
+only way to achieve strong correctness guarantees and to maintain 
+the current rate of innovation.
+
+Research questions:
+* Feasibility of specifying and verifying virtual networks in 
+  <language_name>.  This involves constructing a series of 
+  refinements where abstract specifications define the semantics 
+  of virtual networks, whereas low-level refined specifications 
+  describe how this semantics is implemented on top of the 
+  underlying virtual switches.  
+
+   - ??Question??: is there any previous work on verifying network
+     virtualization?
+
+* The place of formal verification in the network design workflow.  
+  To what extent can various components and their assemblies be 
+  verified at development time (by the virtualization provider) vs 
+  at deployment time (by the network operator)?   The former is 
+  clearly preferable, as it allows the virtualization provider to 
+  fix defects before shipping the software to the customer.
+
+Proposed concrete steps:
+* Implement a compiler backend to compile <language_name> specs to 
+  the virtual switch API of one of existing virtualization 
+  platforms, e.g., OpenStack.
+* Implement and verify basic network virtualization features 
+  (virtual L2/L3 topology support and virtual-to-virtual and 
+  virtual-to-physical routing)
+* Implement and verify several extensions that mimic existing 
+  Neutron or NSX extensions.  The most important one would be 
+  E2-style service chaining. 
+
+Network operators
+-----------------
+
+We would like to demonstrate that <language_name> benefits network 
+operators by lowering the barrier to writing their own or 
+modifying existing SDN applications.  At the moment the majority 
+of network operators are limited to the features and configuration 
+options supported by existing SDN applications shipped with the 
+vitualization platform or by third-party vendors.  Although 
+virtualization platforms support the development of arbitrary user 
+applications by exposing their internal APIs, writing and testing 
+such applications is beyond reach of most users.
+
+<language_name> may improve the situation in two ways.  First, it 
+raises the level of abstraction from flow rules to the procedural 
+syntax of <language_name>.  More importantly, the verification 
+engine helps achieve stronger confidence that the user-developed 
+extension is correct and correctly composes with other SDN 
+applications included with the platform, for example that the 
+service chaining extension does not break isolation between 
+virtual networks.  
+
+- ??Question??: I would like to identify several examples of SDN 
+  features that are too specialized to be supported by a 
+  general-purpose virtualization platform out of the box, but may 
+  be useful in a particular application scenario.
