@@ -132,6 +132,7 @@ printUOp Not   = pp "not"
 -- True if expression cannot be interpreted at compile time and requires a P4 table.
 exprNeedsTable :: Expr -> Bool
 exprNeedsTable (EVar _ _)         = False
+exprNeedsTable (EDotVar _ _)      = False
 exprNeedsTable (EPacket _)        = False
 exprNeedsTable (EApply _ _ _)     = True
 exprNeedsTable (EField _ s _)     = exprNeedsTable s
@@ -260,6 +261,10 @@ mkStatement (SSend _ dst) = do
                            mkAssignTable tablename egressSpec portnum
                            return $ P4SApply tablename Nothing
 
+mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
+mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
+mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
+
 iteFromCascade :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
 iteFromCascade t e (ECond _ [] d)                 = iteFromCascade t e d
 iteFromCascade t e (ECond _ ((c,v):cs) d)         = do t' <- iteFromCascade t e v
@@ -303,6 +308,7 @@ liftConds'' :: (?r::Refine, ?role::Role, ?kmap::KMap, ?todisj::Bool) => Expr -> 
 liftConds'' e = 
     case e of 
          EVar _ _          -> e
+         EDotVar _ _       -> e
          EPacket _         -> e
          EApply _ f as     -> combineCascades (EApply nopos f) $ map liftConds' as
          EField _ s f      -> combineCascades (\[s'] -> EField nopos s' f) [liftConds' s]

@@ -20,6 +20,7 @@ exprFuncs r e = let ?r = r in nub $ exprFuncs' e
 
 exprFuncs' :: (?r::Refine) => Expr -> [String]
 exprFuncs' (EVar _ _)         = []
+exprFuncs' (EDotVar _ _)      = []
 exprFuncs' (EPacket _)        = []
 exprFuncs' (EApply _ f as)    = f:(concatMap exprFuncs' as)
 exprFuncs' (EField _ s _)     = exprFuncs' s
@@ -38,6 +39,7 @@ exprFuncsRec r e = let ?r = r in nub $ exprFuncsRec' e
 
 exprFuncsRec' :: (?r::Refine) => Expr -> [String]
 exprFuncsRec' (EVar _ _)         = []
+exprFuncsRec' (EDotVar _ _)      = []
 exprFuncsRec' (EPacket _)        = []
 exprFuncsRec' (EApply _ f as)    = f:(concatMap exprFuncsRec' as) ++ maybe [] exprFuncsRec' (funcDef $ getFunc ?r f)
 exprFuncsRec' (EField _ s _)     = exprFuncsRec' s
@@ -53,6 +55,7 @@ exprFuncsRec' (ECond _ cs d)     = concatMap (\(c,e) -> exprFuncsRec' c ++ exprF
 -- (it may contain function calls and references to other variables)
 exprRefersToPkt :: Expr -> Bool
 exprRefersToPkt (EVar _ _)         = False
+exprRefersToPkt (EDotVar _ _)      = False
 exprRefersToPkt (EPacket _)        = True
 exprRefersToPkt (EApply _ _ as)    = or $ map exprRefersToPkt as
 exprRefersToPkt (EField _ s _)     = exprRefersToPkt s

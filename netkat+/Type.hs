@@ -24,17 +24,18 @@ instance WithType Field where
     typ _ _ = fieldType
 
 instance WithType Expr where
-    typ _ ctx  (EVar _ v)         = fieldType $ getVar ctx v
-    typ _ _    (EPacket _)        = TUser nopos packetTypeName
-    typ r _    (EApply _ f _)     = funcType $ getFunc r f
-    typ r ctx  (EField _ e f)     = let TStruct _ fs = typ' r ctx e  in
-                                    fieldType $ fromJust $ find ((== f) . name) fs
-    typ _ _    (ELocation _ _ _)  = TLocation nopos
-    typ _ _    (EBool _ _)        = TBool nopos
-    typ _ _    (EInt _ w _)       = TUInt nopos w
-    typ r _    (EStruct _ n _)    = TUser (pos tdef) (name tdef)
-                                    where tdef = getType r n
-    typ r ctx (EBinOp _ op e1 e2) = case op of
+    typ _ ctx           (EVar _ v)         = fieldType $ getVar ctx v
+    typ _ (CtxSend _ t) (EDotVar _ v)      = fieldType $ getVar (CtxRole t) v
+    typ _ _             (EPacket _)        = TUser nopos packetTypeName
+    typ r _             (EApply _ f _)     = funcType $ getFunc r f
+    typ r ctx           (EField _ e f)     = let TStruct _ fs = typ' r ctx e  in
+                                             fieldType $ fromJust $ find ((== f) . name) fs
+    typ _ _             (ELocation _ _ _)  = TLocation nopos
+    typ _ _             (EBool _ _)        = TBool nopos
+    typ _ _             (EInt _ w _)       = TUInt nopos w
+    typ r _             (EStruct _ n _)    = TUser (pos tdef) (name tdef)
+                                             where tdef = getType r n
+    typ r ctx           (EBinOp _ op e1 e2) = case op of
                                          Eq    -> TBool nopos
                                          Lt    -> TBool nopos
                                          Gt    -> TBool nopos
@@ -47,8 +48,8 @@ instance WithType Expr where
                                          Mod   -> t1
         where t1 = typ' r ctx e1
               t2 = typ' r ctx e2
-    typ _ _   (EUnOp _ Not _)     = TBool nopos
-    typ r ctx (ECond _ _ d)       = typ r ctx d
+    typ _ _             (EUnOp _ Not _)     = TBool nopos
+    typ r ctx           (ECond _ _ d)       = typ r ctx d
 
 -- Unwrap typedef's down to actual type definition
 typ' :: (WithType a) => Refine -> ECtx -> a -> Type

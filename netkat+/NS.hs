@@ -53,11 +53,11 @@ checkRole p r n = case lookupRole r n of
 getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
-
 lookupVar :: ECtx -> String -> Maybe Field
 lookupVar (CtxRole Role{..})     n = find ((==n) . name) roleKeys
 lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
+lookupVar (CtxSend Role{..} _)   n = find ((==n) . name) roleKeys
 
 checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
 checkVar p c n = case lookupVar c n of

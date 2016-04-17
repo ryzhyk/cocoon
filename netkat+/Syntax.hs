@@ -187,6 +187,7 @@ instance WithName TypeDef where
     name = tdefName
 
 data Expr = EVar      {exprPos :: Pos, exprVar :: String}
+          | EDotVar   {exprPos :: Pos, exprVar :: String}
           | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
@@ -200,6 +201,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
 
 instance Eq Expr where
     (==) (EVar      _ k1)        (EVar      _ k2)        = k1 == k2
+    (==) (EDotVar   _ k1)        (EDotVar   _ k2)        = k1 == k2
     (==) (EPacket   _)           (EPacket   _)           = True
     (==) (EApply    _ f1 as1)    (EApply    _ f2 as2)    = (f1 == f2) && (as1 == as2)
     (==) (EField    _ s1 f1)     (EField    _ s2 f2)     = (s1 == s2) && (f1 == f2)
@@ -218,10 +220,11 @@ instance WithPos Expr where
 
 instance PP Expr where
     pp (EVar _ v)          = pp v
+    pp (EDotVar _ v)       = char '.' <> pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
-    pp (ELocation _ r as)  = pp r <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (ELocation _ r as)  = pp r <> (brackets $ hsep $ punctuate comma $ map pp as)
     pp (EBool _ True)      = pp "true"
     pp (EBool _ False)     = pp "false"
     pp (EInt _ w v)        = pp w <> pp "'d" <> pp v
@@ -248,19 +251,23 @@ disj (e:es) = EBinOp nopos Or e (disj es)
 data ECtx = CtxRole   Role
           | CtxAssume Assume
           | CtxFunc   Function
+          | CtxSend   Role Role
      
 instance Show ECtx where
-    show (CtxRole r)   = "role " ++ name r
-    show (CtxAssume a) = "assume " ++ show a
-    show (CtxFunc f)   = "function " ++ name f
+    show (CtxRole r)     = "role " ++ name r
+    show (CtxAssume a)   = "assume " ++ show a
+    show (CtxFunc f)     = "function " ++ name f
+    show (CtxSend r1 r2) = "send " ++ name r1 ++ " " ++ name r2
 
-data Statement = SSeq  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               | SPar  {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               | SITE  {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Maybe Statement}
-               | STest {statPos :: Pos, statCond :: Expr}
-               | SSet  {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
-               | SSend {statPos :: Pos, statDst :: Expr}
-
+data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
+               | SPar    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
+               | SITE    {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Maybe Statement}
+               | STest   {statPos :: Pos, statCond :: Expr}
+               | SSet    {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
+               | SSend   {statPos :: Pos, statDst  :: Expr}
+               | SSendND {statPos :: Pos, statSndRole :: String, statCond :: Expr}
+               | SHavoc  {statPos :: Pos, statLVal :: Expr}
+               | SAssume {statPos :: Pos, statCond :: Expr}
 
 statSendsTo :: Statement -> [Expr]
 statSendsTo st = nub $ statSendsTo' st
@@ -272,24 +279,30 @@ statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ (maybe [] statSendsTo' s2)
 statSendsTo' (STest _ _)       = []
 statSendsTo' (SSet  _ _ _)     = []
 statSendsTo' (SSend _ loc)     = [loc]
+statSendsTo' (SHavoc _ _)      = []
+statSendsTo' (SAssume _ _)     = []
+statSendsTo' (SSendND _ _ _)   = error "Syntax.statSendsTo' SSendND"
 
 instance WithPos Statement where
     pos = statPos
     atPos s p = s{statPos = p}
 
 instance PP Statement where
-    pp (SSeq _ s1 s2) = lbrace 
-                        $$ (nest' $ (pp s1 <> semi) $$ pp s2)
-                        $$ rbrace
-    pp (SPar _ s1 s2) = lbrace 
-                        $$ (nest' $ pp s1 $$ pp "|" $$ pp s2)
-                        $$ rbrace
-    pp (SITE _ c t e) = (pp "if" <+> pp c <+> pp "then")
-                        $$ (nest' $ pp t)
-                        $$ (maybe empty (\e' -> pp "else" $$ (nest' $ pp e')) e)
-    pp (STest _ c)    = pp "filter" <+> pp c
-    pp (SSet _ l r)   = pp l <+> pp ":=" <+> pp r
-    pp (SSend _ d)    = pp "send" <+> pp d
+    pp (SSeq _ s1 s2)   = lbrace 
+                          $$ (nest' $ (pp s1 <> semi) $$ pp s2)
+                          $$ rbrace
+    pp (SPar _ s1 s2)   = lbrace 
+                          $$ (nest' $ pp s1 $$ pp "|" $$ pp s2)
+                          $$ rbrace
+    pp (SITE _ c t e)   = (pp "if" <+> pp c <+> pp "then")
+                          $$ (nest' $ pp t)
+                          $$ (maybe empty (\e' -> pp "else" $$ (nest' $ pp e')) e)
+    pp (STest _ c)      = pp "filter" <+> pp c
+    pp (SSet _ l r)     = pp l <+> pp ":=" <+> pp r
+    pp (SSend _ d)      = pp "send" <+> pp d
+    pp (SSendND _ rl c) = pp "?send" <+> pp rl <> (brackets $ pp c)
+    pp (SHavoc _ e)     = pp "havoc" <+> pp e
+    pp (SAssume _ e)    = pp "assume" <+> pp e
 
 instance Show Statement where
     show = render . pp

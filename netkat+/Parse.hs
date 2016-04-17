@@ -15,7 +15,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["!", "|", "==", "=", ":=", "%", "+", "-"]
+reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-"]
 reservedNames = ["and",
                  "assume",
                  "bool",
@@ -26,6 +26,7 @@ reservedNames = ["and",
                  "filter",
                  "function",
                  "host",
+                 "havoc",
                  "if",
                  "not",
                  "or",
@@ -257,13 +258,19 @@ stat' =  braces stat
 simpleStat = withPos $
               stest
           <|> site
+          <|> ssendnd
           <|> ssend
           <|> sset
+          <|> shavoc
+          <|> sassume
 
-stest = STest nopos <$ reserved "filter" <*> expr
-ssend = SSend nopos <$ reserved "send" <*> expr
-sset  = SSet  nopos <$> expr <*> (reservedOp ":=" *> expr)
-site  = SITE  nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (optionMaybe $ reserved "else" *> stat)
+stest   = STest   nopos <$ reserved "filter" <*> expr
+ssendnd = SSendND nopos <$ reservedOp "?" <* reserved "send" <*> identifier <*> (brackets expr)
+ssend   = SSend   nopos <$ reserved "send" <*> expr
+sset    = SSet    nopos <$> expr <*> (reservedOp ":=" *> expr)
+site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (optionMaybe $ reserved "else" *> stat)
+shavoc  = SHavoc  nopos <$ reserved "havoc" <*> expr
+sassume = SAssume nopos <$ reserved "assume" <*> expr
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]

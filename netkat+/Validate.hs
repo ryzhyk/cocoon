@@ -16,6 +16,7 @@ import Pos
 import Name
 import Expr
 import Refine
+import Statement
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -45,6 +46,8 @@ validateFinal r = do
     case grCycle (funcGraph r) of
          Nothing -> return ()
          Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
+    mapM_ (roleValidateFinal r) $ refineRoles r
+    mapM_ (nodeValidateFinal r) $ refineNodes r
 --    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 
 --                  $ statFuncsRec r $ roleBody rl)
 --          $ concatMap (map (getRole r . snd) . nodePorts) 
@@ -135,7 +138,12 @@ roleValidate r role@Role{..} = do
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) roleKeyRange
     exprValidate r (CtxRole role) rolePktGuard
-    _ <- statValidate r role roleBody
+    _ <- statValidate r role [] roleBody
+    return ()
+
+roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
+roleValidateFinal _ Role{..} = do
+    assert (statIsDeterministic roleBody) (pos roleBody) "Cannot synthesize non-deterministic behavior"
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
@@ -161,7 +169,14 @@ nodeValidate r nd@Node{..} = do
                                                 assertR r ((init $ roleKeys rl) == roleKeys nodeRole) (pos nd) 
                                                        $ "Port " ++ name rl ++ " must be indexed with the same keys as node " ++ nodeName ++ " and one extra integer key" 
                           validateR r1
-                          validateR r2
+                          validateR r2)
+          nodePorts
+
+nodeValidateFinal :: (MonadError String me) => Refine -> Node -> me ()
+nodeValidateFinal r nd@Node{..} = do
+    -- for each port 
+    mapM_ (\(p1,p2) -> do r1 <- checkRole (pos nd) r p1
+                          r2 <- checkRole (pos nd) r p2
                           -- input ports can only send to output ports of the same node
                           assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) && 
                                                                     (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
@@ -172,19 +187,25 @@ nodeValidate r nd@Node{..} = do
                           checkLinkSt $ roleBody r2)
           nodePorts
 
+
+
 checkLinkSt :: (MonadError String me) => Statement -> me ()
-checkLinkSt (SSeq _ s1 s2) = do checkLinkSt s1
-                                checkLinkSt s2
-checkLinkSt (SPar p _  _)  = err p "Parallel composition not allowed in output port body" 
-checkLinkSt (SITE _ c t e) = do checkLinkExpr c
-                                checkLinkSt t
-                                maybe (return ()) checkLinkSt e
-checkLinkSt (STest _ e)    = checkLinkExpr e
-checkLinkSt (SSet p _ _)   = err p "Output port may not modify packets"
-checkLinkSt (SSend _ e)    = checkLinkExpr e
+checkLinkSt (SSeq _ s1 s2)  = do checkLinkSt s1
+                                 checkLinkSt s2
+checkLinkSt (SPar p _  _)   = err p "Parallel composition not allowed in output port body" 
+checkLinkSt (SITE _ c t e)  = do checkLinkExpr c
+                                 checkLinkSt t
+                                 maybe (return ()) checkLinkSt e
+checkLinkSt (STest _ e)     = checkLinkExpr e
+checkLinkSt (SSet p _ _)    = err p "Output port may not modify packets"
+checkLinkSt (SSend _ e)     = checkLinkExpr e
+checkLinkSt (SSendND _ _ _) = error "Validate.checkLinkSt SSendND" 
+checkLinkSt (SHavoc _ _)    = error "Validate.checkLinkSt SHavoc" 
+checkLinkSt (SAssume _ _)   = error "Validate.checkLinkSt SAssume" 
 
 checkLinkExpr :: (MonadError String me) => Expr -> me ()
 checkLinkExpr (EVar    _ _)       = return ()
+checkLinkExpr (EDotVar    _ _)    = return ()
 checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
 checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
 checkLinkExpr (EField _ s _)      = checkLinkExpr s
@@ -203,11 +224,16 @@ exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 exprValidate _ ctx (EVar p v) = do 
    _ <- checkVar p ctx v
    return ()
+exprValidate r ctx (EDotVar p v) = 
+   case ctx of
+        CtxSend _ t -> assertR r (isJust $ find ((== v) . name) $ roleKeys t) p $ "Unknown key " ++ v
+        _           -> errR r p "Dot-variable is not allowed here"
 exprValidate r ctx (EPacket p) = do 
    case ctx of
         CtxAssume _ -> errR r p "Assumptions cannot refer to pkt"
         CtxFunc _   -> errR r p "Functions cannot refer to pkt"
         CtxRole _   -> return ()
+        CtxSend _ _ -> return ()
    return ()
 exprValidate r ctx (EApply p f as) = do
     func <- checkFunc p r f
@@ -267,13 +293,15 @@ exprValidate r ctx (ECond _ cs def) = do
 exprValidate _ _ _ = return ()
 
 
-lexprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-lexprValidate r ctx e = do
+lexprValidate :: (MonadError String me) => Refine -> ECtx -> [Expr] -> Expr -> me ()
+lexprValidate r ctx mset e = do
     exprValidate r ctx e
     assertR r (isLExpr e) (pos e) "Not an l-value"
+    checkNotModified r ctx mset e
 
 isLExpr :: Expr -> Bool
 isLExpr (EVar _ _)        = False
+isLExpr (EDotVar _ _)     = False
 isLExpr (EPacket _)       = True
 isLExpr (EApply _ _ _)    = False
 isLExpr (EField _ s _)    = isLExpr s
@@ -285,39 +313,69 @@ isLExpr (EBinOp _ _ _ _)  = False
 isLExpr (EUnOp _ _ _)     = False
 isLExpr (ECond _ _ _)     = False
 
-statValidate :: (MonadError String me) => Refine -> Role -> Statement -> me Bool
-statValidate r role (SSeq _ h t) = do
-    sends <- statValidate r role h
+-- Checks that no part of lvalue e is in the modified set mset
+checkNotModified :: (MonadError String me) => Refine -> ECtx -> [Expr] -> Expr -> me ()
+checkNotModified r ctx mset e = do
+    let checkParent e' = do assert (not $ elem e' mset) (pos e') $ show e' ++ " has already been assigned"
+                            case e' of
+                                 EField _ p _ -> checkParent p
+                                 _            -> return ()
+    -- e and its ancestors are not in mset
+    checkParent e
+    -- recursively check children
+    case typ' r ctx e of
+         TStruct _ fs -> mapM_ (checkNotModified r ctx mset . EField nopos e . name) fs
+         _            -> return()
+
+
+statValidate :: (MonadError String me) => Refine -> Role -> [Expr] -> Statement -> me (Bool, [Expr])
+statValidate r role mset (SSeq _ h t) = do
+    (sends, mset') <- statValidate r role mset h
     assertR r (not sends) (pos h) "Send not allowed in the middle of a sequence"
-    statValidate r role t
+    statValidate r role mset' t
 
-statValidate r role (SPar _ h t) = do
-    sends1 <- statValidate r role h
-    sends2 <- statValidate r role t
-    return $ sends1 || sends2
+statValidate r role mset (SPar _ h t) = do
+    (sends1, mset1) <- statValidate r role mset h
+    (sends2, mset2) <- statValidate r role mset t
+    return $ (sends1 || sends2, union mset1 mset2)
 
-statValidate r role (SITE _ c t e) = do
+statValidate r role mset (SITE _ c t e) = do
     exprValidate r (CtxRole role) c
     assertR r (isBool r (CtxRole role) c) (pos c) "Condition must be a boolean expression"
-    sends1 <- statValidate r role t
-    sends2 <- maybe (return False) (statValidate r role) e
-    return $ sends1 || sends2
+    (sends1, mset1) <- statValidate r role mset t
+    (sends2, mset2) <- maybe (return (False,[])) (statValidate r role mset) e
+    return $ (sends1 || sends2, union mset1 mset2)
 
-statValidate r role (STest _ c) = do
+statValidate r role mset (STest _ c) = do
     exprValidate r (CtxRole role) c
     assertR r (isBool r (CtxRole role) c) (pos c) "Filter must be a boolean expression"
-    return False
+    return (False, mset)
 
-statValidate r role (SSet _ lval rval) = do
+statValidate r role mset (SSet _ lval rval) = do
     exprValidate r (CtxRole role) rval
-    lexprValidate r (CtxRole role) lval
+    lexprValidate r (CtxRole role) mset lval
     matchType r (CtxRole role) lval rval
     when (exprIsValidFlag lval) $ case rval of
                                        EBool _ _ -> return ()
                                        _         -> errR r (pos rval) $ "Not a boolean constant"
-    return False
+    return (False, union [lval] mset)
 
-statValidate r role (SSend _ dst) = do
+statValidate r role mset (SSend _ dst) = do
     exprValidate r (CtxRole role) dst
     assertR r (isLocation r (CtxRole role) dst) (pos dst) "Not a valid location"
-    return True
+    return (True, mset)
+
+statValidate r role mset (SSendND p rl c) = do
+    role' <- checkRole p r rl
+    exprValidate r (CtxSend role role') c
+    assertR r (isBool r (CtxSend role role') c) (pos c) "Condition must be a boolean expression"
+    return (True, mset)
+
+statValidate r role mset (SHavoc _ lval) = do
+    lexprValidate r (CtxRole role) mset lval
+    return (False, union [lval] mset)
+
+statValidate r role mset (SAssume _ c) = do
+    exprValidate r (CtxRole role) c
+    assertR r (isBool r (CtxRole role) c) (pos c) "Assumption must be a boolean expression"
+    return (False, mset)
