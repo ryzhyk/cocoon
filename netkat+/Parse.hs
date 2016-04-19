@@ -15,7 +15,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-"]
+reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-", "."]
 reservedNames = ["and",
                  "assume",
                  "bool",
@@ -170,7 +170,7 @@ structType = TStruct nopos <$  reserved "struct" <*> (braces $ commaSep1 arg)
 expr =  buildExpressionParser etable term
     <?> "expression"
 
-term    = parens expr <|> term'
+term  = parens expr <|> term'
 term' = withPos $
          estruct
      <|> eapply
@@ -178,7 +178,8 @@ term' = withPos $
      <|> eint
      <|> ebool
      <|> epacket
-     <|> eterm
+     <|> evar
+     <|> edotvar
      <|> econd
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
@@ -187,7 +188,8 @@ eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
     where isloc = try $ lookAhead $ identifier *> symbol "["
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
-eterm = EVar nopos <$> identifier
+evar = EVar nopos <$> identifier
+edotvar = EDotVar nopos <$ reservedOp "." <*> identifier
 econd = (fmap uncurry (ECond nopos <$ reserved "case"))
                <*> (braces $ (,) <$> (many $ (,) <$> expr <* colon <*> expr <* semi) 
                                  <*> (reserved "default" *> colon *> expr <* semi))
