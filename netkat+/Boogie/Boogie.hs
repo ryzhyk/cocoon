@@ -309,7 +309,7 @@ mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                    case M.lookup n ?rmap of
                                         Nothing -> (havoc $ pp outputVar)
                                                    $$
-                                                   (assume $ apply ("is#" ++ outputTypeName) [pp outputVar])
+                                                   assume notDropped
                                                    $$
                                                    (assume $ apply ("is#" ++ n) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
                                                    $$
@@ -411,11 +411,14 @@ mkAbstStatement _    nxt s              = error $ "Boogie.mkAbstStatement " ++ s
 isDropped :: Doc
 isDropped = apply "is#Dropped" [pp outputVar]
 
+notDropped :: Doc
+notDropped = apply "!is#Dropped" [pp outputVar]
+
 checkDropped :: Doc
 checkDropped = assrt isDropped
 
 checkNotDropped :: Doc
-checkNotDropped = assrt $ apply "!is#Dropped" [pp outputVar]
+checkNotDropped = assrt notDropped
 
 mkNext :: (?r::Refine, ?rl::Role) => MSet -> [Statement] -> Doc
 mkNext mset nxt = case nxt of
