@@ -363,12 +363,18 @@ statValidate r role mset (SSet _ lval rval) = do
 statValidate r role mset (SSend _ dst) = do
     exprValidate r (CtxRole role) dst
     assertR r (isLocation r (CtxRole role) dst) (pos dst) "Not a valid location"
+    case dst of
+         ELocation _ _ _ -> return ()
+         _               -> errR r (pos dst)  "send destination must be of the form Role[args]"
+    let ELocation p rl _ = dst
+    assertR r (rl /= name role) p "role cannot send to itself"
     return (True, mset)
 
 statValidate r role mset (SSendND p rl c) = do
     role' <- checkRole p r rl
     exprValidate r (CtxSend role role') c
     assertR r (isBool r (CtxSend role role') c) (pos c) "Condition must be a boolean expression"
+    assertR r (rl /= name role) p "role cannot send to itself"
     return (True, mset)
 
 statValidate r role mset (SHavoc _ lval) = do
