@@ -5,6 +5,7 @@ import Text.Parsec.Prim
 import Control.Monad
 import System.FilePath.Posix
 import Text.PrettyPrint
+import Text.Printf
 import Data.Maybe
 import Data.List
 import System.Directory
@@ -55,9 +56,10 @@ main = do
     oldfiles <- listDirectory boogiedir
     mapM_ (removeFile . (boogiedir </>)) oldfiles
     mapIdxM_ (\(_, (asms, mroles)) i -> do -- putStrLn $ "Verifying refinement " ++ show i ++ " with " ++ (show $ length asms) ++ " verifiable assumptions , " ++ (maybe "_" (show . length) mroles) ++ " roles" 
-                                           mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_asm" ++ show j) "bpl") (render b)) asms
+                                           let specN = printf "spec%02d" i
+                                           mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension (specN ++ "_asm" ++ show j) "bpl") (render b)) asms
                                            maybe (return ())
-                                                 (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension ("spec" ++ show i ++ "_" ++ rl) "bpl") (render b)))
+                                                 (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension (specN ++ "_" ++ rl) "bpl") (render b)))
                                                  mroles)
              boogieSpecs
     
