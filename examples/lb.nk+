@@ -178,7 +178,7 @@ refine LoadBalancerIn{
  *)
 refine {
     function iserver(IP4 addr): bool = 
-        addr == IP4{10,0,0,1} or 
-        addr == IP4{10,0,0,2} or 
-        addr == IP4{10,0,0,3}
+        addr == IP4{8'd10,8'd0,8'd0,8'd1} or 
+        addr == IP4{8'd10,8'd0,8'd0,8'd2} or 
+        addr == IP4{8'd10,8'd0,8'd0,8'd3}
 }

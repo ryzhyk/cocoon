@@ -98,9 +98,9 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (pp outputVar =: (pp "Dropped" <> (parens $ empty)))
                  $$
-                 (call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
-                 $$
                  (call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
+                 $$
+                 (call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
 
 mkLocType :: Refine -> Doc
 mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
@@ -205,7 +205,7 @@ mkAbstExpr :: (?r::Refine) => ECtx -> MSet -> Expr -> Doc
 mkAbstExpr c mset e = let ?mset = mset 
                           ?c = c
                           ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
-                          ?p = pktVar in 
+                          ?p = "_pkt" in 
                       mkExpr' e
 
 mkExprP :: String -> Refine -> ECtx -> Expr -> Doc
@@ -248,7 +248,7 @@ mkPktField e =
     -- Parent or e in mset -- outp.field
     if isInMSet e
        then field (apply ("pkt#" ++ outputTypeName) [pp outputVar]) e
-       else if not (overlapsMSet e)
+       else if not (overlapsMSet e ?mset)
                then -- None of the children overlaps with mset -- generate as is
                     field (pp ?p) e
                else -- otherwise -- constructor with recursive calls for fields
@@ -259,10 +259,6 @@ mkPktField e =
                        case x of
                             EField _ p _ -> isInMSet p
                             _            -> False
-          overlapsMSet x = elem x ?mset ||
-                           case typ' ?r ?c x of
-                                TStruct _ fs -> any (overlapsMSet . EField nopos x . name) fs
-                                _            -> False 
           field p (EPacket _)    = p
           field p (EField _ s f) = let TUser _ tn = typ'' ?r ?c s
                                    in pp f <> char '#' <> pp tn <> (parens $ field p s)
@@ -383,7 +379,7 @@ mkAbstStatement mset nxt (SITE _ c t e) = stat
 mkAbstStatement mset nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
                                           $$
                                           mkNext mset nxt
-mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ checkDropped <+> pp "||" <+> (parens $ mkAbstExpr (CtxRole ?rl) mset' l === mkAbstExpr (CtxRole ?rl) mset rhs))
+mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ (apply "is#Dropped" [pp outputVar]) <+> pp "||" <+> (parens $ mkAbstExpr (CtxRole ?rl) mset' l === mkAbstExpr (CtxRole ?rl) mset rhs))
                                           $$
                                           mkNext mset' nxt
     where mset' = msetUnion [l] mset
@@ -438,14 +434,22 @@ msetEq ms1 ms2 = length ms1 == length ms2 && (length $ intersect ms1 ms2) == len
 msetUnion :: MSet -> MSet -> MSet
 msetUnion s1 s2 = union s1 s2
 
+overlapsMSet :: (?r::Refine, ?c::ECtx) => Expr -> MSet -> Bool
+overlapsMSet x mset = elem x mset ||
+                      case typ' ?r ?c x of
+                           TStruct _ fs -> any (\f -> overlapsMSet (EField nopos x $ name f) mset) fs
+                           _            -> False 
+
+
 msetComplement :: (?r::Refine, ?rl::Role) => MSet -> MSet
 msetComplement mset = msetComplement' (EPacket nopos)
     where ctx = CtxRole ?rl
           msetComplement' e = if elem e mset
                                  then []
-                                 else case typ' ?r ctx e of
-                                           TStruct _ fs -> concatMap (msetComplement' . EField nopos e . name) fs
-                                           _            -> [e]
+                                 else if (let ?c = ctx in overlapsMSet e mset)
+                                         then let TStruct _ fs = typ' ?r ctx e in
+                                              concatMap (msetComplement' . EField nopos e . name) fs
+                                         else [e]
 
 mkBVOps :: Refine -> Doc
 mkBVOps r = vcat $ map mkOpDecl $ collectOps r
