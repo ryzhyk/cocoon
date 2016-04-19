@@ -237,8 +237,8 @@ mkExpr' (EBool _ False)      = pp "false"
 mkExpr' (EInt _ w v)         = pp v <> text "bv" <> pp w
 mkExpr' (EStruct _ n fs)     = apply n $ map mkExpr' fs
 mkExpr' (EBinOp _ Eq e1 e2)  = parens $ mkExpr' e1 === mkExpr' e2
-mkExpr' (EBinOp _ And e1 e2) = parens $ mkExpr' e1 <+> text "&&" <+> mkExpr' e2
-mkExpr' (EBinOp _ Or e1 e2)  = parens $ mkExpr' e1 <+> text "||" <+> mkExpr' e2
+mkExpr' (EBinOp _ And e1 e2) = parens $ mkExpr' e1 &&& mkExpr' e2
+mkExpr' (EBinOp _ Or e1 e2)  = parens $ mkExpr' e1 ||| mkExpr' e2
 mkExpr' (EBinOp _ op e1 e2)  = bvbop op e1 e2
 mkExpr' (EUnOp _ Not e)      = parens $ char '!' <> mkExpr' e
 mkExpr' (ECond _ cs d)       = mkCond cs d 
@@ -379,18 +379,22 @@ mkAbstStatement mset nxt (SITE _ c t e) = stat
 mkAbstStatement mset nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
                                           $$
                                           mkNext mset nxt
-mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ (apply "is#Dropped" [pp outputVar]) <+> pp "||" <+> (parens $ mkAbstExpr (CtxRole ?rl) mset' l === mkAbstExpr (CtxRole ?rl) mset rhs))
+mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ isDropped ||| (parens $ mkAbstExpr (CtxRole ?rl) mset' l === mkAbstExpr (CtxRole ?rl) mset rhs))
                                           $$
                                           mkNext mset' nxt
     where mset' = msetUnion [l] mset
-mkAbstStatement mset []  (SSend _ dst)  = (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) === (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset) ks))
+mkAbstStatement mset []  (SSend _ dst)  = checkNotDropped
+                                          $$
+                                          (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) === (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset) ks))
                                           $$
                                           (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e === mkAbstExpr (CtxRole ?rl) mset e) mset')
                                           $$
                                           ret
     where mset' = msetComplement mset
           ELocation _ rname ks = dst
-mkAbstStatement mset []  (SSendND _ rl c) = (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
+mkAbstStatement mset []  (SSendND _ rl c) = checkNotDropped
+                                            $$
+                                            (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
                                             $$
                                             (assrt $ mkAbstExpr (CtxSend ?rl $ getRole ?r rl) mset c)
                                             $$
@@ -399,13 +403,19 @@ mkAbstStatement mset []  (SSendND _ rl c) = (assrt $ apply ("is#" ++ rl) [apply 
                                             ret
     where mset' = msetComplement mset
 mkAbstStatement mset nxt (SHavoc _ e)   = mkNext (msetUnion mset [e]) nxt
-mkAbstStatement mset nxt (SAssume _ c)  = (assrt $ mkAbstExpr (CtxRole ?rl) mset c)
+mkAbstStatement mset nxt (SAssume _ c)  = (assrt $ isDropped ||| mkAbstExpr (CtxRole ?rl) mset c)
                                           $$
                                           mkNext mset nxt
 mkAbstStatement _    nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
 
+isDropped :: Doc
+isDropped = apply "is#Dropped" [pp outputVar]
+
 checkDropped :: Doc
-checkDropped = assrt $ apply "is#Dropped" [pp outputVar]
+checkDropped = assrt isDropped
+
+checkNotDropped :: Doc
+checkNotDropped = assrt $ apply "!is#Dropped" [pp outputVar]
 
 mkNext :: (?r::Refine, ?rl::Role) => MSet -> [Statement] -> Doc
 mkNext mset nxt = case nxt of
@@ -518,6 +528,12 @@ assume c = pp "assume" <+> c <> semi
 
 (===) :: Doc -> Doc -> Doc
 (===) x y = x <+> pp "==" <+> y
+
+(|||) :: Doc -> Doc -> Doc
+(|||) x y = x <+> pp "||" <+> y
+
+(&&&) :: Doc -> Doc -> Doc
+(&&&) x y = x <+> pp "&&" <+> y
 
 apply :: String -> [Doc] -> Doc
 apply f as = pp f <> (parens $ hsep $ punctuate comma as)
