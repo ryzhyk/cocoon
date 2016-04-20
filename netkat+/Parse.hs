@@ -238,7 +238,7 @@ etable = [[postf $ choice [postField]]
            binary ">=" Gte AssocNone]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
-
+         ,[binary "=>" Impl AssocLeft]
          ]
 
 pref  p = Prefix  . chainl1 p $ return       (.)

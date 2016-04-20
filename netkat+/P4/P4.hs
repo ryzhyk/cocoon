@@ -110,6 +110,7 @@ printExpr (EField _ e f)                        = printExpr e <> char '_' <> pp 
 printExpr (EBool _ True)                        = pp "true"
 printExpr (EBool _ False)                       = pp "false"
 printExpr (EInt _ _ v)                          = pp $ show v
+printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr e                                     = error $ "P4.printExpr " ++ show e
@@ -125,6 +126,7 @@ printBOp Or    = pp "or"
 printBOp Plus  = pp "+"
 printBOp Minus = pp "-"
 printBOp Mod   = pp "%"
+printBOp Impl  = error "P4.printBOp =>"
 
 printUOp :: UOp -> Doc
 printUOp Not   = pp "not"

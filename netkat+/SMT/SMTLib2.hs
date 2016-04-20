@@ -98,6 +98,7 @@ instance SMTPP BOp where
     smtpp Gte   = pp "bvuge"
     smtpp And   = pp "and"
     smtpp Or    = pp "or"
+    smtpp Impl  = pp "=>"
     smtpp Plus  = pp "bvadd"
     smtpp Minus = pp "bvsub"
     smtpp Mod   = pp "bvurem"

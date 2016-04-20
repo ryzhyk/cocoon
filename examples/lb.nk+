@@ -124,7 +124,7 @@ refine LoadBalancerIn {
     function hostedAt(FlowId flow): IP4
 
     (* Assumption: hostedAt must return valid server address *)
-    assume (FlowId flow, IP4 addr) (not (addr == hostedAt(flow))) or iserver(addr)
+    assume (FlowId flow, IP4 addr) (addr == hostedAt(flow)) => iserver(addr)
 
     (* Physical server port: deliver packet to the HTTP server if it is
        hosted at this physical server; drop it otherwise *)

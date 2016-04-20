@@ -219,11 +219,11 @@ mkExprP p r c e = let ?c = c
 -- Generage Boogie expression.
 -- Replace packet fields in ?mset with field of outputVar
 mkExpr' :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => Expr -> Doc
-mkExpr' (EVar _ v)           = pp v
-mkExpr' (EDotVar _ v)        = let CtxSend _ rl = ?c in 
-                               apply (v ++ "#" ++ (name rl)) [?loc]
-mkExpr' e@(EPacket _)        = mkPktField e
-mkExpr' (EApply _ f as)      = apply f $ map mkExpr' as
+mkExpr' (EVar _ v)            = pp v
+mkExpr' (EDotVar _ v)         = let CtxSend _ rl = ?c in 
+                                apply (v ++ "#" ++ (name rl)) [?loc]
+mkExpr' e@(EPacket _)         = mkPktField e
+mkExpr' (EApply _ f as)       = apply f $ map mkExpr' as
 mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
                          | otherwise    = 
                                let TUser _ tn = typ'' ?r ?c s
@@ -231,17 +231,18 @@ mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
     where isPktField (EField _ s' _) = isPktField s'
           isPktField (EPacket _)     = True
           isPktField _               = False
-mkExpr' (ELocation _ _ _)    = error "Not implemented: Boogie.mkExpr' ELocation"
-mkExpr' (EBool _ True)       = pp "true"
-mkExpr' (EBool _ False)      = pp "false"
-mkExpr' (EInt _ w v)         = pp v <> text "bv" <> pp w
-mkExpr' (EStruct _ n fs)     = apply n $ map mkExpr' fs
-mkExpr' (EBinOp _ Eq e1 e2)  = parens $ mkExpr' e1 === mkExpr' e2
-mkExpr' (EBinOp _ And e1 e2) = parens $ mkExpr' e1 &&& mkExpr' e2
-mkExpr' (EBinOp _ Or e1 e2)  = parens $ mkExpr' e1 ||| mkExpr' e2
-mkExpr' (EBinOp _ op e1 e2)  = bvbop op e1 e2
-mkExpr' (EUnOp _ Not e)      = parens $ char '!' <> mkExpr' e
-mkExpr' (ECond _ cs d)       = mkCond cs d 
+mkExpr' (ELocation _ _ _)     = error "Not implemented: Boogie.mkExpr' ELocation"
+mkExpr' (EBool _ True)        = pp "true"
+mkExpr' (EBool _ False)       = pp "false"
+mkExpr' (EInt _ w v)          = pp v <> text "bv" <> pp w
+mkExpr' (EStruct _ n fs)      = apply n $ map mkExpr' fs
+mkExpr' (EBinOp _ Eq e1 e2)   = parens $ mkExpr' e1 === mkExpr' e2
+mkExpr' (EBinOp _ And e1 e2)  = parens $ mkExpr' e1 &&& mkExpr' e2
+mkExpr' (EBinOp _ Or e1 e2)   = parens $ mkExpr' e1 ||| mkExpr' e2
+mkExpr' (EBinOp _ Impl e1 e2) = parens $ mkExpr' e1 ==> mkExpr' e2
+mkExpr' (EBinOp _ op e1 e2)   = bvbop op e1 e2
+mkExpr' (EUnOp _ Not e)       = parens $ char '!' <> mkExpr' e
+mkExpr' (ECond _ cs d)        = mkCond cs d 
 
 mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc
 mkPktField e = 
@@ -277,8 +278,6 @@ bvbopname Lt    = "ULT"
 bvbopname Gt    = "UGT"
 bvbopname Lte   = "ULEQ"
 bvbopname Gte   = "UGEQ"
-bvbopname And   = "AND"
-bvbopname Or    = "OR"
 bvbopname Plus  = "ADD"
 bvbopname Minus = "SUB"
 bvbopname op    = error $ "Not implemented: Boogie.bvbopname " ++ show op
@@ -537,6 +536,9 @@ assume c = pp "assume" <+> c <> semi
 
 (&&&) :: Doc -> Doc -> Doc
 (&&&) x y = x <+> pp "&&" <+> y
+
+(==>) :: Doc -> Doc -> Doc
+(==>) x y = x <+> pp "==>" <+> y
 
 apply :: String -> [Doc] -> Doc
 apply f as = pp f <> (parens $ hsep $ punctuate comma as)

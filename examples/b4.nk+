@@ -71,7 +71,7 @@ refine HostOut {
     (* Port on the other end of WAN link *)
     function wanLink(SiteId site, uint<8> port): WANPort
 
-    assume(SiteId site, uint<8> port) (not (iwanPort(site, port) and wpConnected(site,port))) or iwanPort(wanLink(site,port).site, wanLink(site,port).port)
+    assume(SiteId site, uint<8> port) ((iwanPort(site, port) and wpConnected(site,port))) => iwanPort(wanLink(site,port).site, wanLink(site,port).port)
 
     (* maps host to site it belongs to, e.g., based on subnet *)   
     function hostSite(IP4 addr): SiteId
@@ -82,13 +82,13 @@ refine HostOut {
 
     function nexthop(TunnelId tun, SiteId site): uint<8>
     assume(SiteId src, SiteId dst, Packet p, TunnelId tid, SiteId next)
-           (not (tid == tunnel(src, dst, flowid(p)) and next == wanLink(src, nexthop(tid, src)).site)) or 
+           (tid == tunnel(src, dst, flowid(p)) and next == wanLink(src, nexthop(tid, src)).site) => 
            (wpConnected(src,nexthop(tid,src)) and (next == dst or wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
 
-    assume(SiteId site, TunnelId tid) (not isite(site)) or iwanPort(site, nexthop(tid, site))
-    assume(SiteId site, TunnelId tid) (not isite(site)) or wpConnected(site, nexthop(tid,site))
+    assume(SiteId site, TunnelId tid) isite(site) => iwanPort(site, nexthop(tid, site))
+    assume(SiteId site, TunnelId tid) isite(site) => wpConnected(site, nexthop(tid,site))
 
-    assume(IP4 addr) (not ihost(addr)) or isite(hostSite(addr))
+    assume(IP4 addr) ihost(addr) => isite(hostSite(addr))
 
     role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
         if hostSite(dst(pkt)) == hostSite(addr) then {

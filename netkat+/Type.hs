@@ -43,6 +43,7 @@ instance WithType Expr where
                                          Gte   -> TBool nopos
                                          And   -> TBool nopos
                                          Or    -> TBool nopos
+                                         Impl  -> TBool nopos
                                          Plus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          Minus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          Mod   -> t1

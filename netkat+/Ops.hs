@@ -11,6 +11,7 @@ data BOp = Eq
          | Gte
          | And
          | Or
+         | Impl
          | Plus
          | Minus
          | Mod
@@ -24,6 +25,7 @@ instance PP BOp where
     pp Gte    = pp ">="
     pp And    = pp "and"
     pp Or     = pp "or"
+    pp Impl   = pp "=>"
     pp Plus   = pp "+"
     pp Minus  = pp "-"
     pp Mod    = pp "%"
