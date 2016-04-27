@@ -1,0 +1,120 @@
+typedef uint<32> IP4
+
+typedef struct {
+    uint<48> dstAddr,
+    uint<48> srcAddr
+} HEth
+
+typedef struct {
+    uint<8> protocol,
+    IP4 src,
+    IP4 dst
+} HIP4
+
+typedef struct {
+    bool valid,
+    uint<16> tag
+} VLANTag
+
+typedef struct {
+    HEth     ethernet,
+    HIP4     ip4,
+    VLANTag  vlan
+} Packet
+
+typedef uint<10> ASId
+typedef struct {
+    uint<32> addr,
+    uint<8>  mask
+} IP4Prefix
+
+typedef uint<16> ASPort
+typedef uint<16> SDXPort
+
+(* 
+Network topogy encoding
+*)
+
+(* Set of ASs connected to the SDX *)
+function iAS(ASId id): bool
+
+(* AS 0 is a reserved value *)
+function asnone(): ASId = 16'd0
+assume iAS(asnone()) == false
+
+(* Set of SDX-facing ports for each AS *)
+function iASPort(ASId as, ASPort port): bool
+assume (ASId as, ASPort port) iASPort(as, port) => iAS(as)
+
+(*
+Database of routes advertised via BGP 
+*)
+function bgp_db(): List<(ASId, List<IP4Prefix> >
+
+(*
+User-defined policy functions 
+*)
+function outbound_policy(ASId as, HIP4 p): ASId
+function inbound_policy(ASId as, HIP4 p): ASPort
+assume (inbound_policy(as, p) == port) => iASPort(as, port)
+
+function next_hop(ASId as, IP4 addr): ASId
+
+(* next_hop must be consistent with bgp_db *)
+assume (ASId as, ASId dst, IP4 ip) ((not dst == asnone()) and (next_hop(as, ip) == dst)) => prefix_match(ip, snd(find(bgp_db(), (==dst) . fst)))
+
+(* true iff addr matches one of the prefixes *)
+function prefix_match(IP4 addr, List<IP4Prefix>): bool
+
+role ASRouterIn[ASId as] | iAS(as) = 
+    let dst = outbound_policy(as, pkt.ip4) in
+    let defdst = next_hop(as, pkt.ip4.dst) in {
+        havoc pkt.eth;
+        if (not dst == asnone()) and
+           prefix_match(pkt.ip4.dst, snd(find(bgp_db(), (==dst) . fst))) then {
+            send ASSDXIn[dst, inbound_policy(dst, pkt.ip4)]
+        } else if not defdst == asnone() then {
+            send ASSDXIn[defdst, inbound_policy(defdst, pkt.ip4)]
+        }
+    }
+
+role ASSDXIn[ASId as, ASPort port] | iASPort(as, port) = filter false
+
+refine ASRouterIn {
+
+    function iSDXPort(SDXPort port): bool
+
+    (* Connections between AS and SDX ports *)
+    function as_sdx_connection(ASId as, ASPort asport): SDXPort
+    assume iASPort(as, asport) => iSDXPort(as_sdx_connection(as, asport))
+    function sdx_as_connection(SDXPort port): (AS, ASPort)
+    assume iSDXPort(sdxport) => iASPort(sdx_as_connection(sdxport))
+    assume iASPort(as, asport) => (sdxport == as_sdx_connection(as, asport)) == ((as, asport) == sdx_as_connection(sdxport))
+
+    (* hierarchical encoding/decoding procedures *)
+    function encode(ASId as, List<ASId>): uint<38>
+    function decode(ASId as, uint<38>): List<ASId>
+    assume(ASId as, List<ASId> rset) iAS(as) => decode(as, encode(as, rset)) == rset
+
+    role ASRouterIn[ASId as] | iAS(as) = 
+         let rset = map(fst, filter(bgp_db(),prefix_match(pkt.ip4.dst))) in
+         pkt.eth.dstAddr := encode(rset) ++ next_hop(as, pkt.ip4.dst);
+         send ASRouterOut[as, 16'd0] 
+
+    role ASRouterOut[ASId as, ASPort port] | iASPort(as, port) = 
+         send SDXIn[as_sdx_connection(as, port)]
+
+    role SDXIn[SDXPort port] | iSDXPort(port) = 
+        let srcas  = sdx_as_connection(port).as in
+        let rset   = decode(pkt.eth.dstAddr[0:37]) in
+        let dst    = outbound_policy(srcas, pkt.ip4) in
+        let defdst = pkt.eth.dstAddr[38:47] in
+        if ((not dst == asnone()) and elem(dst,rset)) then {
+            send SDXOut[as_sdx_connection(dst, inbound_policy(dst, pkt.ip4))]
+        } else if not defdst == asnone() then {
+            send SDXOut[as_sdx_connection(defdst, inbound_policy(defdst, pkt.ip4)]
+        }
+
+    role SDXOut[SDXPort port] | iSDXPort(port) = 
+        ASSDXIn[sdx_as_connection(port).as, sdx_as_connection(port).port]
+}
