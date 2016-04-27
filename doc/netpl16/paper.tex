@@ -1,0 +1,92 @@
+\documentclass[letterpaper,10pt,twocolumn]{article}
+\usepackage[pdftex]{graphicx}
+\usepackage{url}
+\usepackage{cite}
+\usepackage{epigraph}
+\def\docstatus{}
+
+\setkeys{Gin}{keepaspectratio=true,clip=true,draft=false,width=\linewidth}
+\usepackage{times,cite,url}
+\renewcommand{\ttdefault}{cmtt}	% CM rather than courier for \tt
+
+\newcommand{\Comment}[1]{\relax}
+
+\newcommand{\leonid}[1]{\Comment{#1 [leonid]}}
+\newcommand{\code}[1]{\texttt{#1}}
+
+\begin{document}
+
+\title{Towards Correct-by-Construction SDN}
+
+\author{}
+
+\date{}
+\maketitle
+
+Raise the level of abstraction in SDN programming from managing 
+individual network switches to programming the entire network.
+
+ease of programming, correctness.
+
+So far, only domain-specific solutions have been successful.  For 
+example, there exist languages for network virtualization and 
+service chaining.  However, when developing an SDN solution that 
+does not fall into one of these categories, you either have to 
+program at the switch level (OpenFlow, P4, OVSDB, NetKat) or 
+define a new SDN language and compiler for it.  In fact, even 
+combinations of existing features require compiler extensions, 
+e.g., adding service chaining to network virtualization.
+
+We believe that the key roadblock to the creation is that there 
+does not exist a synthesis algorithm capable of mapping arbitrary 
+functional and non-functional requirements to a near optimal 
+implementation on top of a specific network fabric.  We work off 
+the premise that such a general-purpose algorithm is unlikely to 
+exist in the near future.
+
+We propose CoCooN--a general-purpose SDN programming language and 
+verification system with the focus on modularity and correctness.  
+Network programming in CoCooN on iterative specification 
+refinement.  The network operator starts with a high-level 
+functional description of the desired network behavior.  This 
+description focuses solely on the service that the network should 
+provide to each network packet as opposed to how this service is 
+implemented within the network fabric.  
+
+iteratively refines this top-level spec adding the details of
+topology, routing, fault recovery strategies, etc. 
+
+The final specification contains sufficient detail to directly 
+generate SDN control and data plane implementations.
+
+Refinements are performed in a modular way, with every refinement 
+confined to a single component of the network. 
+
+This modularity enforces clean separation of concerns and ensures 
+that each individual refinement is amenable to automatic formal 
+verification.
+
+Correctness of each refinement in turn guarantees that the final 
+specification is functionally equivalent to the initial top-level 
+specification.  
+
+Importantly, refinements can be performed either manually or 
+automatically.  In the latter case, the user instantiates one of 
+many \emph{refinement tactics}.  An example tactic could be
+shortest-path routing within a segment of the network.  
+
+Note that, in contrast to automatic compilation technique, CoCooN 
+does not enforce any particular compilation tactic.  Different 
+tactics can be applied in different parts of the network.  In 
+either case, correctness of the refinement is enforced by the 
+CoCooN verifier.  
+
+We are able to formalize, synthesize, and verify many existing 
+domain-specific abstractions, including virtual networks, service 
+chaining, B4-style WANs, iSDX, to name a few. 
+
+%\bibliographystyle{acm}
+%
+%\bibliography{extra}
+
+\end{document}
