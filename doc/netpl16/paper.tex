@@ -4,89 +4,155 @@
 \usepackage{cite}
 \usepackage{epigraph}
 \def\docstatus{}
+\usepackage{titlesec}
+\usepackage{authblk}
+\usepackage{natbib}
+
+\usepackage[letterpaper, left=0.7in, right=0.7in, top=1.5in, 
+bottom=1in]{geometry}
+
+\usepackage{authblk}
+\makeatletter
+\renewcommand\AB@affilsepx{ \quad \protect\Affilfont}
+\makeatother
+
 
 \setkeys{Gin}{keepaspectratio=true,clip=true,draft=false,width=\linewidth}
 \usepackage{times,cite,url}
 \renewcommand{\ttdefault}{cmtt}	% CM rather than courier for \tt
+
 
 \newcommand{\Comment}[1]{\relax}
 
 \newcommand{\leonid}[1]{\Comment{#1 [leonid]}}
 \newcommand{\code}[1]{\texttt{#1}}
 
+\titlespacing*{\paragraph} {0pt}{.5ex plus .2ex minus .2ex}{1em}
+
+\titleformat*{\section}{\bfseries}
+\titlespacing*{\section} {0pt}{1ex plus .2ex minus .2ex}{0.3em}
+
+
+\pagenumbering{gobble}
+
 \begin{document}
 
-\title{Towards Correct-by-Construction SDN}
+\title{\vspace{-3cm}Towards Correct-by-Construction SDN}
 
-\author{}
+\author[1]{Leonid Ryzhyk}
+\author[2]{Nikolaj Bj{\o}rner}
+\author[3]{Marco Canini}
+\author[1]{Jean-Baptiste Jeannin}
+\author[1]{Nina Narodytska}
+\author[1]{Cole Schlesinger}
+\author[1]{Douglas B. Terry}
+\author[2]{George Varghese}
+
+\affil[1]{Samsung Research America}
+\affil[2]{Microsoft Research}
+\affil[3]{Universit\'e Catholique de Louvain}
 
 \date{}
 \maketitle
 
-Raise the level of abstraction in SDN programming from managing 
-individual network switches to programming the entire network.
+High-level SDN languages raise the level of abstraction in SDN 
+programming from managing individual switches to programming 
+network-wide policies.  In this talk we will present Cocoon (for 
+\emph{COrrect by COnstruction Networking}), a high-level SDN 
+language designed with the following goals in mind:
 
-ease of programming, correctness.
+\paragraph{Generality} Cocoon enables a wide range of SDN 
+applications, ranging from network virtualization, through 
+software-defined IXPs, to home networks. 
 
-So far, only domain-specific solutions have been successful.  For 
-example, there exist languages for network virtualization and 
-service chaining.  However, when developing an SDN solution that 
-does not fall into one of these categories, you either have to 
-program at the switch level (OpenFlow, P4, OVSDB, NetKat) or 
-define a new SDN language and compiler for it.  In fact, even 
-combinations of existing features require compiler extensions, 
-e.g., adding service chaining to network virtualization.
+%This is in contrast to many existing languages designed for a 
+%particular application domain, such as service 
+%chaining~\cite{Hinrichs_GCMS_09} or virtualization~\cite{neutron}.
 
-We believe that the key roadblock to the creation is that there 
-does not exist a synthesis algorithm capable of mapping arbitrary 
-functional and non-functional requirements to a near optimal 
-implementation on top of a specific network fabric.  We work off 
-the premise that such a general-purpose algorithm is unlikely to 
-exist in the near future.
+\paragraph{Dynamism} A Cocoon program captures both data and 
+control plane behavior.  The Cocoon interpreter runs as an SDN 
+application on top of the controller, dynamically managing the 
+network configuration according to the Cocoon program.  This is in 
+contrast to languages such as NetKAT~\cite{Smolka_EFG_15} that 
+specify an instant snapshot of the dataplane configuration.  The 
+SDN application manages the network by generating updates to the 
+NetKAT program; the semantics of the application itself is outside 
+of the domain of the language.  
 
-We propose CoCooN--a general-purpose SDN programming language and 
-verification system with the focus on modularity and correctness.  
-Network programming in CoCooN on iterative specification 
-refinement.  The network operator starts with a high-level 
-functional description of the desired network behavior.  This 
-description focuses solely on the service that the network should 
-provide to each network packet as opposed to how this service is 
-implemented within the network fabric.  
+\paragraph{Flexibility} Existing high-level SDN languages rely on 
+fixed compilation strategies in mapping the high-level network 
+program to a switch-level implementation.  Whenever the mapping 
+produced by the compiler does not meet the network operator's 
+requirements, compiler modifications are needed.  In contrast, 
+Cocoon does not enforce any particular compilation strategy, 
+giving the programmer complete control over the mapping process.
 
-iteratively refines this top-level spec adding the details of
-topology, routing, fault recovery strategies, etc. 
+\paragraph{Correctness} Crucially, we aim to provide strong 
+correctness guarantees through formal verification for complex 
+dynamic networks.  Examples of such networks that motivate this 
+work are: software-defined cellular cores~\cite{Jin_LVR_13}, cloud 
+data centers, WANs~\cite{Jain_KMOPSVWZZZHSV_13}, etc.
 
-The final specification contains sufficient detail to directly 
-generate SDN control and data plane implementations.
+\vspace{2mm}
+
+Cocoon achieves these objectives via a programming model based on 
+\emph{iterative refinement}.  The programmer starts with a 
+high-level functional description of the desired network behavior, 
+focusing solely on the service that the network should provide to 
+each packet as opposed to how this service is implemented within 
+the network fabric.  This high-level description defines 
+correctness criteria that the resulting implementation must 
+satisfy.
+
+The developer iteratively refines the top-level specification 
+adding the details of topology, routing, fault recovery, etc.  The 
+final Cocoon specification contains sufficient detail to directly 
+generate an SDN application that manages network switches via a 
+Southbound API such as P4 or OpenFlow.  
+
+Refinements are performed either manually or automatically.  In 
+the latter case, the user picks one of an extensible set of 
+\emph{refinement tactics}.  A tactic can be as simple as 
+instantiating shortest-path routing within a segment of the 
+network, or as complicated as the global NetKAT compilation 
+algorithm~\cite{Smolka_EFG_15}.  The user is free to apply 
+different tactics to different parts of the network.  Whenever no 
+existing tactic matches application requirements, the user can 
+implement their own custom solution via a manual refinement.
 
 Refinements are performed in a modular way, with every refinement 
-confined to a single component of the network. 
+confined to a single component of the network.  Modularity is 
+enforced at the language level: a Cocoon program defines a number 
+of \emph{roles}, where each role models a group of similar 
+entities, e.g., top-of-rack switches, virtual network function 
+instances, or a segment of the switching fabric.  A refinement 
+replaces one or more roles with a more detailed implementation, 
+possibly splitting them into multiple roles.  
 
-This modularity enforces clean separation of concerns and ensures 
-that each individual refinement is amenable to automatic formal 
-verification.
+The modular refinement process facilitates clean separation of 
+concerns and ensures that each individual refinement is amenable 
+to automatic formal verification.  The Cocoon verifier proves for 
+each refinement that the refined specification is functionally 
+equivalent to the abstract role it refines.  Correctness of each 
+refinement in the chain guarantees that the final specification is 
+functionally equivalent to the top-level specification.  
 
-Correctness of each refinement in turn guarantees that the final 
-specification is functionally equivalent to the initial top-level 
-specification.  
+%The control plane is specified using a purely functional language 
+%that 
 
-Importantly, refinements can be performed either manually or 
-automatically.  In the latter case, the user instantiates one of 
-many \emph{refinement tactics}.  An example tactic could be
-shortest-path routing within a segment of the network.  
+In this talk, we will present the Cocoon's design philosophy, 
+outline its syntax and semantics, as well as report on several 
+case studies where we used Cocoon to synthesize and verify a range 
+of SDN applications, including network virtualization, service 
+chaining, a B4-style WAN~\cite{Jain_KMOPSVWZZZHSV_13}, and a 
+software-defined internet exchange~\cite{Gupta_MBCFRV_16}. 
 
-Note that, in contrast to automatic compilation technique, CoCooN 
-does not enforce any particular compilation tactic.  Different 
-tactics can be applied in different parts of the network.  In 
-either case, correctness of the refinement is enforced by the 
-CoCooN verifier.  
+\bibliographystyle{abbrv}
 
-We are able to formalize, synthesize, and verify many existing 
-domain-specific abstractions, including virtual networks, service 
-chaining, B4-style WANs, iSDX, to name a few. 
-
-%\bibliographystyle{acm}
+\setlength{\bibsep}{1pt}
 %
-%\bibliography{extra}
+%\renewcommand{\bibfont}{\footnotesize}
+
+\bibliography{refs}
 
 \end{document}

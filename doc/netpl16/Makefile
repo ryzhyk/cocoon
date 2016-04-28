@@ -80,8 +80,8 @@ ${Target}.toc: Makefile ${Target}.tex ${FigFiles}
 
 %.bbl: %.tex ${FigFiles} Makefile
 	${LaTeX} $(patsubst %.tex,%,$<)
-#	${BibTeX} $(patsubst %.tex,%,$<)
-## 	Fix BibTeX-generated line breaks that \url doesn't handle correctly:
-#	${mv} $(patsubst %.tex,%,$<).bbl $(patsubst %.tex,%,$<).bbl~
-#	${awk} <$(patsubst %.tex,%,$<).bbl~ >$(patsubst %.tex,%,$<).bbl \
-#		'/%$$/{printf "%s", substr($$0,1,length()-1); next};{print}'
+	${BibTeX} $(patsubst %.tex,%,$<)
+# 	Fix BibTeX-generated line breaks that \url doesn't handle correctly:
+	${mv} $(patsubst %.tex,%,$<).bbl $(patsubst %.tex,%,$<).bbl~
+	${awk} <$(patsubst %.tex,%,$<).bbl~ >$(patsubst %.tex,%,$<).bbl \
+		'/%$$/{printf "%s", substr($$0,1,length()-1); next};{print}'
