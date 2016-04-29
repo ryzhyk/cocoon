@@ -1,0 +1,47 @@
+Alice's home is equipped with sensors and actuators connected to 
+multiple SSHs (Samsung Secure Hubs).  A smart security monitor 
+watches Alice's home when she is away.
+
+We implement two sets of demo scenarios.  The first will focus on 
+reliability and will demonstrate Rivulet's ability to gracefully 
+overcome hub/sensor/link failures.  These scenarios are to be 
+defined by Masoud and Rayman.
+
+The second set of scenarios focuses on security.  It goes along 
+the following lines: Eve-the-Blackhat wants to virtually 
+infiltrate the smart home.  Her evil plans include (a) accessing 
+sensor data streams to remotely detect when there is noone at home 
+or to spy on the inhabitants, (b) disabling the intrusion 
+detection system, or (c) hacking the intrusion detection system to 
+open smart doorlocks granting Eve physical access to the smart 
+home.
+
+In order to get behind the security perimeter of Alice's home 
+(along with many other homes), Eve plants a trojan inside a free 
+home entertainment app.  Millions of users, including Alice, 
+download and install the app on their home networks.  
+
+Now that the trojan is running inside Alice's home, Eve is in 
+control of the entire home network, including all smart sensors 
+and actuators.  Or that's what she thinks.  Worry not, Alice's 
+home is still completely secure.  Eve's trojan was installed 
+within a virtual container, which confines it to a network of 
+virtual machines that can communicate with each other, but do not 
+have direct access to the Internet or other applications or 
+devices inside the smart home.  All such accesses are mediated by 
+a virtual router, which enforces a high-level security policy.  
+The policy decides what resources are available to each container.  
+For example, it may prohibit an application obtained from an 
+untrusted source to access both a video camera feed and the 
+Internet or to establish connections to trusted applications.  
+Furthermore, all authorized communication is redirected via an 
+Intrusion Detection System (IDS), which checks it against a 
+database of attack fingerprints.
+
+The actual demonstration may include two network setups 
+(conventional and secure) seating side by side.  Installing a 
+trojan in the conventional network leads to visible consequences 
+(e.g., locks are opened or a video camera feed appears on the 
+"intruder's" screen).  Installing the same trojan on the secure 
+network does not affect its functionality, and a message is sent 
+to Alice notifying her about the intrusion attempt.
