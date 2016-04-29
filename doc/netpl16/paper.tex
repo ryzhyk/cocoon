@@ -57,9 +57,29 @@ bottom=1in]{geometry}
 
 High-level SDN languages raise the level of abstraction in SDN 
 programming from managing individual switches to programming 
-network-wide policies.  In this talk we will present Cocoon (for 
-\emph{COrrect by COnstruction Networking}), a high-level SDN 
-language designed with the following goals in mind:
+network-wide policies.  In this talk, we present Cocoon (for 
+Correct by Construction Networking), a language designed around 
+the idea of \emph{iterative refinement}.  The programmer starts 
+with a high-level functional description of the desired network 
+behavior, focusing on the service the network should provide to 
+each packet, as opposed to how this service is implemented within 
+the network fabric.  The developer then iteratively refines the 
+top-level specification, adding details of the topology, routing, 
+fault recovery, etc., until reaching a level of detail sufficient 
+for the Cocoon compiler to generate an SDN application that 
+manages network switches at the level of P4 or OpenFlow.  We 
+designed Cocoon with the following goals in mind:
+
+\paragraph{Correctness} The Cocoon verifier establishes that each 
+refinement correctly implements the behavior it refines, ensuring 
+that behaviors specified at any refinement step hold on the 
+resulting SDN application.
+
+%Crucially, we aim to provide strong correctness guarantees through 
+%formal verification for complex dynamic networks.  Examples of 
+%such networks that motivate this work are: software-defined 
+%cellular cores~\cite{Jin_LVR_13}, cloud data centers, 
+%WANs~\cite{Jain_KMOPSVWZZZHSV_13}, etc.
 
 \paragraph{Generality} Cocoon enables a wide range of SDN 
 applications, ranging from network virtualization, through 
@@ -69,46 +89,57 @@ software-defined IXPs, to home networks.
 %particular application domain, such as service 
 %chaining~\cite{Hinrichs_GCMS_09} or virtualization~\cite{neutron}.
 
-\paragraph{Dynamism} A Cocoon program captures both data and 
-control plane behavior.  The Cocoon interpreter runs as an SDN 
-application on top of the controller, dynamically managing the 
-network configuration according to the Cocoon program.  This is in 
-contrast to languages such as NetKAT~\cite{Smolka_EFG_15} that 
-specify an instant snapshot of the dataplane configuration.  The 
-SDN application manages the network by generating updates to the 
-NetKAT program; the semantics of the application itself is outside 
-of the domain of the language.  
+\paragraph{Dynamism} A Cocoon program specifies both data and 
+control plane behavior, akin to languages like 
+FlowLog~\cite{Nelson_FSK_14}, Maple~\cite{Voellmy_WYFH_13}, and 
+VeriCon~\cite{Ball_BGIKSSV_14}.  This is in contrast to languages 
+such as NetKAT, which specify a snapshot of data plane behavior 
+but rely on a general-purpose programming language to implement 
+the control plane by emitting a stream of snapshots in response to 
+network events.
 
-\paragraph{Flexibility} Existing high-level SDN languages rely on 
+%A Cocoon program captures both data and control plane behavior.  
+%The Cocoon interpreter runs as an SDN application on top of the 
+%controller, dynamically managing the network configuration 
+%according to the Cocoon program.  This is in contrast to languages 
+%such as NetKAT~\cite{Smolka_EFG_15} that specify an instant 
+%snapshot of the dataplane configuration.  The SDN application 
+%manages the network by generating updates to the NetKAT program; 
+%the semantics of the application itself is outside of the domain 
+%of the language.  
+
+\paragraph{Flexibility} Existing high-level languages rely on 
 fixed compilation strategies in mapping the high-level network 
-program to a switch-level implementation.  Whenever the mapping 
-produced by the compiler does not meet the network operator's 
-requirements, compiler modifications are needed.  In contrast, 
-Cocoon does not enforce any particular compilation strategy, 
-giving the programmer complete control over the mapping process.
+program to a switch-level implementation.  Cocoon allows the 
+programmer to specify how each high-level component is implemented 
+and deployed, while automatically verifying the correctness of the 
+implementation.
 
-\paragraph{Correctness} Crucially, we aim to provide strong 
-correctness guarantees through formal verification for complex 
-dynamic networks.  Examples of such networks that motivate this 
-work are: software-defined cellular cores~\cite{Jin_LVR_13}, cloud 
-data centers, WANs~\cite{Jain_KMOPSVWZZZHSV_13}, etc.
+%Existing high-level SDN languages rely on fixed compilation 
+%strategies in mapping the high-level network program to a 
+%switch-level implementation.  Whenever the mapping produced by the 
+%compiler does not meet the network operator's requirements, 
+%compiler modifications are needed.  In contrast, Cocoon does not 
+%enforce any particular compilation strategy, giving the programmer 
+%complete control over the mapping process.
+
 
 \vspace{2mm}
 
-Cocoon achieves these objectives via a programming model based on 
-\emph{iterative refinement}.  The programmer starts with a 
-high-level functional description of the desired network behavior, 
-focusing solely on the service that the network should provide to 
-each packet as opposed to how this service is implemented within 
-the network fabric.  This high-level description defines 
-correctness criteria that the resulting implementation must 
-satisfy.
-
-The developer iteratively refines the top-level specification 
-adding the details of topology, routing, fault recovery, etc.  The 
-final Cocoon specification contains sufficient detail to directly 
-generate an SDN application that manages network switches via a 
-Southbound API such as P4 or OpenFlow.  
+%Cocoon achieves these objectives via a programming model based on 
+%\emph{iterative refinement}.  The programmer starts with a 
+%high-level functional description of the desired network behavior, 
+%focusing solely on the service that the network should provide to 
+%each packet as opposed to how this service is implemented within 
+%the network fabric.  This high-level description defines 
+%correctness criteria that the resulting implementation must 
+%satisfy.
+%
+%The developer iteratively refines the top-level specification 
+%adding the details of topology, routing, fault recovery, etc.  The 
+%final Cocoon specification contains sufficient detail to directly 
+%generate an SDN application that manages network switches via a 
+%Southbound API such as P4 or OpenFlow.  
 
 Refinements are performed either manually or automatically.  In 
 the latter case, the user picks one of an extensible set of 
@@ -133,8 +164,8 @@ The modular refinement process facilitates clean separation of
 concerns and ensures that each individual refinement is amenable 
 to automatic formal verification.  The Cocoon verifier proves for 
 each refinement that the refined specification is functionally 
-equivalent to the abstract role it refines.  Correctness of each 
-refinement in the chain guarantees that the final specification is 
+equivalent to the role it refines.  Correctness of each refinement 
+in the chain guarantees that the final specification is 
 functionally equivalent to the top-level specification.  
 
 %The control plane is specified using a purely functional language 
