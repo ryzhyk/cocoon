@@ -1,5 +1,5 @@
 Alice's home is equipped with sensors and actuators connected to 
-multiple SSHs (Samsung Secure Hubs).  A smart security monitor 
+multiple SSHs (Samsung Secure Hubs).  A smart security monitor app
 watches Alice's home when she is away.
 
 We implement two sets of demo scenarios.  The first will focus on 
@@ -45,3 +45,8 @@ trojan in the conventional network leads to visible consequences
 "intruder's" screen).  Installing the same trojan on the secure 
 network does not affect its functionality, and a message is sent 
 to Alice notifying her about the intrusion attempt.
+
+The demo could be made more spectacular if we wanted to go beyond 
+home automation: drones falling out of the sky, self driving cars 
+crashing into each other, industrial robots electrocuting people, 
+etc. :)

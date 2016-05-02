@@ -50,7 +50,7 @@ bottom=1in]{geometry}
 
 \affil[1]{Samsung Research America}
 \affil[2]{Microsoft Research}
-\affil[3]{Universit\'e Catholique de Louvain}
+\affil[3]{Universit\'e catholique de Louvain}
 
 \date{}
 \maketitle
@@ -67,13 +67,15 @@ the network fabric.  The developer then iteratively refines the
 top-level specification, adding details of the topology, routing, 
 fault recovery, etc., until reaching a level of detail sufficient 
 for the Cocoon compiler to generate an SDN application that 
-manages network switches at the level of P4 or OpenFlow.  We 
-designed Cocoon with the following goals in mind:
+manages network switches via the southbound interface (we 
+currently support P4~\cite{Bosshart_DGIMRSTVVW_14}).  We designed 
+Cocoon with the following goals in mind:
 
-\paragraph{Correctness} The Cocoon verifier establishes that each 
-refinement correctly implements the behavior it refines, ensuring 
-that behaviors specified at any refinement step hold on the 
-resulting SDN application.
+\paragraph{Correctness} Cocoon uses the Corral model 
+checker~\cite{Lal_QL_12} to establish that each refinement 
+correctly implements the behavior it refines, ensuring that 
+behaviors specified at any refinement step hold on the resulting 
+SDN application.
 
 %Crucially, we aim to provide strong correctness guarantees through 
 %formal verification for complex dynamic networks.  Examples of 
@@ -93,10 +95,10 @@ software-defined IXPs, to home networks.
 control plane behavior, akin to languages like 
 FlowLog~\cite{Nelson_FSK_14}, Maple~\cite{Voellmy_WYFH_13}, and 
 VeriCon~\cite{Ball_BGIKSSV_14}.  This is in contrast to languages 
-such as NetKAT, which specify a snapshot of data plane behavior 
-but rely on a general-purpose programming language to implement 
-the control plane by emitting a stream of snapshots in response to 
-network events.
+such as NetKAT~\cite{Anderson_FGJKSW_14}, which specify a snapshot 
+of data plane behavior but rely on a general-purpose programming 
+language to implement the control plane by emitting a stream of 
+snapshots in response to network events.
 
 %A Cocoon program captures both data and control plane behavior.  
 %The Cocoon interpreter runs as an SDN application on top of the 
@@ -176,13 +178,13 @@ outline its syntax and semantics, as well as report on several
 case studies where we used Cocoon to synthesize and verify a range 
 of SDN applications, including network virtualization, service 
 chaining, a B4-style WAN~\cite{Jain_KMOPSVWZZZHSV_13}, and a 
-software-defined internet exchange~\cite{Gupta_MBCFRV_16}. 
+software-defined Internet exchange~\cite{Gupta_MBCFRV_16}. 
 
 \bibliographystyle{abbrv}
 
 \setlength{\bibsep}{1pt}
 %
-%\renewcommand{\bibfont}{\footnotesize}
+\renewcommand{\bibfont}{\footnotesize}
 
 \bibliography{refs}
 
