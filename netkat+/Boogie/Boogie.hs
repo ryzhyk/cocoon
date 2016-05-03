@@ -242,6 +242,7 @@ mkExpr' (EBinOp _ Or e1 e2)   = parens $ mkExpr' e1 ||| mkExpr' e2
 mkExpr' (EBinOp _ Impl e1 e2) = parens $ mkExpr' e1 ==> mkExpr' e2
 mkExpr' (EBinOp _ op e1 e2)   = bvbop op e1 e2
 mkExpr' (EUnOp _ Not e)       = parens $ char '!' <> mkExpr' e
+mkExpr' (ESlice _ e h l)      = mkExpr' e <> (brackets $ pp h <> colon <> pp l)
 mkExpr' (ECond _ cs d)        = mkCond cs d 
 
 mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc

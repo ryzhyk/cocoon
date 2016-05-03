@@ -197,6 +197,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EStruct   {exprPos :: Pos, exprStructName :: String, exprFields :: [Expr]}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
+          | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
           | ECond     {exprPos :: Pos, exprCases :: [(Expr, Expr)], exprDefault :: Expr}
 
 instance Eq Expr where
@@ -211,6 +212,7 @@ instance Eq Expr where
     (==) (EStruct   _ s1 fs1)    (EStruct   _ s2 fs2)    = (s1 == s2) && (fs1 == fs2)
     (==) (EBinOp    _ op1 l1 r1) (EBinOp    _ op2 l2 r2) = (op1 == op2) && (l1 == l2) && (r1 == r2)
     (==) (EUnOp     _ op1 e1)    (EUnOp     _ op2 e2)    = (op1 == op2) && (e1 == e2)
+    (==) (ESlice    _ e1 h1 l1)  (ESlice    _ e2 h2 l2)  = (e1 == e2) && (h1 == h2) && (l1 == l2)
     (==) (ECond     _ cs1 d1)    (ECond     _ cs2 d2)    = (cs1 == cs2) && (d1 == d2)
     (==) _                       _                       = False
 
@@ -231,6 +233,7 @@ instance PP Expr where
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
+    pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
     pp (ECond _ cs d)      = pp "case" <+> (braces $ hsep $ (map (\(c,v) -> pp c <> colon <+> pp v <> semi) cs) ++ [pp "default" <> colon <+> pp d <> semi])
 
 instance Show Expr where

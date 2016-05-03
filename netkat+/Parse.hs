@@ -68,7 +68,7 @@ braces     = T.braces lexer
 parens     = T.parens lexer
 angles     = T.angles lexer
 brackets   = T.brackets lexer
---natural    = T.natural lexer
+natural    = T.natural lexer
 decimal    = T.decimal lexer
 --integer    = T.integer lexer
 whiteSpace = T.whiteSpace lexer
@@ -226,7 +226,7 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
                  | msb v < w           = return $ EInt nopos w v
                  | otherwise           = fail "Value exceeds specified width"
 
-etable = [[postf $ choice [postField]]
+etable = [[postf $ choice [postSlice, postField]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
@@ -241,9 +241,13 @@ etable = [[postf $ choice [postField]]
          ,[binary "=>" Impl AssocLeft]
          ]
 
+
 pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
 postField  = (\f end e -> EField (fst $ pos e, end) e f) <$> field <*> getPosition
+postSlice  = try $ (\(h,l) end e -> ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
+slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
+
 field = dot *> identifier
 
 prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n

@@ -144,6 +144,7 @@ exprNeedsTable (EInt _ _ _)       = False
 exprNeedsTable (EStruct _ _ fs)   = or $ map exprNeedsTable fs
 exprNeedsTable (EBinOp _ _ e1 e2) = exprNeedsTable e1 || exprNeedsTable e2
 exprNeedsTable (EUnOp _ _ e)      = exprNeedsTable e
+exprNeedsTable (ESlice _ e _ _)   = exprNeedsTable e
 exprNeedsTable (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable c || exprNeedsTable e) cs) || exprNeedsTable d
 
 
@@ -320,6 +321,7 @@ liftConds'' e =
          EStruct _ s fs    -> combineCascades (EStruct nopos s) $ map liftConds' fs
          EBinOp _ op e1 e2 -> combineCascades (\[e1', e2'] -> EBinOp nopos op e1' e2') [liftConds' e1, liftConds' e2]
          EUnOp _ op v      -> combineCascades (EUnOp nopos op . head) [liftConds' v]
+         ESlice _ v h l    -> combineCascades (\[v'] -> ESlice nopos v' h l) [liftConds' v]
          ECond _ cs d      -> let d' = liftConds' d in
                               case d' of  
                                    ECond _ dcs dd -> ECond nopos ((map (\(c,v) -> (cascadeToDisj $ liftConds' c, liftConds' v)) cs)++dcs) dd

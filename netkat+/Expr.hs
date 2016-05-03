@@ -30,6 +30,7 @@ exprFuncs' (EInt _ _ _)       = []
 exprFuncs' (EStruct _ _ fs)   = concatMap exprFuncs' fs
 exprFuncs' (EBinOp _ _ l r)   = exprFuncs' l ++ exprFuncs' r
 exprFuncs' (EUnOp _ _ e)      = exprFuncs' e
+exprFuncs' (ESlice _ e _ _)   = exprFuncs' e
 exprFuncs' (ECond _ cs d)     = concatMap (\(c,e) -> exprFuncs' c ++ exprFuncs' e) cs ++ exprFuncs' d
 
 
@@ -49,6 +50,7 @@ exprFuncsRec' (EInt _ _ _)       = []
 exprFuncsRec' (EStruct _ _ fs)   = concatMap exprFuncsRec' fs
 exprFuncsRec' (EBinOp _ _ l r)   = exprFuncsRec' l ++ exprFuncsRec' r
 exprFuncsRec' (EUnOp _ _ e)      = exprFuncsRec' e
+exprFuncsRec' (ESlice _ e _ _)   = exprFuncsRec' e
 exprFuncsRec' (ECond _ cs d)     = concatMap (\(c,e) -> exprFuncsRec' c ++ exprFuncsRec' e) cs ++ exprFuncsRec' d
 
 -- True if e does not refer to any packet fields 
@@ -65,4 +67,5 @@ exprRefersToPkt (EInt _ _ _)       = False
 exprRefersToPkt (EStruct _ _ fs)   = or $ map exprRefersToPkt fs
 exprRefersToPkt (EBinOp _ _ l r)   = exprRefersToPkt l || exprRefersToPkt r
 exprRefersToPkt (EUnOp _ _ e)      = exprRefersToPkt e
+exprRefersToPkt (ESlice _ e _ _)   = exprRefersToPkt e
 exprRefersToPkt (ECond _ cs d)     = (or $ map (\(c,e) -> exprRefersToPkt c || exprRefersToPkt e) cs) || exprRefersToPkt d

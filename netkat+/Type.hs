@@ -50,6 +50,7 @@ instance WithType Expr where
         where t1 = typ' r ctx e1
               t2 = typ' r ctx e2
     typ _ _             (EUnOp _ Not _)     = TBool nopos
+    typ _ _             (ESlice _ _ h l)    = TUInt nopos (h-l+1)
     typ r ctx           (ECond _ _ d)       = typ r ctx d
 
 -- Unwrap typedef's down to actual type definition

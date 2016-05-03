@@ -216,6 +216,7 @@ checkLinkExpr (EStruct _ _ fs)    = mapM_ checkLinkExpr fs
 checkLinkExpr (EBinOp _ _ e1 e2)  = do checkLinkExpr e1
                                        checkLinkExpr e2
 checkLinkExpr (EUnOp _ _ e)       = checkLinkExpr e
+checkLinkExpr (ESlice _ e _ _)     = checkLinkExpr e
 checkLinkExpr (ECond _ cs d)      = do mapM_ (\(c,v) -> do checkLinkExpr c
                                                            checkLinkExpr v) cs
                                        checkLinkExpr d
@@ -283,6 +284,13 @@ exprValidate r ctx (EUnOp _ op e) = do
     case op of
          Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a boolean expression"
 
+exprValidate r ctx (ESlice p e h l) = do
+    exprValidate r ctx e
+    case typ' r ctx e of
+         TUInt _ w -> do assertR r (h >= l) p "Upper bound of the slice must be greater than lower bound"
+                         assertR r (h < w) p "Upper bound of the slice cannot exceed argument width"
+         _         -> errR r (pos e) "Cannot take slice of a non-integer expression"
+
 exprValidate r ctx (ECond _ cs def) = do
     exprValidate r ctx def
     mapM_ (\(cond, e)-> do exprValidate r ctx cond
@@ -311,6 +319,7 @@ isLExpr (EInt _ _ _)      = False
 isLExpr (EStruct _ _ _)   = False
 isLExpr (EBinOp _ _ _ _)  = False
 isLExpr (EUnOp _ _ _)     = False
+isLExpr (ESlice _ _ _ _)  = False -- TODO: allow this
 isLExpr (ECond _ _ _)     = False
 
 -- Checks that no part of lvalue e is in the modified set mset
