@@ -21,10 +21,10 @@ assume p() <= 8'd128
 
 function k(): uint<8> = p() + p()
 
-function tree(uint<48> addr): uint<1>
-function i1(uint<48> addr): uint<8>
-function i0(uint<48> addr): uint<8>
-function port(uint<48> addr): uint<8>
+function tree(uint<48> addr): uint<1> = addr[0:0]
+function i1(uint<48> addr): uint<8>   = addr[15:8]
+function i0(uint<48> addr): uint<8>   = addr[23:16]
+function port(uint<48> addr): uint<8> = addr[31:24]
 
 function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = 
     i1 < p() and i0 < p() and port < p()
@@ -39,6 +39,8 @@ refine L0In {
 
     function hash(HEth eth): uint<8>
 
+    function l1SwitchUp(uint<1> tree, uint<8> i1, uint<8> r): bool
+
     role L0In[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
         if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 and i0(pkt.eth.dstAddr) == i0 then {
             if port(pkt.eth.dstAddr) < p() then {
@@ -46,7 +48,7 @@ refine L0In {
             }
         } else {
             if l1SwitchUp(tree, i1, hash(pkt.eth)) then
-                L01Out[tree, i1, i0, mod(hash(pkt.eth))]
+                L01Out[tree, i1, i0, hash(pkt.eth)]
             else
                 L01Out[tree, i1, i0, mod(hash(pkt.eth) + 8'd1)]
         }
@@ -71,6 +73,9 @@ refine L0In {
 }
 
 refine L10In {
+
+    function l2SwitchUp(uint<8> x, uint<8> y): bool
+
     role L10In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] 
     | iL1Port(i1,r,port) 
     / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
@@ -79,10 +84,61 @@ refine L10In {
                 send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
             }
         } else if tree == 8'd0 then {
-            if l0SwitchUp(i1, hash(pkt.eth)) then
-                L01Out[tree, i1, i0, mod(hash(pkt.eth))]
+            if l2SwitchUp(r, hash(pkt.eth)) then
+                send L12Out[tree, i1, r, hash(pkt.eth)]
             else
-                L01Out[tree, i1, i0, mod(hash(pkt.eth) + 8'd1)]
+                send L12Out[tree, i1, r, mod(hash(pkt.eth) + 8'd1)]
         } else {
+            if l2SwitchUp(hash(pkt.eth), r) then
+                send L12Out[tree, i1, r, hash(pkt.eth)]
+            else
+                send L12Out[tree, i1, r, mod(hash(pkt.eth) + 8'd1)]
+        }
+
+    role L12Out[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] 
+    | iL1Port(i1,r,port) 
+    / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
+        if tree == 8'd0 then {
+             if l2SwitchUp(r, port) then
+                send L2In[r, port, i1]           
+        } else {
+            if l2SwitchUp(port, r) then
+                send L2In[port, r, p() + i1]
+        }
+
+    function iL2Port(uint<8> x, uint<8> y, uint<8> port): bool = 
+        x < p() and y < p() and port < k()
+
+    role L2In[uint<8> x, uint<8> y, uint<8> port] 
+    | iL2Port(x,y,port) = 
+        if tree(pkt.eth.dstAddr) == 8'd0 then {
+             if l1SwitchUp(8'd0, i1(pkt.eth.dstAddr), x) then
+                send L2Out[x, y, i1(pkt.eth.dstAddr)]
+             else 
+                send L2Out[x, y, p() + hash(pkt.eth)]
+        } else {
+             if l1SwitchUp(8'd1, i1(pkt.eth.dstAddr), y) then
+                send L2Out[x, y, p() + i1(pkt.eth.dstAddr)]
+             else 
+                send L2Out[x, y, hash(i1(pkt.eth))]
+        }
+
+    role L2Out[uint<8> x, uint<8> y, uint<8> port] 
+    | iL2Port(x,y,port) = 
+        if (port < p()) then {
+             if l1SwitchUp(8'd0, port, x) then
+                send L12In[8'd0, port, x, y]
+        } else {
+             if l1SwitchUp(8'd1, port - p(), y) then
+                send L12In[8'd1, port - p(), y, x]
+        }
+
+    role L12In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port]
+    | iL1Port(i1,r,port) 
+    / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
+        if (tree == tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr)) then {
+            send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
+        } else {
+            send L12Out[tree, i1, r, mod(port + 8'd1)]
         }
 }
