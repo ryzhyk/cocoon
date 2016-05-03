@@ -13,13 +13,19 @@ typedef struct {
 } HEth
 
 typedef struct {
-    HEth     eth,
+    HEth     eth
 } Packet
 
 function p(): uint<8>
-assume p() <= 8'd128 
+assume () p() <= 8'd128 
 
 function k(): uint<8> = p() + p()
+
+function incmodp(uint<8> v): uint<8> = 
+    case {
+        (v + 8'd1) < p(): (v + 8'd1);
+        default:          (v + 8'd1) - p();
+    }
 
 function tree(uint<48> addr): uint<1> = addr[0:0]
 function i1(uint<48> addr): uint<8>   = addr[15:8]
@@ -48,9 +54,9 @@ refine L0In {
             }
         } else {
             if l1SwitchUp(tree, i1, hash(pkt.eth)) then
-                L01Out[tree, i1, i0, hash(pkt.eth)]
+                send L01Out[tree, i1, i0, hash(pkt.eth)]
             else
-                L01Out[tree, i1, i0, mod(hash(pkt.eth) + 8'd1)]
+                send L01Out[tree, i1, i0, incmodp(hash(pkt.eth))]
         }
         
     role L01Out[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
@@ -69,7 +75,7 @@ refine L0In {
         ?send L10Out[tree==tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr) and port == i0(pkt.eth.dstAddr)]
 
     role L10Out[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) = 
-        send L01In[trr, i1, port, r]
+        send L01In[tree, i1, port, r]
 }
 
 refine L10In {
@@ -83,22 +89,22 @@ refine L10In {
             if i0(pkt.eth.dstAddr) < p() then {
                 send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
             }
-        } else if tree == 8'd0 then {
+        } else if tree == 1'd0 then {
             if l2SwitchUp(r, hash(pkt.eth)) then
                 send L12Out[tree, i1, r, hash(pkt.eth)]
             else
-                send L12Out[tree, i1, r, mod(hash(pkt.eth) + 8'd1)]
+                send L12Out[tree, i1, r, incmodp(hash(pkt.eth))]
         } else {
             if l2SwitchUp(hash(pkt.eth), r) then
                 send L12Out[tree, i1, r, hash(pkt.eth)]
             else
-                send L12Out[tree, i1, r, mod(hash(pkt.eth) + 8'd1)]
+                send L12Out[tree, i1, r, incmodp(hash(pkt.eth))]
         }
 
     role L12Out[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] 
     | iL1Port(i1,r,port) 
     / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
-        if tree == 8'd0 then {
+        if tree == 1'd0 then {
              if l2SwitchUp(r, port) then
                 send L2In[r, port, i1]           
         } else {
@@ -111,26 +117,26 @@ refine L10In {
 
     role L2In[uint<8> x, uint<8> y, uint<8> port] 
     | iL2Port(x,y,port) = 
-        if tree(pkt.eth.dstAddr) == 8'd0 then {
-             if l1SwitchUp(8'd0, i1(pkt.eth.dstAddr), x) then
+        if tree(pkt.eth.dstAddr) == 1'd0 then {
+             if l1SwitchUp(1'd0, i1(pkt.eth.dstAddr), x) then
                 send L2Out[x, y, i1(pkt.eth.dstAddr)]
              else 
                 send L2Out[x, y, p() + hash(pkt.eth)]
         } else {
-             if l1SwitchUp(8'd1, i1(pkt.eth.dstAddr), y) then
+             if l1SwitchUp(1'd1, i1(pkt.eth.dstAddr), y) then
                 send L2Out[x, y, p() + i1(pkt.eth.dstAddr)]
              else 
-                send L2Out[x, y, hash(i1(pkt.eth))]
+                send L2Out[x, y, hash(pkt.eth)]
         }
 
     role L2Out[uint<8> x, uint<8> y, uint<8> port] 
     | iL2Port(x,y,port) = 
         if (port < p()) then {
-             if l1SwitchUp(8'd0, port, x) then
-                send L12In[8'd0, port, x, y]
+             if l1SwitchUp(1'd0, port, x) then
+                send L12In[1'd0, port, x, y]
         } else {
-             if l1SwitchUp(8'd1, port - p(), y) then
-                send L12In[8'd1, port - p(), y, x]
+             if l1SwitchUp(1'd1, port - p(), y) then
+                send L12In[1'd1, port - p(), y, x]
         }
 
     role L12In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port]
@@ -139,6 +145,10 @@ refine L10In {
         if (tree == tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr)) then {
             send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
         } else {
-            send L12Out[tree, i1, r, mod(port + 8'd1)]
+            send L12Out[tree, i1, r, incmodp(port)]
         }
+}
+
+refine {
+    function p(): uint<8> = 8'd2
 }
