@@ -192,7 +192,8 @@ mkField :: Field -> Doc
 mkField f = (pp $ name f) <> colon <+> (mkType $ fieldType f)
 
 mkAssume :: Refine -> Assume -> Doc
-mkAssume r a@Assume{..} = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> mkExpr r (CtxAssume a) assExpr) <> semi
+mkAssume r a@Assume{..} | null assVars = pp "axiom" <+> (parens $ mkExpr r (CtxAssume a) assExpr) <> semi
+mkAssume r a@Assume{..} | otherwise    = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> mkExpr r (CtxAssume a) assExpr) <> semi
     where args = hsep $ punctuate comma $ map mkField assVars
 
 mkExpr :: Refine -> ECtx -> Expr -> Doc
@@ -242,7 +243,7 @@ mkExpr' (EBinOp _ Or e1 e2)   = parens $ mkExpr' e1 ||| mkExpr' e2
 mkExpr' (EBinOp _ Impl e1 e2) = parens $ mkExpr' e1 ==> mkExpr' e2
 mkExpr' (EBinOp _ op e1 e2)   = bvbop op e1 e2
 mkExpr' (EUnOp _ Not e)       = parens $ char '!' <> mkExpr' e
-mkExpr' (ESlice _ e h l)      = mkExpr' e <> (brackets $ pp h <> colon <> pp l)
+mkExpr' (ESlice _ e h l)      = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
 mkExpr' (ECond _ cs d)        = mkCond cs d 
 
 mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc
