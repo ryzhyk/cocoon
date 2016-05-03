@@ -8,7 +8,7 @@ NC='\033[0m' # No Color
 for file in $1/*.bpl
 do
     printf "Verifying $file "
-    corral.exe "$file" /main:main /k:100 /recursionBound:10 > "$file".log
+    corral.exe "$file" /main:main /k:100 /recursionBound:10 &> "$file".log
     ERR=$?
     if [ $ERR -eq 0 ]
     then
@@ -21,6 +21,7 @@ do
       fi
     else
       printf "${RED}Failed (error code $?)${NC}\n" >&2
+      cat "$file".log
       exit $ERR
     fi
 done
