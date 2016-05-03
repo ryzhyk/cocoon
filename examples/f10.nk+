@@ -17,7 +17,7 @@ typedef struct {
 } Packet
 
 function p(): uint<8>
-assume () p() <= 8'd128 
+assume () p() < 8'd128 
 
 function k(): uint<8> = p() + p()
 
@@ -49,7 +49,7 @@ refine L0In {
     function hash(HEth eth): uint<8>
     assume (HEth e) hash(e) < p()
 
-    function l1SwitchUp(uint<1> tree, uint<8> i1, uint<8> r): bool
+    function l1SwitchUp(uint<1> tree, uint<8> i1, uint<8> r): bool = true
 
     role L0In[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
         (* Validate packets at the edge *)
@@ -77,7 +77,7 @@ refine L0In {
         i1 < p() and r < p() and port < p()
 
     role L10In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) / goodPacket(pkt) = 
-        ?send L10Out[tree==tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr) and port == i0(pkt.eth.dstAddr)]
+        ?send L10Out[.tree==tree(pkt.eth.dstAddr) and .i1 == i1(pkt.eth.dstAddr) and .r < p() and .port == i0(pkt.eth.dstAddr)]
 
     role L10Out[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) / goodPacket(pkt) = 
         send L01In[tree, i1, port, r]
@@ -85,7 +85,7 @@ refine L0In {
 
 refine L10In {
 
-    function l2SwitchUp(uint<8> x, uint<8> y): bool
+    function l2SwitchUp(uint<8> x, uint<8> y): bool = true
 
     role L10In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) / goodPacket(pkt) = 
          if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 then {
