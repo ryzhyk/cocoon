@@ -1,0 +1,88 @@
+(* Liu et al. F10: A Fault-Tolerant Engineered Network *)
+
+typedef struct {
+    uint<8> ip3,
+    uint<8> ip2,
+    uint<8> ip1,
+    uint<8> ip0
+} IP4
+
+typedef struct {
+    uint<48> dstAddr,
+    uint<48> srcAddr
+} HEth
+
+typedef struct {
+    HEth     eth,
+} Packet
+
+function p(): uint<8>
+assume p() <= 8'd128 
+
+function k(): uint<8> = p() + p()
+
+function tree(uint<48> addr): uint<1>
+function i1(uint<48> addr): uint<8>
+function i0(uint<48> addr): uint<8>
+function port(uint<48> addr): uint<8>
+
+function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = 
+    i1 < p() and i0 < p() and port < p()
+
+role L0In[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
+    if iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) then
+        send L0Out[tree(pkt.eth.dstAddr), i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)]
+
+role L0Out[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = filter false
+
+refine L0In {
+
+    function hash(HEth eth): uint<8>
+
+    role L0In[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
+        if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 and i0(pkt.eth.dstAddr) == i0 then {
+            if port(pkt.eth.dstAddr) < p() then {
+                send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
+            }
+        } else {
+            if l1SwitchUp(tree, i1, hash(pkt.eth)) then
+                L01Out[tree, i1, i0, mod(hash(pkt.eth))]
+            else
+                L01Out[tree, i1, i0, mod(hash(pkt.eth) + 8'd1)]
+        }
+        
+    role L01Out[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
+        if l1SwitchUp(tree, i1, port) then
+            send L10In[tree, i1, port, i0]
+
+    role L01In[uint<1> tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) / port(pkt.eth.dstAddr) < p() = 
+        send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
+
+    function iL1Port(uint<8> i1, uint<8> r, uint<8> port): bool = 
+        i1 < p() and r < p() and port < p()
+
+    role L10In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] 
+    | iL1Port(i1,r,port) 
+    / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
+        ?send L10Out[tree==tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr) and port == i0(pkt.eth.dstAddr)]
+
+    role L10Out[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) = 
+        send L01In[trr, i1, port, r]
+}
+
+refine L10In {
+    role L10In[uint<1> tree, uint<8> i1, uint<8> r, uint<8> port] 
+    | iL1Port(i1,r,port) 
+    / iL0Port(i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)) = 
+         if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 then {
+            if i0(pkt.eth.dstAddr) < p() then {
+                send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
+            }
+        } else if tree == 8'd0 then {
+            if l0SwitchUp(i1, hash(pkt.eth)) then
+                L01Out[tree, i1, i0, mod(hash(pkt.eth))]
+            else
+                L01Out[tree, i1, i0, mod(hash(pkt.eth) + 8'd1)]
+        } else {
+        }
+}
