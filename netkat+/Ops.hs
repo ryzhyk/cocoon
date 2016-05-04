@@ -5,6 +5,7 @@ import Text.PrettyPrint
 import PP
 
 data BOp = Eq
+         | Neq
          | Lt
          | Gt
          | Lte
@@ -19,6 +20,7 @@ data BOp = Eq
 
 instance PP BOp where
     pp Eq     = pp "=="
+    pp Neq    = pp "!="
     pp Lt     = pp "<"
     pp Gt     = pp ">"
     pp Lte    = pp "<="

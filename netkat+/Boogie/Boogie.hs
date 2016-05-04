@@ -238,6 +238,7 @@ mkExpr' (EBool _ False)       = pp "false"
 mkExpr' (EInt _ w v)          = pp v <> text "bv" <> pp w
 mkExpr' (EStruct _ n fs)      = apply n $ map mkExpr' fs
 mkExpr' (EBinOp _ Eq e1 e2)   = parens $ mkExpr' e1 === mkExpr' e2
+mkExpr' (EBinOp _ Neq e1 e2)  = parens $ mkExpr' e1 !== mkExpr' e2
 mkExpr' (EBinOp _ And e1 e2)  = parens $ mkExpr' e1 &&& mkExpr' e2
 mkExpr' (EBinOp _ Or e1 e2)   = parens $ mkExpr' e1 ||| mkExpr' e2
 mkExpr' (EBinOp _ Impl e1 e2) = parens $ mkExpr' e1 ==> mkExpr' e2
@@ -532,6 +533,9 @@ assume c = pp "assume" <+> c <> semi
 
 (===) :: Doc -> Doc -> Doc
 (===) x y = x <+> pp "==" <+> y
+
+(!==) :: Doc -> Doc -> Doc
+(!==) x y = x <+> pp "!=" <+> y
 
 (|||) :: Doc -> Doc -> Doc
 (|||) x y = x <+> pp "||" <+> y

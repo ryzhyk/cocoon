@@ -117,6 +117,7 @@ printExpr e                                     = error $ "P4.printExpr " ++ sho
 
 printBOp :: BOp -> Doc
 printBOp Eq    = pp "=="
+printBOp Neq   = pp "!="
 printBOp Lt    = pp "<"
 printBOp Gt    = pp ">"
 printBOp Lte   = pp "<="

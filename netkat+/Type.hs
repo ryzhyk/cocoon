@@ -37,6 +37,7 @@ instance WithType Expr where
                                              where tdef = getType r n
     typ r ctx           (EBinOp _ op e1 e2) = case op of
                                          Eq    -> TBool nopos
+                                         Neq   -> TBool nopos
                                          Lt    -> TBool nopos
                                          Gt    -> TBool nopos
                                          Lte   -> TBool nopos

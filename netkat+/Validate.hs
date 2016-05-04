@@ -266,7 +266,7 @@ exprValidate r ctx (EStruct p n as) = do
 exprValidate r ctx (EBinOp _ op left right) = do
     exprValidate r ctx left
     exprValidate r ctx right
-    if' (elem op [Eq]) (matchType r ctx left right)
+    if' (elem op [Eq, Neq]) (matchType r ctx left right)
      $ if' (elem op [Lt, Lte, Gt, Gte, Plus, Minus]) (
           do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
              assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression"
