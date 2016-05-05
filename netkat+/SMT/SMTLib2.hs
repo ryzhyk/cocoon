@@ -12,7 +12,6 @@ import System.IO.Unsafe
 import System.Process
 import System.Exit
 import Control.Monad.Except
-import Control.Applicative hiding (empty)
 import Data.String.Utils
 
 import Util
@@ -77,21 +76,23 @@ instance SMTPP Struct where
                                       <+> parens (pp ("mk-" ++ n) <+> (hsep $ map (\(f,t) -> parens $ pp (n ++ f) <+> smtpp t) fs)))
 
 instance SMTPP Expr where
-    smtpp (EVar n)          = pp n
-    smtpp (EField e f)      = parens $ text (s ++ f) <+> smtpp e
-                              where TStruct s = typ ?q e
-    smtpp (EBool True)      = pp "true"
-    smtpp (EBool False)     = pp "false"
-    smtpp (EInt w v)        = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
-    smtpp (EStruct n fs)    = parens (pp ("mk-" ++ n) <+> (hsep $ map smtpp fs))
-    smtpp (EBinOp op e1 e2) = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
-    smtpp (EUnOp op e)      = parens $ smtpp op <+> smtpp e
-    smtpp (ECond cs d)      = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
-    smtpp (EApply f [])     = pp f
-    smtpp (EApply f as)     = parens $ pp f <+> (hsep $ map smtpp as)
+    smtpp (EVar n)           = pp n
+    smtpp (EField e f)       = parens $ text (s ++ f) <+> smtpp e
+                               where TStruct s = typ ?q e
+    smtpp (EBool True)       = pp "true"
+    smtpp (EBool False)      = pp "false"
+    smtpp (EInt w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
+    smtpp (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map smtpp fs))
+    smtpp (EBinOp Neq e1 e2) = smtpp $ EUnOp Not $ EBinOp Eq e1 e2
+    smtpp (EBinOp op e1 e2)  = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
+    smtpp (EUnOp op e)       = parens $ smtpp op <+> smtpp e
+    smtpp (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
+    smtpp (EApply f [])      = pp f
+    smtpp (EApply f as)      = parens $ pp f <+> (hsep $ map smtpp as)
 
 instance SMTPP BOp where
     smtpp Eq    = pp "="
+    smtpp Neq   = error "SMTLib2.smtpp !="
     smtpp Lt    = pp "bvult"
     smtpp Gt    = pp "bvugt"
     smtpp Lte   = pp "bvule"
