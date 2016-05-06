@@ -2,7 +2,7 @@
 
 module Type( WithType(..) 
            , typ', typ''
-           , isBool, isUInt, isLocation
+           , isBool, isUInt, isLocation, isStruct
            , matchType) where
 
 import Data.Maybe
@@ -70,18 +70,24 @@ typ'' r ctx x = case typ r ctx x of
 
 isBool :: (WithType a) => Refine -> ECtx -> a -> Bool
 isBool r ctx a = case typ' r ctx a of
-                     TBool _ -> True
-                     _       -> False
+                      TBool _ -> True
+                      _       -> False
 
 isUInt :: (WithType a) => Refine -> ECtx -> a -> Bool
 isUInt r ctx a = case typ' r ctx a of
-                       TUInt _ _ -> True
-                       _         -> False
+                      TUInt _ _ -> True
+                      _         -> False
 
 isLocation :: (WithType a) => Refine -> ECtx -> a -> Bool
 isLocation r ctx a = case typ' r ctx a of
-                           TLocation _ -> True
-                           _           -> False
+                          TLocation _ -> True
+                          _           -> False
+
+isStruct :: (WithType a) => Refine -> ECtx -> a -> Bool
+isStruct r ctx a = case typ' r ctx a of
+                        TStruct _ _ -> True
+                        _           -> False
+
 
 matchType :: (MonadError String me, WithType a, WithPos a, WithType b) => Refine -> ECtx -> a -> b -> me ()
 matchType r ctx x y = assertR r (matchType' r ctx x y) (pos x) "Incompatible type"

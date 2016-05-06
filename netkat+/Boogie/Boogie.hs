@@ -38,7 +38,8 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
                                | otherwise   = Just $
     vcat $ punctuate (pp " ") $ 
     [ pp "/*" <+> pp asm <+> pp "*/"
-    , mkBVOps conc
+--    , mkBVOps conc
+    , mkBoundsCheckers conc
     , vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc]
     , vcat $ map (mkFunction conc . getFunc conc) fs
     , pp "procedure" <+> pp "main" <+> parens empty <+> lbrace
@@ -53,15 +54,16 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
                           mabst
           body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ assVars asm)
                  $$
-                 (vcat $ map (havoc . pp . name) $ assVars asm)
+                 (vcat $ map (\v -> havoc' conc (pp $ name v, fieldType v)) $ assVars asm)
                  $$
                  (assrt $ mkExpr conc (CtxAssume asm) (assExpr asm))
 
 type RMap = M.Map String String
 
 refinementToBoogie1 :: Refine -> Refine -> String -> Doc
-refinementToBoogie1 abst conc rname = vcat $ punctuate (pp "") [ops, types, gvars, funcs, arole, croles, assums, check]
-    where ops    = mkBVOps conc
+refinementToBoogie1 abst conc rname = vcat $ punctuate (pp "") [{-ops,-} bounds, types, gvars, funcs, arole, croles, assums, check]
+    where --ops    = mkBVOps conc
+          bounds = mkBoundsCheckers conc
           new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
           crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
           types  = vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc, mkOutputType]
@@ -88,11 +90,11 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (var (pp "inppkt") (pp packetTypeName))
                  $$
-                 (vcat $ map (havoc . pp . name) $ roleKeys role)
+                 (vcat $ map (\k -> havoc' conc (pp $ name k, fieldType k)) $ roleKeys role)
                  $$
                  (pp "assume" <+> (mkExpr conc (CtxRole role) $ roleKeyRange role) <> semi)
                  $$
-                 (havoc (pp "inppkt"))
+                 (havoc' conc (pp "inppkt", TUser nopos packetTypeName))
                  $$
                  (pp "assume" <+> (mkExprP "inppkt" conc (CtxRole role) $ rolePktGuard role) <> semi)
                  $$
@@ -139,16 +141,22 @@ mkTypeDef TypeDef{..} =
 mkType :: Type -> Doc 
 mkType (TLocation _) = error "Not implemented: Boogie.mkType TLocation"
 mkType (TBool _)     = pp "bool"
-mkType (TUInt _ w)   = pp "bv" <> pp w
+mkType (TUInt _ _)   = pp "int" -- pp "bv" <> pp w
 mkType (TUser _ n)   = pp n
 mkType t             = error $ "Boogie.mkType " ++ show t
 
 mkFunction :: Refine -> Function -> Doc
-mkFunction r f@Function{..} = maybe (decl <> semi) 
+mkFunction r f@Function{..} = maybe ((decl <> semi)
+                                     $$
+                                     (if isUInt r undefined funcType || isStruct r undefined funcType then asm else empty))
                                     (\e -> decl <+> lbrace $$ nest' (mkExpr r (CtxFunc f) e) $$ rbrace) 
                                     funcDef
     where decl = pp "function" <+> (apply (name f) $ map mkField funcArgs)
               <> colon <+> (mkType funcType)
+          -- Values returned by uninterpreted functions are within their type bounds
+          asm = axiom (map (\a -> mkField $ Field nopos (name a) (fieldType a)) funcArgs) asmbody
+          bexpr = apply (name f) $ map (pp . name) funcArgs
+          asmbody = checkBVBounds r [(bexpr, funcType)]
 
 mkAbstRole :: Refine -> Role -> Doc
 mkAbstRole r rl@Role{..} = (pp "procedure" <+> (apply ("a_" ++ roleName) args))
@@ -173,6 +181,8 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                            $$
                            (pp "requires" <+> mkExprP "_pkt" r (CtxRole rl) rolePktGuard <> semi)
                            $$
+                           (pp "requires" <+> checkBVBounds r (map (\k -> (pp $ name k, fieldType k)) roleKeys) <> semi)
+                           $$
                            (modifies $ pp outputVar)
                            $$
                            lbrace
@@ -192,9 +202,7 @@ mkField :: Field -> Doc
 mkField f = (pp $ name f) <> colon <+> (mkType $ fieldType f)
 
 mkAssume :: Refine -> Assume -> Doc
-mkAssume r a@Assume{..} | null assVars = pp "axiom" <+> (parens $ mkExpr r (CtxAssume a) assExpr) <> semi
-mkAssume r a@Assume{..} | otherwise    = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> mkExpr r (CtxAssume a) assExpr) <> semi
-    where args = hsep $ punctuate comma $ map mkField assVars
+mkAssume r a@Assume{..} = axiom (map mkField assVars) (mkExpr r (CtxAssume a) assExpr)
 
 mkExpr :: Refine -> ECtx -> Expr -> Doc
 mkExpr r c e = mkExprP pktVar r c e
@@ -220,11 +228,11 @@ mkExprP p r c e = let ?c = c
 -- Generage Boogie expression.
 -- Replace packet fields in ?mset with field of outputVar
 mkExpr' :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => Expr -> Doc
-mkExpr' (EVar _ v)            = pp v
-mkExpr' (EDotVar _ v)         = let CtxSend _ rl = ?c in 
-                                apply (v ++ "#" ++ (name rl)) [?loc]
-mkExpr' e@(EPacket _)         = mkPktField e
-mkExpr' (EApply _ f as)       = apply f $ map mkExpr' as
+mkExpr' (EVar _ v)             = pp v
+mkExpr' (EDotVar _ v)          = let CtxSend _ rl = ?c in 
+                                 apply (v ++ "#" ++ (name rl)) [?loc]
+mkExpr' e@(EPacket _)          = mkPktField e
+mkExpr' (EApply _ f as)        = apply f $ map mkExpr' as
 mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
                          | otherwise    = 
                                let TUser _ tn = typ'' ?r ?c s
@@ -232,20 +240,26 @@ mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
     where isPktField (EField _ s' _) = isPktField s'
           isPktField (EPacket _)     = True
           isPktField _               = False
-mkExpr' (ELocation _ _ _)     = error "Not implemented: Boogie.mkExpr' ELocation"
-mkExpr' (EBool _ True)        = pp "true"
-mkExpr' (EBool _ False)       = pp "false"
-mkExpr' (EInt _ w v)          = pp v <> text "bv" <> pp w
-mkExpr' (EStruct _ n fs)      = apply n $ map mkExpr' fs
-mkExpr' (EBinOp _ Eq e1 e2)   = parens $ mkExpr' e1 === mkExpr' e2
-mkExpr' (EBinOp _ Neq e1 e2)  = parens $ mkExpr' e1 !== mkExpr' e2
-mkExpr' (EBinOp _ And e1 e2)  = parens $ mkExpr' e1 &&& mkExpr' e2
-mkExpr' (EBinOp _ Or e1 e2)   = parens $ mkExpr' e1 ||| mkExpr' e2
-mkExpr' (EBinOp _ Impl e1 e2) = parens $ mkExpr' e1 ==> mkExpr' e2
-mkExpr' (EBinOp _ op e1 e2)   = bvbop op e1 e2
-mkExpr' (EUnOp _ Not e)       = parens $ char '!' <> mkExpr' e
-mkExpr' (ESlice _ e h l)      = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
-mkExpr' (ECond _ cs d)        = mkCond cs d 
+mkExpr' (ELocation _ _ _)      = error "Not implemented: Boogie.mkExpr' ELocation"
+mkExpr' (EBool _ True)         = pp "true"
+mkExpr' (EBool _ False)        = pp "false"
+mkExpr' (EInt _ _ v)           = pp v -- <> text "bv" <> pp w
+mkExpr' (EStruct _ n fs)       = apply n $ map mkExpr' fs
+mkExpr' (EBinOp _ Eq e1 e2)    = parens $ mkExpr' e1 .== mkExpr' e2
+mkExpr' (EBinOp _ Neq e1 e2)   = parens $ mkExpr' e1 .!= mkExpr' e2
+mkExpr' (EBinOp _ And e1 e2)   = parens $ mkExpr' e1 .&& mkExpr' e2
+mkExpr' (EBinOp _ Or e1 e2)    = parens $ mkExpr' e1 .|| mkExpr' e2
+mkExpr' (EBinOp _ Impl e1 e2)  = parens $ mkExpr' e1 .=> mkExpr' e2
+mkExpr' (EBinOp _ Lt e1 e2)    = parens $ mkExpr' e1 .<  mkExpr' e2
+mkExpr' (EBinOp _ Gt e1 e2)    = parens $ mkExpr' e1 .>  mkExpr' e2
+mkExpr' (EBinOp _ Lte e1 e2)   = parens $ mkExpr' e1 .<= mkExpr' e2
+mkExpr' (EBinOp _ Gte e1 e2)   = parens $ mkExpr' e1 .>= mkExpr' e2
+mkExpr' (EBinOp _ Plus e1 e2)  = parens $ mkExpr' e1 .+  mkExpr' e2
+mkExpr' (EBinOp _ Minus e1 e2) = parens $ mkExpr' e1 .-  mkExpr' e2
+mkExpr' (EBinOp _ Mod e1 e2)   = parens $ mkExpr' e1 .%  mkExpr' e2
+mkExpr' (EUnOp _ Not e)        = parens $ char '!' <> mkExpr' e
+mkExpr' (ESlice _ e h l)       = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
+mkExpr' (ECond _ cs d)         = mkCond cs d 
 
 mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc
 mkPktField e = 
@@ -274,16 +288,16 @@ mkCond [] d             = mkExpr' d
 mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "then" <+> mkExpr' e
                                                                       <+> pp "else" <+> mkCond cs d
 
-bvbop :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => BOp -> Expr -> Expr -> Doc
-bvbop op e1 e2 = text ("BV"++(show $ typeWidth $ typ' ?r ?c e1)++"_"++bvbopname op) <> (parens $ mkExpr' e1 <> comma <+> mkExpr' e2)
+--bvbop :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => BOp -> Expr -> Expr -> Doc
+--bvbop op e1 e2 = text ("BV"++(show $ typeWidth $ typ' ?r ?c e1)++"_"++bvbopname op) <> (parens $ mkExpr' e1 <> comma <+> mkExpr' e2)
 
-bvbopname Lt    = "ULT"
-bvbopname Gt    = "UGT"
-bvbopname Lte   = "ULEQ"
-bvbopname Gte   = "UGEQ"
-bvbopname Plus  = "ADD"
-bvbopname Minus = "SUB"
-bvbopname op    = error $ "Not implemented: Boogie.bvbopname " ++ show op
+--bvbopname Lt    = "ULT"
+--bvbopname Gt    = "UGT"
+--bvbopname Lte   = "ULEQ"
+--bvbopname Gte   = "UGEQ"
+--bvbopname Plus  = "ADD"
+--bvbopname Minus = "SUB"
+--bvbopname op    = error $ "Not implemented: Boogie.bvbopname " ++ show op
 
 mkStatement :: (?rmap::RMap) => Refine -> Role -> Statement -> Doc
 mkStatement r rl (SSeq _ s1 s2) = mkStatement r rl s1 $$ mkStatement r rl s2
@@ -300,14 +314,20 @@ mkStatement r rl (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r (CtxRole rl) c)
                                                 rbrace)
                                          e)
 mkStatement r rl (STest _ c)    = pp "if" <> (parens $ mkExpr r (CtxRole rl) (EUnOp nopos Not c)) <+> (braces $ pp "return" <> semi)
-mkStatement r rl (SSet _ l rhs) = mkAssign r rl l [] rhs
+mkStatement r rl (SSet _ l rhs) = checkBounds r (CtxRole rl) rhs
+                                  $$
+                                  mkAssign r rl l [] rhs
 mkStatement r rl (SSend _ dst)  = let ELocation _ rname ks = dst in
+                                  checkBounds r (CtxRole rl) dst
+                                  $$
                                   case M.lookup rname ?rmap of
                                        Nothing -> pp outputVar =: (pp outputTypeName <> 
                                                                    (parens $ pp pktVar <> comma <+>
                                                                              (apply rname $ map (mkExpr r (CtxRole rl)) ks)))
                                        Just _  -> call (mkRoleName rname) $ map (mkExpr r (CtxRole rl)) $ ks ++ [EPacket nopos]
 mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
+                                   checkBounds r (CtxSend rl rl') c
+                                   $$
                                    case M.lookup n ?rmap of
                                         Nothing -> (havoc $ pp outputVar)
                                                    $$
@@ -315,22 +335,54 @@ mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                                    $$
                                                    (assume $ apply ("is#" ++ n) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
                                                    $$
+                                                   (assume $ checkBVBounds r (map (\k -> (mkExpr r (CtxSend rl rl') (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
+                                                   $$
                                                    (assume $ mkExpr r (CtxSend rl rl') c)
                                         Just _  -> (havoc $ pp locationVar)
                                                    $$
                                                    (assume $ apply ("is#" ++ n) [pp locationVar])
                                                    $$
-                                                   (assume $ let ?p = pktVar
-                                                                 ?mset = []
-                                                                 ?r = r
-                                                                 ?c = CtxSend rl rl'
-                                                                 ?loc = pp locationVar in
-                                                             mkExpr' c)
+                                                   (let ?p = pktVar
+                                                        ?mset = []
+                                                        ?r = r
+                                                        ?c = CtxSend rl rl'
+                                                        ?loc = pp locationVar in
+                                                    (assume $ checkBVBounds r (map (\k -> (mkExpr' (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
+                                                    $$
+                                                    (assume $ mkExpr' c))
                                                    $$
                                                    (call (mkRoleName n) 
                                                          $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
-mkStatement r rl (SHavoc _ e)    = havoc $ mkExpr r (CtxRole rl) e
+mkStatement r rl (SHavoc _ e)    = havoc' r (mkExpr r (CtxRole rl) e, typ r (CtxRole rl) e)
 mkStatement r rl (SAssume _ e)   = assume $ mkExpr r (CtxRole rl) e
+
+checkBounds :: Refine -> ECtx -> Expr -> Doc
+checkBounds r c e = if null es then empty else (assrt $ checkBVBounds r es)
+    where es = map (\e' -> (mkExpr r c e', typ r c e')) $ filter (isUInt r c) $ arithSubExpr e
+          arithSubExpr (EVar _ _)          = []
+          arithSubExpr (EDotVar _ _)       = []
+          arithSubExpr (EPacket _)         = []
+          arithSubExpr e'@(EApply _ f as)  = let func = getFunc r f in
+                                             (maybe [] (\_ -> if' (isStruct r c e' || isUInt r c e') [e'] []) $ funcDef func) ++ concatMap arithSubExpr as
+          arithSubExpr (EField _ s _)      = arithSubExpr s
+          arithSubExpr (ELocation _ _ as)  = concatMap arithSubExpr as
+          arithSubExpr (EBool _ _)         = []
+          arithSubExpr (EInt _ _ _)        = []
+          arithSubExpr (EStruct _ _ fs)    = concatMap arithSubExpr fs
+          arithSubExpr e'@(EBinOp _ op l x) = arithSubExpr l ++ arithSubExpr x ++ 
+                                             (if elem op [Plus, Minus] then [e'] else [])
+          arithSubExpr (EUnOp _ _ e')      = arithSubExpr e'
+          arithSubExpr (ESlice _ e' _ _)   = arithSubExpr e'
+          arithSubExpr (ECond _ cs d)      = arithSubExpr d ++ (concatMap (\(x,v) -> arithSubExpr x ++ arithSubExpr v) cs)
+
+checkBVBounds :: Refine -> [(Doc, Type)] -> Doc
+checkBVBounds r xs = if null cs then pp "true" else (hsep $ punctuate (pp "&&") cs)
+    where cs = concatMap (\(v, x) -> case typ' r undefined x of
+                                          TUInt _ w   -> [apply ("checkBounds" ++ show w) [v]]
+                                          TStruct _ _ -> let TUser _ sname = typ'' r undefined x in
+                                                         [apply ("checkBounds" ++ sname) [v]]
+                                          _           -> []) xs
+
 
 mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
 mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (f:fs) r
@@ -381,15 +433,15 @@ mkAbstStatement mset nxt (SITE _ c t e) = stat
 mkAbstStatement mset nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
                                           $$
                                           mkNext mset nxt
-mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ isDropped ||| (parens $ mkAbstExpr (CtxRole ?rl) mset' l === mkAbstExpr (CtxRole ?rl) mset rhs))
+mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr (CtxRole ?rl) mset' l .== mkAbstExpr (CtxRole ?rl) mset rhs))
                                           $$
                                           mkNext mset' nxt
     where mset' = msetUnion [l] mset
 mkAbstStatement mset []  (SSend _ dst)  = checkNotDropped
                                           $$
-                                          (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) === (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset) ks))
+                                          (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset) ks))
                                           $$
-                                          (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e === mkAbstExpr (CtxRole ?rl) mset e) mset')
+                                          (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e .== mkAbstExpr (CtxRole ?rl) mset e) mset')
                                           $$
                                           ret
     where mset' = msetComplement mset
@@ -400,12 +452,12 @@ mkAbstStatement mset []  (SSendND _ rl c) = checkNotDropped
                                             $$
                                             (assrt $ mkAbstExpr (CtxSend ?rl $ getRole ?r rl) mset c)
                                             $$
-                                            (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e === mkAbstExpr (CtxRole ?rl) mset e) mset')
+                                            (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e .== mkAbstExpr (CtxRole ?rl) mset e) mset')
                                             $$
                                             ret
     where mset' = msetComplement mset
 mkAbstStatement mset nxt (SHavoc _ e)   = mkNext (msetUnion mset [e]) nxt
-mkAbstStatement mset nxt (SAssume _ c)  = (assrt $ isDropped ||| mkAbstExpr (CtxRole ?rl) mset c)
+mkAbstStatement mset nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr (CtxRole ?rl) mset c)
                                           $$
                                           mkNext mset nxt
 mkAbstStatement _    nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
@@ -466,53 +518,117 @@ msetComplement mset = msetComplement' (EPacket nopos)
                                               concatMap (msetComplement' . EField nopos e . name) fs
                                          else [e]
 
-mkBVOps :: Refine -> Doc
-mkBVOps r = vcat $ map mkOpDecl $ collectOps r
+mkBoundsCheckers :: Refine -> Doc
+mkBoundsCheckers r = vcat $ map (\t -> case t of 
+                                            TUser _ n -> mkStructChecker r n
+                                            TUInt _ w -> mkBVChecker w
+                                            _         -> empty)
+                                $ collectTypes r
 
-mkOpDecl :: (Either UOp BOp, Int) -> Doc
-mkOpDecl (Right Lt   , w) = mkBOpDecl "bvult" (bvbopname Lt)    w "bool" 
-mkOpDecl (Right Gt   , w) = mkBOpDecl "bvugt" (bvbopname Gt)    w "bool" 
-mkOpDecl (Right Lte  , w) = mkBOpDecl "bvule" (bvbopname Lte)   w "bool" 
-mkOpDecl (Right Gte  , w) = mkBOpDecl "bvuge" (bvbopname Gte)   w "bool" 
-mkOpDecl (Right Plus , w) = mkBOpDecl "bvadd" (bvbopname Plus)  w (bvtname w)
-mkOpDecl (Right Minus, w) = mkBOpDecl "bvsub" (bvbopname Minus) w (bvtname w)
-mkOpDecl _                = empty
+mkBVChecker :: Int -> Doc
+mkBVChecker w = (pp "function" <+> (apply ("checkBounds" ++ show w) [pp "x" <> colon <+> pp "int"]) <> colon <+> (pp "bool") <+> lbrace)
+                $$
+                (nest' $ pp $ "(x >= 0) && (x < " ++ show ((2^w)::Integer) ++ ")")
+                $$
+                rbrace
 
-mkBOpDecl builtin opname w retname = pp $ "function {:bvbuiltin \"" ++ builtin ++ "\"} BV" ++ show w ++ "_" ++ opname ++ "(x:" ++ bvtname w ++ ", " ++ "y:" ++ bvtname w ++ ")" ++ " returns (" ++ retname ++ ");"
-bvtname w = "bv" ++ show w
+mkStructChecker :: Refine -> String -> Doc
+mkStructChecker r sname = 
+    (pp "function" <+> (apply ("checkBounds" ++ sname) [pp "x" <> colon <+> pp sname]) <> colon <+> (pp "bool") <+> lbrace)
+    $$
+    (nest' cond)
+    $$
+    rbrace
+    where TStruct _ fs = typ' r undefined $ TUser nopos sname
+          cond = checkBVBounds r $ map (\(Field _ n t) -> (apply (n++"#"++sname) [pp "x"], t)) fs
 
 
-collectOps :: Refine -> [(Either UOp BOp, Int)]
-collectOps r@Refine{..} = let ?r = r in
-                          nub $ concatMap (\f -> maybe [] (exprCollectOps (CtxFunc f)) $ funcDef f) refineFuncs ++
-                                concatMap (\a -> exprCollectOps (CtxAssume a) $ assExpr a) refineAssumes ++
-                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ roleKeyRange rl) refineRoles ++
-                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ rolePktGuard rl) refineRoles ++
-                                concatMap (\rl -> statCollectOps rl $ roleBody rl) refineRoles
+collectTypes :: Refine -> [Type]
+collectTypes r@Refine{..} = let ?r = r in
+                            nub $ concatMap (\t -> let t'' = typ'' r undefined $ TUser nopos $ tdefName t
+                                                       t' = typ' r undefined $ tdefType t in
+                                                   t'' : case t' of
+                                                              TStruct _ fs -> map (typ'' r undefined . fieldType) fs
+                                                              _            -> []) refineTypes ++
+                                  concatMap (\f -> maybe [] (exprCollectTypes (CtxFunc f)) $ funcDef f) refineFuncs ++
+                                  concatMap (\a -> exprCollectTypes (CtxAssume a) $ assExpr a) refineAssumes ++
+                                  concatMap (\rl -> exprCollectTypes (CtxRole rl) $ roleKeyRange rl) refineRoles ++
+                                  concatMap (\rl -> exprCollectTypes (CtxRole rl) $ rolePktGuard rl) refineRoles ++
+                                  concatMap (\rl -> statCollectTypes rl $ roleBody rl) refineRoles
 
-statCollectOps :: (?r::Refine) => Role -> Statement -> [(Either UOp BOp, Int)]
-statCollectOps rl (SSeq _ l r)    = statCollectOps rl l ++ statCollectOps rl r
-statCollectOps rl (SPar  _ l r)   = statCollectOps rl l ++ statCollectOps rl r
-statCollectOps rl (SITE _ c t me) = exprCollectOps (CtxRole rl) c ++ statCollectOps rl t ++ maybe [] (statCollectOps rl) me
-statCollectOps rl (STest _ c)     = exprCollectOps (CtxRole rl) c
-statCollectOps rl (SSet _ l r)    = exprCollectOps (CtxRole rl) l ++ exprCollectOps (CtxRole rl) r
-statCollectOps rl (SSend _ d)     = exprCollectOps (CtxRole rl) d
-statCollectOps rl (SSendND _ n c) = exprCollectOps (CtxSend rl $ getRole ?r n) c
-statCollectOps _  (SHavoc _ _)    = []
-statCollectOps rl (SAssume _ c)   = exprCollectOps (CtxRole rl) c
+statCollectTypes :: (?r::Refine) => Role -> Statement -> [Type]
+statCollectTypes rl (SSeq _ l r)    = statCollectTypes rl l ++ statCollectTypes rl r
+statCollectTypes rl (SPar  _ l r)   = statCollectTypes rl l ++ statCollectTypes rl r
+statCollectTypes rl (SITE _ c t me) = exprCollectTypes (CtxRole rl) c ++ statCollectTypes rl t ++ maybe [] (statCollectTypes rl) me
+statCollectTypes rl (STest _ c)     = exprCollectTypes (CtxRole rl) c
+statCollectTypes rl (SSet _ l r)    = exprCollectTypes (CtxRole rl) l ++ exprCollectTypes (CtxRole rl) r
+statCollectTypes rl (SSend _ d)     = exprCollectTypes (CtxRole rl) d
+statCollectTypes rl (SSendND _ n c) = exprCollectTypes (CtxSend rl $ getRole ?r n) c
+statCollectTypes _  (SHavoc _ _)    = []
+statCollectTypes rl (SAssume _ c)   = exprCollectTypes (CtxRole rl) c
 
-exprCollectOps :: (?r::Refine) => ECtx -> Expr -> [(Either UOp BOp, Int)]
-exprCollectOps c (EApply _ _ as)    = concatMap (exprCollectOps c) as
-exprCollectOps c (EField _ s _)     = exprCollectOps c s
-exprCollectOps c (ELocation _ _ as) = concatMap (exprCollectOps c) as
-exprCollectOps c (EStruct _ _ fs)   = concatMap (exprCollectOps c) fs
-exprCollectOps c (EBinOp _ op l r)  = (exprCollectOps c l ++ exprCollectOps c r) ++ 
-                                      case typ' ?r c l of
-                                            TUInt _ w -> [(Right op, w)]
-                                            _         -> []
-exprCollectOps c (EUnOp _ _ e)      = exprCollectOps c e
-exprCollectOps c (ECond _ cs d)     = concatMap (\(e, v) -> exprCollectOps c e ++ exprCollectOps c v) cs ++ exprCollectOps c d
-exprCollectOps _ _ = []
+exprCollectTypes :: (?r::Refine) => ECtx -> Expr -> [Type]
+exprCollectTypes c e = (typ' ?r c e) : exprCollectTypes' c e
+
+exprCollectTypes' :: (?r::Refine) => ECtx -> Expr -> [Type]
+exprCollectTypes' c (EApply _ _ as)    = concatMap (exprCollectTypes c) as
+exprCollectTypes' c (EField _ s _)     = exprCollectTypes c s
+exprCollectTypes' c (ELocation _ _ as) = concatMap (exprCollectTypes c) as
+exprCollectTypes' c (EStruct _ _ fs)   = concatMap (exprCollectTypes c) fs
+exprCollectTypes' c (EBinOp _ _ l r)   = exprCollectTypes c l ++ exprCollectTypes c r
+exprCollectTypes' c (EUnOp _ _ e)      = exprCollectTypes c e
+exprCollectTypes' c (ESlice _ e _ _)   = exprCollectTypes c e
+exprCollectTypes' c (ECond _ cs d)     = concatMap (\(e, v) -> exprCollectTypes c e ++ exprCollectTypes c v) cs ++ exprCollectTypes c d
+exprCollectTypes' _ _                  = []
+
+
+--mkBVOps :: Refine -> Doc
+--mkBVOps r = vcat $ map mkOpDecl $ collectOps r
+--
+--mkOpDecl :: (Either UOp BOp, Int) -> Doc
+--mkOpDecl (Right Lt   , w) = mkBOpDecl "bvult" (bvbopname Lt)    w "bool" 
+--mkOpDecl (Right Gt   , w) = mkBOpDecl "bvugt" (bvbopname Gt)    w "bool" 
+--mkOpDecl (Right Lte  , w) = mkBOpDecl "bvule" (bvbopname Lte)   w "bool" 
+--mkOpDecl (Right Gte  , w) = mkBOpDecl "bvuge" (bvbopname Gte)   w "bool" 
+--mkOpDecl (Right Plus , w) = mkBOpDecl "bvadd" (bvbopname Plus)  w (bvtname w)
+--mkOpDecl (Right Minus, w) = mkBOpDecl "bvsub" (bvbopname Minus) w (bvtname w)
+--mkOpDecl _                = empty
+--
+--mkBOpDecl builtin opname w retname = pp $ "function {:bvbuiltin \"" ++ builtin ++ "\"} BV" ++ show w ++ "_" ++ opname ++ "(x:" ++ bvtname w ++ ", " ++ "y:" ++ bvtname w ++ ")" ++ " returns (" ++ retname ++ ");"
+--bvtname w = "bv" ++ show w
+
+
+--collectOps :: Refine -> [(Either UOp BOp, Int)]
+--collectOps r@Refine{..} = let ?r = r in
+--                          nub $ concatMap (\f -> maybe [] (exprCollectOps (CtxFunc f)) $ funcDef f) refineFuncs ++
+--                                concatMap (\a -> exprCollectOps (CtxAssume a) $ assExpr a) refineAssumes ++
+--                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ roleKeyRange rl) refineRoles ++
+--                                concatMap (\rl -> exprCollectOps (CtxRole rl) $ rolePktGuard rl) refineRoles ++
+--                                concatMap (\rl -> statCollectOps rl $ roleBody rl) refineRoles
+--
+--statCollectOps :: (?r::Refine) => Role -> Statement -> [(Either UOp BOp, Int)]
+--statCollectOps rl (SSeq _ l r)    = statCollectOps rl l ++ statCollectOps rl r
+--statCollectOps rl (SPar  _ l r)   = statCollectOps rl l ++ statCollectOps rl r
+--statCollectOps rl (SITE _ c t me) = exprCollectOps (CtxRole rl) c ++ statCollectOps rl t ++ maybe [] (statCollectOps rl) me
+--statCollectOps rl (STest _ c)     = exprCollectOps (CtxRole rl) c
+--statCollectOps rl (SSet _ l r)    = exprCollectOps (CtxRole rl) l ++ exprCollectOps (CtxRole rl) r
+--statCollectOps rl (SSend _ d)     = exprCollectOps (CtxRole rl) d
+--statCollectOps rl (SSendND _ n c) = exprCollectOps (CtxSend rl $ getRole ?r n) c
+--statCollectOps _  (SHavoc _ _)    = []
+--statCollectOps rl (SAssume _ c)   = exprCollectOps (CtxRole rl) c
+--
+--exprCollectOps :: (?r::Refine) => ECtx -> Expr -> [(Either UOp BOp, Int)]
+--exprCollectOps c (EApply _ _ as)    = concatMap (exprCollectOps c) as
+--exprCollectOps c (EField _ s _)     = exprCollectOps c s
+--exprCollectOps c (ELocation _ _ as) = concatMap (exprCollectOps c) as
+--exprCollectOps c (EStruct _ _ fs)   = concatMap (exprCollectOps c) fs
+--exprCollectOps c (EBinOp _ op l r)  = (exprCollectOps c l ++ exprCollectOps c r) ++ 
+--                                      case typ' ?r c l of
+--                                            TUInt _ w -> [(Right op, w)]
+--                                            _         -> []
+--exprCollectOps c (EUnOp _ _ e)      = exprCollectOps c e
+--exprCollectOps c (ECond _ cs d)     = concatMap (\(e, v) -> exprCollectOps c e ++ exprCollectOps c v) cs ++ exprCollectOps c d
+--exprCollectOps _ _ = []
 
 -- Boogie syntax helpers
 
@@ -526,34 +642,65 @@ modifies :: Doc -> Doc
 modifies v = pp "modifies" <+> v <> semi
 
 assrt :: Doc -> Doc
-assrt c = pp "assert" <+> c <> semi
+assrt c = if c == pp "true" then empty else pp "assert" <+> c <> semi
 
 assume :: Doc -> Doc
-assume c = pp "assume" <+> c <> semi
+assume c = if c == pp "true" then empty else pp "assume" <+> c <> semi
 
-(===) :: Doc -> Doc -> Doc
-(===) x y = x <+> pp "==" <+> y
+(.==) :: Doc -> Doc -> Doc
+(.==) x y = x <+> pp "==" <+> y
 
-(!==) :: Doc -> Doc -> Doc
-(!==) x y = x <+> pp "!=" <+> y
+(.!=) :: Doc -> Doc -> Doc
+(.!=) x y = x <+> pp "!=" <+> y
 
-(|||) :: Doc -> Doc -> Doc
-(|||) x y = x <+> pp "||" <+> y
+(.||) :: Doc -> Doc -> Doc
+(.||) x y = x <+> pp "||" <+> y
 
-(&&&) :: Doc -> Doc -> Doc
-(&&&) x y = x <+> pp "&&" <+> y
+(.&&) :: Doc -> Doc -> Doc
+(.&&) x y = x <+> pp "&&" <+> y
 
-(==>) :: Doc -> Doc -> Doc
-(==>) x y = x <+> pp "==>" <+> y
+(.=>) :: Doc -> Doc -> Doc
+(.=>) x y = x <+> pp "==>" <+> y
+
+(.<) :: Doc -> Doc -> Doc
+(.<) x y = x <+> pp "<" <+> y
+
+(.>) :: Doc -> Doc -> Doc
+(.>) x y = x <+> pp ">" <+> y
+
+(.<=) :: Doc -> Doc -> Doc
+(.<=) x y = x <+> pp "<=" <+> y
+
+(.>=) :: Doc -> Doc -> Doc
+(.>=) x y = x <+> pp ">=" <+> y
+
+(.+) :: Doc -> Doc -> Doc
+(.+) x y = x <+> pp "+" <+> y
+
+(.-) :: Doc -> Doc -> Doc
+(.-) x y = x <+> pp "-" <+> y
+
+(.%) :: Doc -> Doc -> Doc
+(.%) x y = x <+> pp "%" <+> y
 
 apply :: String -> [Doc] -> Doc
 apply f as = pp f <> (parens $ hsep $ punctuate comma as)
+
+axiom :: [Doc] -> Doc -> Doc
+axiom [] e = pp "axiom" <+> (parens e) <> semi
+axiom vs e = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> e) <> semi
+    where args = hsep $ punctuate comma vs
 
 call :: String -> [Doc] -> Doc
 call f as = pp "call" <+> apply f as <> semi
 
 havoc :: Doc -> Doc
 havoc x = pp "havoc" <+> x <> semi
+
+havoc' :: Refine -> (Doc, Type) -> Doc
+havoc' r (x,t) = havoc x
+                 $$
+                 (assume $ checkBVBounds r [(x,t)])
 
 ret :: Doc
 ret = pp "return" <> semi

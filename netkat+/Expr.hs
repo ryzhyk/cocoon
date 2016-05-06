@@ -3,12 +3,16 @@
 module Expr ( exprIsValidFlag
             , exprFuncs
             , exprFuncsRec
-            , exprRefersToPkt) where
+            , exprRefersToPkt
+            , exprScalars) where
 
 import Data.List
 
 import Syntax
 import NS
+import Type
+import Pos
+import Name
 
 exprIsValidFlag e = case e of 
                          EField _ _ f -> f == "valid"
@@ -69,3 +73,9 @@ exprRefersToPkt (EBinOp _ _ l r)   = exprRefersToPkt l || exprRefersToPkt r
 exprRefersToPkt (EUnOp _ _ e)      = exprRefersToPkt e
 exprRefersToPkt (ESlice _ e _ _)   = exprRefersToPkt e
 exprRefersToPkt (ECond _ cs d)     = (or $ map (\(c,e) -> exprRefersToPkt c || exprRefersToPkt e) cs) || exprRefersToPkt d
+
+exprScalars :: Refine -> ECtx -> Expr -> [Expr]
+exprScalars r c e = 
+    case typ' r c e of
+         TStruct _ fs -> concatMap (exprScalars r c . EField nopos e . name) fs
+         _            -> [e]
