@@ -1,0 +1,11 @@
+Review #4A Updated 9 May 2016 7:21:29am EDT
+Overall merit
+4. Accept
+Comments for author
+
+Interesting, timely and ambitious work, on-topic for NetPL. From 
+the description it wasn't clear to me what the workflow consists 
+of when refining the specification -- what does the user see and 
+think? And who is the intended user -- network engineers? How does 
+this scale -- how long does the model checker take in realistic 
+applications?
