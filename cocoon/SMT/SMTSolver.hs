@@ -88,6 +88,14 @@ data SMTSolver = SMTSolver {
 }
 
 
+allValues :: SMTQuery -> Type -> [Expr]
+allValues _ TBool       = [EBool True, EBool False]
+allValues _ (TUInt w)   = map (EInt w) [0..2^w-1]
+allValues q (TStruct n) = map (EStruct n) $ allvals fs
+    where Struct _ fs = fromJust $ find ((==n) . name) $ smtStructs q
+          allvals []          = [[]]
+          allvals ((_,t):fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q t
+
 allSolutions :: SMTSolver -> SMTQuery -> String -> [Expr]
 allSolutions solver q var = sortWith solToArray $ allSolutions' solver q var
 
@@ -97,9 +105,12 @@ allSolutions' solver q var =
     case smtGetModel solver q of
          Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
          Just Nothing      -> []
-         Just (Just model) -> let val = model M.! var 
-                                  q'  = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)} 
-                              in val:(allSolutions' solver q' var)
+         Just (Just model) -> case M.lookup var model of
+                                   Nothing  -> allValues q $ typ q $ EVar var
+                                   Just val -> let q' = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)}
+                                               in val:(allSolutions' solver q' var)
+                              
+
 
 solToArray :: Expr -> [Integer]
 solToArray (EBool True)   = [1]
