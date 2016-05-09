@@ -39,7 +39,7 @@ main = do
         workdir = dir </> basename
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
-    spec <- case parse nkplusGrammar fname fdata of
+    spec <- case parse cocoonGrammar fname fdata of
                  Left  e    -> fail $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
     combined <- case validate spec of

@@ -39,13 +39,13 @@ _THRIFT_BASE_PORT = 22222
 parser = argparse.ArgumentParser(description='Mininet demo')
 parser.add_argument('--behavioral-exe', help='Path to behavioral executable',
                     type=str, action="store", required=True)
-parser.add_argument('--spec', help='Path to NetKAT+ spec file',
+parser.add_argument('--spec', help='Path to Cocoon spec file',
                     type=str, action="store", required=True)
-parser.add_argument('--cfg', help='Path to NetKAT+ config file',
+parser.add_argument('--cfg', help='Path to Cocoon config file',
                     type=str, action="store", required=True)
 parser.add_argument('--cli', help='Path to BM CLI',
                     type=str, action="store", required=True)
-parser.add_argument('--nkp', help='Path to NetKAT+ compiler',
+parser.add_argument('--cocoon', help='Path to Cocoon compiler',
                     type=str, action="store", required=True)
 parser.add_argument('--miniedit', help='Path to the MiniEdit tool',
                     type=str, action="store", required=False)
@@ -77,19 +77,19 @@ class MyTopo(Topo):
         for link in topology['links']:
             self.addLink(link['src'], link['dest'], port1 = link['srcport'], port2 = link['destport'])
 
-def updateConfig(nkp, loadedTopology):
-    # send signal to the netkat+ process
-    nkp.stdin.write("update\n")
+def updateConfig(cocoon, loadedTopology):
+    # send signal to the cocoon process
+    cocoon.stdin.write("update\n")
 
     # read output until magic line appears
-    while nkp.poll() == None:
-        line = nkp.stdout.readline()
-        sys.stdout.write("netkat+: " + line)
+    while cocoon.poll() == None:
+        line = cocoon.stdout.readline()
+        sys.stdout.write("cocoon: " + line)
         if line == "Network configuration complete\n":
             break
 
-    if nkp.poll() != None:
-        raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
+    if cocoon.poll() != None:
+        raise Exception(args.cocoon + " terminated with error code " + str(cocoon.returncode))
 
 def applyConfig(loadedTopology, netdir, netname, oldts):
     # re-apply switch configuration files whose timestamps are newer than the previous timestamp
@@ -117,19 +117,19 @@ def main():
 
     oldts = time.time()
 
-    # Start the NetKAT+ process.  Wait for it to generate network topology,
+    # Start the Cocoon process.  Wait for it to generate network topology,
     # and leave it running for future network updates
-    cmd = [args.nkp, args.spec, args.cfg]
+    cmd = [args.cocoon, args.spec, args.cfg]
     print " ".join(cmd)
-    nkp = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    while nkp.poll() == None:
-        line = nkp.stdout.readline() # This blocks until it receives a newline.
-        sys.stdout.write("netkat+: " + line)
+    cocoon = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    while cocoon.poll() == None:
+        line = cocoon.stdout.readline() # This blocks until it receives a newline.
+        sys.stdout.write("cocoon: " + line)
         if line == "Network configuration complete\n":
             break
 
-    if nkp.poll() != None:
-        raise Exception(args.nkp + " terminated with error code " + str(nkp.returncode))
+    if cocoon.poll() != None:
+        raise Exception(args.cocoon + " terminated with error code " + str(cocoon.returncode))
 
 
     specdir, specfname = os.path.split(args.spec)
@@ -195,7 +195,7 @@ def main():
     oldts = newts
     while True:
         CLI( net )
-        updateConfig(nkp, loadedTopology)
+        updateConfig(cocoon, loadedTopology)
         newts = time.time()
         applyConfig(loadedTopology, netdir, netname, oldts)
         oldts = newts

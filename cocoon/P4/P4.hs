@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, TupleSections, RecordWildCards #-}
 
--- Convert NetKAT+ spec to P4
+-- Convert Cocoon spec to P4
 
 module P4.P4( P4DynAction(..)
             , P4Switch(..)

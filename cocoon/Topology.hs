@@ -1,6 +1,6 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
 
--- Managing physical network topology induced by a NetKAT+ spec
+-- Managing physical network topology induced by a Cocoon spec
 
 module Topology ( Topology
                 , topologyLinks

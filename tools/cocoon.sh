@@ -14,7 +14,7 @@ sudo mn -c
 
 sudo PYTHONPATH=$PYTHONPATH:$BMV2_PATH/mininet/ python $THIS_DIR/run_network.py \
     --behavioral-exe $SWITCH_PATH \
-    --nkp $NETKATPLUS_PATH \
+    --cocoon $COCOON_PATH \
     --spec $1 \
     --cfg $2 \
     --cli $CLI_PATH \
