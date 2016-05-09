@@ -20,12 +20,13 @@ outputTypeName = "_Output"
 locTypeName    = "_Location"
 
 outputVar = "_outp"
+depthVar  = "_depth"
 locationVar = "_loc"
 
-refinementToBoogie :: Maybe Refine -> Refine -> ([(Assume, Doc)], Maybe [(String, Doc)])
-refinementToBoogie mabst conc = (assums, roles)
+refinementToBoogie :: Maybe Refine -> Refine -> Int -> ([(Assume, Doc)], Maybe [(String, Doc)])
+refinementToBoogie mabst conc maxdepth = (assums, roles)
     where assums = mapMaybe (\assm -> fmap (assm,) $ assumeToBoogie1 mabst conc assm) $ refineAssumes conc
-          roles  = fmap (\abst -> map (\role -> (role, refinementToBoogie1 abst conc role)) $ refineTarget conc)
+          roles  = fmap (\abst -> map (\role -> (role, refinementToBoogie1 abst conc role maxdepth)) $ refineTarget conc)
                         mabst
 
 -- Generate verification condition to validate  an assumption.
@@ -60,17 +61,19 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 
 type RMap = M.Map String String
 
-refinementToBoogie1 :: Refine -> Refine -> String -> Doc
-refinementToBoogie1 abst conc rname = vcat $ punctuate (pp "") [{-ops,-} bounds, types, gvars, funcs, arole, croles, assums, check]
+refinementToBoogie1 :: Refine -> Refine -> String -> Int -> Doc
+refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} bounds, types, gvars, funcs, arole, croles, assums, check]
     where --ops    = mkBVOps conc
           bounds = mkBoundsCheckers conc
           new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
           crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
           types  = vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc, mkOutputType]
-          gvars  = vcat $ [var (pp outputVar) (pp outputTypeName)]
+          gvars  = vcat $ [ var (pp outputVar) (pp outputTypeName)
+                          , var (pp depthVar) (pp "int")]
           funcs  = vcat $ map (mkFunction conc) $ refineFuncs conc
           arole  = mkAbstRole abst $ getRole abst rname
-          croles = let ?rmap = crmap in 
+          croles = let ?rmap = crmap 
+                       ?maxdepth = maxdepth in 
                    vcat $ punctuate (pp "") $ map (mkConcRole conc) $ map (getRole conc) new
           assums = vcat $ map (mkAssume conc) $ refineAssumes conc
           check  = mkCheck conc rname 
@@ -98,7 +101,9 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (pp "assume" <+> (mkExprP "inppkt" conc (CtxRole role) $ rolePktGuard role) <> semi)
                  $$
-                 (pp outputVar =: (pp "Dropped" <> (parens $ empty)))
+                 (pp outputVar .:= (pp "Dropped" <> (parens $ empty)))
+                 $$
+                 (pp depthVar .:= pp "0")
                  $$
                  (call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
                  $$
@@ -174,7 +179,7 @@ mkAbstRole r rl@Role{..} = (pp "procedure" <+> (apply ("a_" ++ roleName) args))
 
 
 
-mkConcRole :: (?rmap::RMap) => Refine -> Role -> Doc
+mkConcRole :: (?rmap::RMap, ?maxdepth::Int) => Refine -> Role -> Doc
 mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args))
                            $$
                            (pp "requires" <+> mkExpr r (CtxRole rl) roleKeyRange <> semi)
@@ -191,7 +196,7 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                                     $$
                                     var (pp pktVar) (pp packetTypeName) 
                                     $$
-                                    pp pktVar =: pp "_pkt"
+                                    pp pktVar .:= pp "_pkt"
                                     $$
                                     mkStatement r rl roleBody)
                            $$
@@ -299,7 +304,7 @@ mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "th
 --bvbopname Minus = "SUB"
 --bvbopname op    = error $ "Not implemented: Boogie.bvbopname " ++ show op
 
-mkStatement :: (?rmap::RMap) => Refine -> Role -> Statement -> Doc
+mkStatement :: (?rmap::RMap, ?maxdepth::Int) => Refine -> Role -> Statement -> Doc
 mkStatement r rl (SSeq _ s1 s2) = mkStatement r rl s1 $$ mkStatement r rl s2
 mkStatement _ _  (SPar _ _ _)   = error "Not implemented: Boogie.mkStatement SPar" {- run in sequence, copying packet -}
 mkStatement r rl (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r (CtxRole rl) c) <+> lbrace)
@@ -320,13 +325,17 @@ mkStatement r rl (SSet _ l rhs) = checkBounds r (CtxRole rl) rhs
 mkStatement r rl (SSend _ dst)  = let ELocation _ rname ks = dst in
                                   checkBounds r (CtxRole rl) dst
                                   $$
+                                  checkDepth
+                                  $$
                                   case M.lookup rname ?rmap of
-                                       Nothing -> pp outputVar =: (pp outputTypeName <> 
+                                       Nothing -> pp outputVar .:= (pp outputTypeName <> 
                                                                    (parens $ pp pktVar <> comma <+>
                                                                              (apply rname $ map (mkExpr r (CtxRole rl)) ks)))
                                        Just _  -> call (mkRoleName rname) $ map (mkExpr r (CtxRole rl)) $ ks ++ [EPacket nopos]
 mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                    checkBounds r (CtxSend rl rl') c
+                                   $$
+                                   checkDepth
                                    $$
                                    case M.lookup n ?rmap of
                                         Nothing -> (havoc $ pp outputVar)
@@ -355,6 +364,11 @@ mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                                          $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
 mkStatement r rl (SHavoc _ e)    = havoc' r (mkExpr r (CtxRole rl) e, typ r (CtxRole rl) e)
 mkStatement r rl (SAssume _ e)   = assume $ mkExpr r (CtxRole rl) e
+
+checkDepth :: (?maxdepth::Int) => Doc
+checkDepth = (pp depthVar .:= (pp depthVar .+ pp "1"))
+             $$
+             (assrt $ pp depthVar .< pp ?maxdepth)
 
 checkBounds :: Refine -> ECtx -> Expr -> Doc
 checkBounds r c e = if null es then empty else (assrt $ checkBVBounds r es)
@@ -386,7 +400,7 @@ checkBVBounds r xs = if null cs then pp "true" else (hsep $ punctuate (pp "&&") 
 
 mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
 mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (f:fs) r
-mkAssign rf rl l fs r              = mkExpr rf (CtxRole rl) l =: mkAssignRHS rf rl l fs r
+mkAssign rf rl l fs r              = mkExpr rf (CtxRole rl) l .:= mkAssignRHS rf rl l fs r
 
 mkAssignRHS :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
 mkAssignRHS rf rl _ []     r                = mkExpr rf (CtxRole rl) r
@@ -632,8 +646,8 @@ exprCollectTypes' _ _                  = []
 
 -- Boogie syntax helpers
 
-(=:) :: Doc -> Doc -> Doc
-(=:) l r = l <+> text ":=" <+> r <> semi
+(.:=) :: Doc -> Doc -> Doc
+(.:=) l r = l <+> text ":=" <+> r <> semi
 
 var :: Doc -> Doc -> Doc
 var n t = pp "var" <+> n <> colon <+> t <> semi

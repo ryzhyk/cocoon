@@ -11,6 +11,7 @@ import Data.List
 import System.Directory
 import System.IO.Error
 import System.IO
+import Numeric
 
 import Parse
 import Validate
@@ -29,14 +30,17 @@ import Util
 main = do
     args <- getArgs
     prog <- getProgName
-    when (length args > 2 || length args < 1) $ fail $ "Usage: " ++ prog ++ " <spec_file> [<config_file>]"
-    let fname  = head args
-        cfname = if length args >= 2
-                    then Just $ args !! 1
+    when (length args > 3 || length args < 2) $ fail $ "Usage: " ++ prog ++ " <spec_file> <bound> [<config_file>]"
+    let fname  = args !! 0
+        cfname = if length args >= 3
+                    then Just $ args !! 2
                     else Nothing
         (dir, file) = splitFileName fname
         (basename,_) = splitExtension file
         workdir = dir </> basename
+    bound <- case readDec (args !! 1) of
+                  [(b, _)] -> return b
+                  _        -> fail $ "Invalid bound: " ++ (args !! 1)
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
     spec <- case parse cocoonGrammar fname fdata of
@@ -49,8 +53,8 @@ main = do
     putStrLn "Validation complete"
 
     let ps = pairs combined
-    let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined)) :
-                      map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2)) ps
+    let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined) bound) :
+                      map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2 bound)) ps
         boogiedir = workdir </> "boogie"
     createDirectoryIfMissing False boogiedir
     oldfiles <- listDirectory boogiedir
