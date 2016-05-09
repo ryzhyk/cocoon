@@ -55,21 +55,32 @@ refine L0In {
     assume (bool tree, uint<8> i1, uint<8> r1, uint<8> r2) 
         ((not (r1 == r2)) and (not l1SwitchUp(tree, i1, r1))) => l1SwitchUp(tree, i1, r2)
 
+    function l1Avoid(bool tree, uint<8> i1, uint<8> r): bool
+    assume (bool tree, uint<8> i1, uint<8> r)
+        l1Avoid(tree, i1, r) => (not l1SwitchUp(tree, i1, r))
+
     assume (bool tree, uint<8> i1_1, uint<8> i1_2, uint<8> r) 
         (not (i1_1 == i1_2) and (not l1SwitchUp(tree, i1_1, r))) => l1SwitchUp(tree, i1_2, r)
+
+    function pickdef01port(bool tree, Packet p): uint<8> =
+        case {
+            tree(p.eth.dstAddr) == tree and l1Avoid(tree, i1(p.eth.dstAddr), hash(p.eth)): incmodp(hash(p.eth));
+            default: hash(p.eth);
+        }
+
+    function pick01port(bool tree, uint<8> i1, uint<8> defport): uint<8> =
+        case {
+            l1SwitchUp(tree, i1, defport): defport;
+            default: incmodp(defport);
+        }
 
     role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
         (* Validate packets at the edge *)
         if goodPacket(pkt) then {
             if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 and i0(pkt.eth.dstAddr) == i0 then {
-                if port(pkt.eth.dstAddr) < p() then {
-                    send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
-                }
+                send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
             } else {
-                if l1SwitchUp(tree, i1, hash(pkt.eth)) then
-                    send L01Out[tree, i1, i0, hash(pkt.eth)]
-                else
-                    send L01Out[tree, i1, i0, incmodp(hash(pkt.eth))]
+                send L01Out[tree, i1, i0, pick01port(tree, i1, pickdef01port(tree, pkt))]
             }
         }
         
@@ -96,25 +107,31 @@ refine L10In {
     assume (uint<8> x1, uint<8> y1, uint<8> x2, uint<8> y2) 
         ((not l2SwitchUp(x1, y1)) and (not (x1 == x2 and y1 == y2))) => l2SwitchUp(x2, y2)
 
-    function pick12port(bool tree, uint<8> i1, uint<8> r, Packet p): uint<8> =
+    function pickdef12port(bool tree, Packet p): uint<8> =
+        case {
+            tree(p.eth.dstAddr) != tree and l1Avoid(tree(p.eth.dstAddr), i1(p.eth.dstAddr), hash(p.eth)): incmodp(hash(p.eth));
+            default: hash(p.eth);
+        }
+
+    function pick12port(bool tree, uint<8> i1, uint<8> r, uint<8> defport): uint<8> =
         case {
             tree == false: 
                 case {
-                    l2SwitchUp(r, hash(p.eth)): hash(p.eth);
-                    default: incmodp(hash(p.eth));};
+                    l2SwitchUp(r, defport): defport;
+                    default: incmodp(defport);};
             default: 
                 case {
-                    l2SwitchUp(hash(p.eth), r): hash(p.eth);
-                    default: incmodp(hash(p.eth));};
+                    l2SwitchUp(defport, r): defport;
+                    default: incmodp(defport);};
         }
 
     role L10In[bool tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) / goodPacket(pkt) = 
-         if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 then {
+        if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 then {
             if i0(pkt.eth.dstAddr) < p() then {
                 send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
             }
         } else {
-            send L12Out[tree, i1, r, pick12port(tree, i1, r, pkt)]
+            send L12Out[tree, i1, r, pick12port(tree, i1, r, pickdef12port(tree, pkt))]
         }
   
     role L12Out[bool tree, uint<8> i1, uint<8> r, uint<8> port] | iL1Port(i1,r,port) / goodPacket(pkt) = 
@@ -161,7 +178,7 @@ refine L10In {
         if (tree == tree(pkt.eth.dstAddr) and i1 == i1(pkt.eth.dstAddr)) then {
             send L10Out[tree, i1, r, i0(pkt.eth.dstAddr)]
         } else {
-            send L12Out[tree, i1, r, pick12port(tree, i1, r, pkt)]
+            send L12Out[tree, i1, r, pick12port(tree, i1, r, incmodp(port))]
         }
 }
 
