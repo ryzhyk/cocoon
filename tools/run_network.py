@@ -47,6 +47,8 @@ parser.add_argument('--cli', help='Path to BM CLI',
                     type=str, action="store", required=True)
 parser.add_argument('--cocoon', help='Path to Cocoon compiler',
                     type=str, action="store", required=True)
+parser.add_argument('--bound', help='Bound on the number of hops (for verification purposs)',
+                    type=str, action="store", required=True)
 parser.add_argument('--miniedit', help='Path to the MiniEdit tool',
                     type=str, action="store", required=False)
 parser.add_argument('--p4c', help='Path to P4C-to-json compiler',
@@ -119,7 +121,7 @@ def main():
 
     # Start the Cocoon process.  Wait for it to generate network topology,
     # and leave it running for future network updates
-    cmd = [args.cocoon, args.spec, args.cfg]
+    cmd = [args.cocoon, args.spec, args.bound, args.cfg]
     print " ".join(cmd)
     cocoon = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     while cocoon.poll() == None:

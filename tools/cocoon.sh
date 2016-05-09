@@ -10,11 +10,14 @@ SWITCH_PATH=$BMV2_PATH/targets/simple_switch/simple_switch
 
 CLI_PATH=$BMV2_PATH/tools/runtime_CLI.py
 
+BOUND=10
+
 sudo mn -c
 
 sudo PYTHONPATH=$PYTHONPATH:$BMV2_PATH/mininet/ python $THIS_DIR/run_network.py \
     --behavioral-exe $SWITCH_PATH \
     --cocoon $COCOON_PATH \
+    --bound $BOUND \
     --spec $1 \
     --cfg $2 \
     --cli $CLI_PATH \
