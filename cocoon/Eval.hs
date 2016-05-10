@@ -49,31 +49,37 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
     in case (lhs', rhs') of
             (EBool _ v1, EBool _ v2)   -> case op of
                                                Eq  -> EBool nopos (v1 == v2)
+                                               Neq -> EBool nopos (v1 /= v2)
                                                And -> EBool nopos (v1 && v2)
                                                Or  -> EBool nopos (v1 || v2)
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (EBool _ True, _)          -> case op of
                                                Eq  -> rhs'
+                                               Neq -> EUnOp nopos Not rhs'
                                                And -> rhs'
                                                Or  -> lhs'
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (EBool _ False, _)         -> case op of
                                                Eq  -> EUnOp nopos Not rhs'
+                                               Neq -> rhs'
                                                And -> lhs'
                                                Or  -> rhs'
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (_, EBool _ True)          -> case op of
                                                Eq  -> lhs'
+                                               Neq -> EUnOp nopos Not lhs'
                                                And -> lhs'
                                                Or  -> rhs'
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (_, EBool _ False)          -> case op of
                                                Eq  -> EUnOp nopos Not lhs'
+                                               Neq -> lhs'
                                                And -> rhs'
                                                Or  -> lhs'
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
                                                Eq    -> EBool nopos (v1 == v2)
+                                               Neq   -> EBool nopos (v1 /= v2)
                                                Lt    -> EBool nopos (v1 < v2)
                                                Gt    -> EBool nopos (v1 > v2)
                                                Lte   -> EBool nopos (v1 <= v2)
@@ -83,8 +89,9 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                Mod   -> EInt  nopos w1 (v1 `mod` v2)
                                                _     -> error $ "Eval.evalExpr " ++ show e
             (EStruct _ _ fs1, EStruct _ _ fs2) -> case op of 
-                                                       Eq -> evalExpr $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
-                                                       _  -> error $ "Eval.evalExpr " ++ show e
+                                                       Eq  -> evalExpr $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
+                                                       Neq -> evalExpr $ disj $ map (\(f1,f2) -> EBinOp nopos Neq f1 f2) $ zip fs1 fs2
+                                                       _   -> error $ "Eval.evalExpr " ++ show e
             _                          -> EBinOp nopos op lhs' rhs'
 evalExpr (EUnOp _ op e)                = 
     let e' = evalExpr e
@@ -92,6 +99,10 @@ evalExpr (EUnOp _ op e)                =
            (EBool _ v) -> case op of
                                Not -> EBool nopos (not v)
            _           -> EUnOp nopos op e'
+
+evalExpr (ESlice _ e h l)              = case evalExpr e of
+                                              EInt _ _ v -> EInt nopos (h-l+1) $ (v `shiftR` l) .&. (2^(h-l+1) - 1)
+                                              e'         -> ESlice nopos e' h l
 evalExpr (ECond _ cs d)                = 
     let cs1 = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
         cs2 = filter ((/= EBool nopos False) . fst) cs1
@@ -102,3 +113,4 @@ evalExpr (ECond _ cs d)                =
             ([],(_,e):_)  -> e
             (cs3,(_,e):_) -> ECond nopos cs3 e
 evalExpr e                             = e
+

@@ -13,7 +13,6 @@ import Data.List
 import Data.Bits
 import qualified Data.Map as M
 import Numeric
-import Debug.Trace
 
 import Util
 import PP
@@ -113,6 +112,8 @@ printExpr (EInt _ _ v)                          = pp $ show v
 printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
+printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
+                                                           (pp "0b" <> (pp $ concat $ replicate (h-l+1) "1"))
 printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 printBOp :: BOp -> Doc
