@@ -21,7 +21,7 @@ type KMap = M.Map String Expr
 -- Expand function definitions, substitute variable values defined in KMap
 -- When all functions are defined and all variables are mapped into values, the result should be an expression without
 -- function calls and with only pkt variables.
-evalExpr  :: (?r::Refine, ?role::Role, ?kmap::KMap) => Expr -> Expr
+evalExpr  :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> Expr
 evalExpr e@(EVar _ k)                  = case M.lookup k ?kmap of
                                               Nothing -> e
                                               Just e' -> e'
@@ -34,7 +34,7 @@ evalExpr (EApply p f as)               =
           func = getFunc ?r f
 evalExpr (EField _ s f)        = 
     case evalExpr s of
-         s'@(EStruct _ _ fs) -> let (TStruct _ sfs) = typ' ?r (CtxRole ?role) s'
+         s'@(EStruct _ _ fs) -> let (TStruct _ sfs) = typ' ?r ?c s'
                                     fidx = fromJust $ findIndex ((== f) . name) sfs
                                 in fs !! fidx
          s'                  -> EField nopos s' f
@@ -43,8 +43,8 @@ evalExpr (EStruct _ s fs)              = EStruct nopos s $ map evalExpr fs
 evalExpr e@(EBinOp _ op lhs rhs)       = 
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-        TUInt _ w1 = typ' ?r (CtxRole ?role) lhs'
-        TUInt _ w2 = typ' ?r (CtxRole ?role) rhs'
+        TUInt _ w1 = typ' ?r ?c lhs'
+        TUInt _ w2 = typ' ?r ?c rhs'
         w = max w1 w2
     in case (lhs', rhs') of
             (EBool _ v1, EBool _ v2)   -> case op of

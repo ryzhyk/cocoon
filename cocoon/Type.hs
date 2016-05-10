@@ -3,7 +3,8 @@
 module Type( WithType(..) 
            , typ', typ''
            , isBool, isUInt, isLocation, isStruct
-           , matchType) where
+           , matchType
+           , typeDomainSize, typeEnumerate) where
 
 import Data.Maybe
 import Data.List
@@ -103,3 +104,24 @@ matchType' r ctx x y =
          _                              -> False
     where t1 = typ' r ctx x
           t2 = typ' r ctx y
+
+typeDomainSize :: Refine -> Type -> Integer
+typeDomainSize r t = 
+    case typ' r undefined t of
+         TBool _      -> 2
+         TUInt _ w    -> 2^w
+         TStruct _ fs -> product $ map (typeDomainSize r . fieldType) fs
+         TUser _ _    -> error "Type.typeDomainSize TUser"
+         TLocation _  -> error "Not implemented: Type.typeDomainSize TLocation"
+
+typeEnumerate :: Refine -> Type -> [Expr]
+typeEnumerate r t = 
+    case typ' r undefined t of
+         TBool _      -> [EBool nopos False, EBool nopos True]
+         TUInt _ w    -> map (EInt nopos w) [0..2^w-1]
+         TStruct _ fs -> map (EStruct nopos sname) $ fieldsEnum fs
+         TUser _ _    -> error "Type.typeEnumerate TUser"
+         TLocation _  -> error "Not implemented: Type.typeEnumerate TLocation"
+    where TUser _ sname = typ'' r undefined t
+          fieldsEnum []     = [[]]
+          fieldsEnum (f:fs) = concatMap (\vs -> map (:vs) $ typeEnumerate r $ fieldType f) $ fieldsEnum fs

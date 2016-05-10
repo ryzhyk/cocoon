@@ -13,6 +13,7 @@ import Data.List
 import Data.Bits
 import qualified Data.Map as M
 import Numeric
+import Debug.Trace
 
 import Util
 import PP
@@ -25,6 +26,7 @@ import Topology
 import Type
 import P4.Header
 import Expr
+
 
 {-
 
@@ -41,6 +43,10 @@ requires passing field f2 of the packet to an action defined at compile time.  T
 impossible, since P4 match tables do not allow actions with non-const parameters.
 
 -} 
+
+-- Maximal size of a tabular representation of expression
+maxExprTable :: Integer
+maxExprTable = 1000
 
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
@@ -135,19 +141,23 @@ printUOp Not   = pp "not"
 
 -- True if expression cannot be interpreted at compile time and requires a P4 table.
 exprNeedsTable :: Expr -> Bool
-exprNeedsTable (EVar _ _)         = False
-exprNeedsTable (EDotVar _ _)      = False
-exprNeedsTable (EPacket _)        = False
-exprNeedsTable (EApply _ _ _)     = True
-exprNeedsTable (EField _ s _)     = exprNeedsTable s
-exprNeedsTable (ELocation _ _ as) = or $ map exprNeedsTable as
-exprNeedsTable (EBool _ _)        = False
-exprNeedsTable (EInt _ _ _)       = False
-exprNeedsTable (EStruct _ _ fs)   = or $ map exprNeedsTable fs
-exprNeedsTable (EBinOp _ _ e1 e2) = exprNeedsTable e1 || exprNeedsTable e2
-exprNeedsTable (EUnOp _ _ e)      = exprNeedsTable e
-exprNeedsTable (ESlice _ e _ _)   = exprNeedsTable e
-exprNeedsTable (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable c || exprNeedsTable e) cs) || exprNeedsTable d
+exprNeedsTable e = trace ("exprNeedsTable " ++ show e ++ " = " ++ show res) res
+   where res = exprNeedsTable' e
+
+exprNeedsTable' :: Expr -> Bool
+exprNeedsTable' (EVar _ _)         = False
+exprNeedsTable' (EDotVar _ _)      = False
+exprNeedsTable' (EPacket _)        = False
+exprNeedsTable' (EApply _ _ _)     = True
+exprNeedsTable' (EField _ s _)     = exprNeedsTable' s
+exprNeedsTable' (ELocation _ _ as) = or $ map exprNeedsTable' as
+exprNeedsTable' (EBool _ _)        = False
+exprNeedsTable' (EInt _ _ _)       = False
+exprNeedsTable' (EStruct _ _ fs)   = or $ map exprNeedsTable' fs
+exprNeedsTable' (EBinOp _ _ e1 e2) = exprNeedsTable' e1 || exprNeedsTable' e2
+exprNeedsTable' (EUnOp _ _ e)      = exprNeedsTable' e
+exprNeedsTable' (ESlice _ e _ _)   = exprNeedsTable' e
+exprNeedsTable' (ECond _ cs d)     = (or $ map (\(c,e) -> exprNeedsTable' c || exprNeedsTable' e) cs) || exprNeedsTable' d
 
 
 incTableCnt :: State P4State Int
@@ -190,6 +200,7 @@ mkSwitch kmap switch = do
     -- get the list of port numbers for each port group
     let portranges = map (\(port,_) -> ?pmap M.! port) $ nodePorts switch
     stats <- mapM (\(port,_) -> do let ?role = getRole ?r port
+                                   let ?c = CtxRole ?role
                                    let ?kmap = kmap 
                                    mkStatement (roleBody ?role))
              $ nodePorts switch
@@ -200,7 +211,7 @@ mkSwitch kmap switch = do
                                                 in P4SITE cond st' (Just st)) 
                     (fst $ head groups) (tail groups)
 
-mkStatement :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
+mkStatement :: (?r::Refine, ?role::Role, ?c::ECtx, ?kmap::KMap, ?pmap::PMap) => Statement -> State P4State P4Statement
 mkStatement (SSeq  _ s1 s2) = do 
     s1' <- mkStatement s1
     s2' <- mkStatement s2
@@ -270,7 +281,7 @@ mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
 
-iteFromCascade :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
+iteFromCascade :: (?r::Refine, ?role::Role, ?c::ECtx, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
 iteFromCascade t e (ECond _ [] d)                 = iteFromCascade t e d
 iteFromCascade t e (ECond _ ((c,v):cs) d)         = do t' <- iteFromCascade t e v
                                                        e' <- iteFromCascade t e (ECond nopos cs d)
@@ -292,7 +303,7 @@ iteFromCascade t e v                              = do t' <- case t of
 
 -- convert expression into a cascade of ECond's, such
 -- that their leaf expressions do not contain any EConds
-liftConds :: (?r::Refine, ?role::Role, ?kmap::KMap) => Bool -> Expr -> Expr
+liftConds :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Bool -> Expr -> Expr
 liftConds todisj e = let ?todisj = (not $ exprNeedsTable e) && todisj
                      in evalExpr $ liftConds' e
 
@@ -301,15 +312,15 @@ liftConds todisj e = let ?todisj = (not $ exprNeedsTable e) && todisj
 -- introduces negations, which we cannot encode in P4 tables yet.  The ?todisj
 -- flag signals when the transformation is safe, i.e., when its result is not
 -- going to be programmed into a P4 table match entry.
-liftConds' :: (?r::Refine, ?role::Role, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
-liftConds' e = case typ' ?r (CtxRole ?role) e' of
+liftConds' :: (?r::Refine, ?c::ECtx, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
+liftConds' e = case typ' ?r ?c e' of
                     TBool _ -> if ?todisj 
                                   then cascadeToDisj e'
                                   else e'
                     _       -> e'
     where e' = liftConds'' e
                   
-liftConds'' :: (?r::Refine, ?role::Role, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
+liftConds'' :: (?r::Refine, ?c::ECtx, ?kmap::KMap, ?todisj::Bool) => Expr -> Expr
 liftConds'' e = 
     case e of 
          EVar _ _          -> e
@@ -362,7 +373,7 @@ mkAssignTable n lhs rhs = do
                 (pp "table" <+> pp n <+> lbrace)
                 $$
                 (if isdyn 
-                    then (nest' $ pp "reads" <+> (braces $ hsep $ map (\f -> printExpr f <> pp ": ternary" <> semi) pktFields)) 
+                    then (nest' $ pp "reads" <+> (braces $ hsep $ map (\f -> printExpr f <> pp ": ternary" <> semi) matchFields)) 
                     else empty)
                 $$
                 (nest' $ pp "actions" <+> (braces $ pp actname <> semi))
@@ -379,7 +390,7 @@ mkCondTable :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => String -> 
 mkCondTable n e = do
     let table = (pp "table" <+> pp n <+> lbrace)
                 $$
-                (nest' $ pp "reads" <+> (braces $ hsep $ map (\f -> printExpr f <> pp ": ternary" <> semi) pktFields))
+                (nest' $ pp "reads" <+> (braces $ hsep $ map (\f -> printExpr f <> pp ": ternary" <> semi) matchFields))
                 $$
                 (nest' $ pp "actions" <+> (braces $ pp "yes" <> semi <+> pp "no" <> semi))
                 $$
@@ -390,8 +401,8 @@ mkCondTable n e = do
 --                     , p4Commands = p4Commands p4 ++ [command]
                      , p4DynActions = p4DynActions p4 ++ [dyn]})
 
-pktFields :: (?r::Refine, ?role::Role) => [Expr]
-pktFields = fields (EPacket nopos)
+matchFields :: (?r::Refine, ?role::Role) => [Expr]
+matchFields = fields (EPacket nopos) ++ [ingressPort]
     where fields e = case typ' ?r (CtxRole ?role) e of
                           TStruct _ fs -> concatMap (\f -> fields (EField nopos e $ name f)) 
                                           $ filter ((/= "valid") . name) fs
@@ -402,7 +413,7 @@ pktFields = fields (EPacket nopos)
 -----------------------------------------------------------------
 
 populateTable :: Refine -> P4DynAction -> [Doc]
-populateTable r P4DynAction{..} = 
+populateTable r P4DynAction{..} = trace ("populateTable " ++ p4dynTable ++ " " ++ show p4dynExpr) $
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -410,7 +421,7 @@ populateTable r P4DynAction{..} =
                                                  _             -> error $ "Non-constant boolean value " ++ show val) es
          Just a  -> mapIdx (\(msk,val) i -> mkTableEntry p4dynTable a [exprToVal val] msk i) es
     where es = let ?r = r
-                   ?role = p4dynRole
+                   ?c = CtxRole p4dynRole
                    ?kmap = p4dynKMap in
                concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
                $ flattenConds 
@@ -419,12 +430,12 @@ populateTable r P4DynAction{..} =
 
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
-flattenConds :: (?r::Refine, ?role::Role) => Expr -> [(Expr, Expr)]
+flattenConds :: (?r::Refine, ?c::ECtx) => Expr -> [(Expr, Expr)]
 flattenConds e = flattenConds' [] e
 
-flattenConds' :: (?r::Refine, ?role::Role) => [Expr] -> Expr -> [(Expr, Expr)]
+flattenConds' :: (?r::Refine, ?c::ECtx) => [Expr] -> Expr -> [(Expr, Expr)]
 flattenConds' es (ECond _ cs d) = (concatMap (\(c,e) -> flattenConds' (es ++ [c]) e) cs) ++ (flattenConds' es d)
-flattenConds' es e              = case typ' ?r (CtxRole ?role) e of 
+flattenConds' es e              = case typ' ?r ?c e of 
                                        TBool _ -> [ (conj $ es++[e], EBool nopos True)
                                                   , (conj es       , EBool nopos False)]
                                        _       -> [(conj es, e)]
@@ -441,22 +452,33 @@ mkTableEntry table action args mask priority =
 -- in the order of decreasing priority.
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
-exprToMasks :: (?r::Refine, ?role::Role) => Expr -> [Doc]
-exprToMasks e = map disjunctToMask $ exprToDNF e
+exprToMasks :: (?r::Refine, ?c::ECtx) => Expr -> [Doc]
+exprToMasks e = trace ("exprToMasks " ++ show e) $ map disjunctToMask $ exprToDNF e
 
-exprToDNF :: (?r::Refine, ?role::Role) => Expr -> [[Expr]]
+exprToDNF :: (?r::Refine, ?c::ECtx) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
 exprToDNF (EBinOp _ Or e1 e2)  = exprToDNF e1 ++ exprToDNF e2
 exprToDNF e@(EBinOp _ Eq e1 e2)  = 
-    case typ' ?r (CtxRole ?role) e1 of
+    case typ' ?r ?c e1 of
          TStruct _ fs -> exprToDNF $ conj $ map (\f -> EBinOp nopos Eq (EField nopos e1 $ name f) (EField nopos e2 $ name f)) fs
          TUInt _ _    -> [[e]]
          _            -> error $ "Cannot convert expression " ++ show e ++ " to DNF" 
 exprToDNF (EBool _ True) = [[]]
 exprToDNF (EBool _ False) = []
+exprToDNF e | (null $ exprFuncs ?r e) && ((product $ map (typeDomainSize ?r . typ ?r ?c) $ exprDeps e) <= maxExprTable) = 
+        map fst $ filter ((==EBool nopos True) . snd) $ exprToTable e
 exprToDNF e = error $ "Cannot convert expression " ++ show e ++ " to DNF" 
 
-disjunctToMask :: (?r::Refine, ?role::Role) => [Expr] -> Doc
+exprToTable :: (?r::Refine, ?c::ECtx) => Expr -> [([Expr], Expr)]
+exprToTable e | null (exprDeps e) = [([], e)]
+              | otherwise = let a = head $ exprDeps e
+                                vals = typeEnumerate ?r $ typ ?r ?c a in 
+                            let ?kmap = M.empty in
+                            concatMap (\v -> let vdnf = exprToDNF (EBinOp nopos Eq a v) in
+                                             concatMap (\(es, eval) -> map ((, eval) . (++es)) vdnf) 
+                                                       $ exprToTable $ evalExpr $ exprSubstArg a v e) vals
+
+disjunctToMask :: (?r::Refine, ?c::ECtx) => [Expr] -> Doc
 disjunctToMask atoms = mkMatch $ map atomToMatch atoms
 
 -- maps atom of the form (x = const) to a (field_name, value)  
@@ -470,11 +492,13 @@ atomToMatch e =
 -- Convert a list of (field,value) pairs into a P4 table match clause
 -- by ordering the fields in the order required by the table and adding
 -- don't care masks for all other fields.
-mkMatch :: (?r::Refine, ?role::Role) => [(Expr,String)] -> Doc
-mkMatch atoms = hsep $ map (\e -> let TUInt _ w = typ' ?r (CtxRole ?role) e in
+mkMatch :: (?r::Refine, ?c::ECtx) => [(Expr,String)] -> Doc
+mkMatch atoms = let CtxRole role = ?c in
+                let ?role = role in 
+                hsep $ map (\e -> let TUInt _ w = typ' ?r ?c e in
                                   case lookup e atoms of
                                        Nothing -> pp "0x0" <> pp "&&&" <> pp "0x0"
-                                       Just v  -> pp v  <> pp "&&&" <> pp "0x" <> pp (showHex (mask w) "")) pktFields
+                                       Just v  -> pp v  <> pp "&&&" <> pp "0x" <> pp (showHex (mask w) "")) matchFields
     where mask w = foldl' (\a i -> setBit a i) (0::Integer) [0..w-1]
 
 exprToVal :: Expr -> Doc

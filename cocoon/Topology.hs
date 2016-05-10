@@ -140,7 +140,7 @@ mkNodePortLinks' kmap (i,o) = mapM (\e@(EInt _ _ pnum) -> liftM (fromInteger pnu
 mkLink :: (?r::Refine, MonadError String me) => Role -> KMap -> me (Maybe PortInstDescr)
 mkLink role kmap = do
     let ?kmap = kmap
-        ?role = role
+        ?c    = CtxRole role
     case portSendsTo (roleBody role) of
          []                         -> return Nothing
          [ELocation _ n ks]         -> if all (\k -> (null $ exprFuncs ?r k) && (not $ exprRefersToPkt k)) ks
@@ -150,10 +150,10 @@ mkLink role kmap = do
 
 -- Evaluate output port body.  Assume that it can only consist of 
 -- conditions and send statements, i.e., it cannot modify or clone packets.
-portSendsTo :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> [Expr]
+portSendsTo :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Statement -> [Expr]
 portSendsTo = nub . portSendsTo'
 
-portSendsTo' :: (?r::Refine, ?role::Role, ?kmap::KMap) => Statement -> [Expr]
+portSendsTo' :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Statement -> [Expr]
 portSendsTo' (SSend _ e)     = [evalExpr e]
 portSendsTo' (SITE _ c t e)  = case evalExpr c of
                                    EBool _ True  -> portSendsTo' t

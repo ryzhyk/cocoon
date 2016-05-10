@@ -4,7 +4,8 @@ module Expr ( exprIsValidFlag
             , exprFuncs
             , exprFuncsRec
             , exprRefersToPkt
-            , exprScalars) where
+            , exprScalars
+            , exprDeps, exprSubstArg) where
 
 import Data.List
 
@@ -79,3 +80,41 @@ exprScalars r c e =
     case typ' r c e of
          TStruct _ fs -> concatMap (exprScalars r c . EField nopos e . name) fs
          _            -> [e]
+
+-- expression must be evaluated with evalExpr before calling this function
+-- to eliminate subexpressions of the form structname{v1,v2}.f1
+exprDeps :: Expr -> [Expr]
+exprDeps = nub . exprDeps'
+
+exprDeps' :: Expr -> [Expr]
+exprDeps' e@(EVar _ _)         = [e]
+exprDeps' e@(EDotVar _ _)      = [e]
+exprDeps' e@(EPacket _)        = [e]
+exprDeps'   (EApply _ _ as)    = concatMap exprDeps' as
+exprDeps' e@(EField _ _ _)     = [e]
+exprDeps'   (ELocation _ _ _)  = error "Not implemented: exprDeps' ELocation"
+exprDeps'   (EBool _ _)        = []
+exprDeps'   (EInt _ _ _)       = []
+exprDeps'   (EStruct _ _ fs)   = concatMap exprDeps' fs
+exprDeps'   (EBinOp _ _ e1 e2) = exprDeps' e1 ++ exprDeps' e2
+exprDeps'   (EUnOp _ _ e)      = exprDeps' e
+exprDeps'   (ESlice _ e _ _)   = exprDeps' e
+exprDeps'   (ECond _ cs d)     = (concatMap (\(c,v) -> exprDeps' c ++ exprDeps' v) cs) ++ exprDeps' d
+
+
+exprSubstArg :: Expr -> Expr -> Expr -> Expr
+exprSubstArg arg val e               | e == arg = val
+exprSubstArg _   _   e@(EVar _ _)               = e
+exprSubstArg _   _   e@(EDotVar _ _)            = e
+exprSubstArg _   _   e@(EPacket _)              = e
+exprSubstArg arg val   (EApply _ f as)          = EApply nopos f $ map (exprSubstArg arg val) as
+exprSubstArg _   _   e@(EField _ _ _)           = e
+exprSubstArg _   _     (ELocation _ _ _)        = error "Not implemented: exprSubstArg ELocation"
+exprSubstArg _   _   e@(EBool _ _)              = e
+exprSubstArg _   _   e@(EInt _ _ _)             = e
+exprSubstArg arg val   (EStruct _ n fs)         = EStruct nopos n $ map (exprSubstArg arg val) fs
+exprSubstArg arg val   (EBinOp _ op e1 e2)      = EBinOp nopos op (exprSubstArg arg val e1) (exprSubstArg arg val e2)
+exprSubstArg arg val   (EUnOp _ op e)           = EUnOp nopos op $ exprSubstArg arg val e
+exprSubstArg arg val   (ESlice _ e h l)         = ESlice nopos (exprSubstArg arg val e) h l
+exprSubstArg arg val   (ECond _ cs d)           = ECond nopos (map (\(c,e) -> (exprSubstArg arg val c, exprSubstArg arg val e)) cs) $ exprSubstArg arg val d
+
