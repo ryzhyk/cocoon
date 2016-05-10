@@ -119,7 +119,7 @@ printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (E
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
-                                                           (pp "0b" <> (pp $ concat $ replicate (h-l+1) "1"))
+                                                           (pp $ "0x" ++ showHex (2^(h-l+1) - 1::Integer) "")
 printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 printBOp :: BOp -> Doc
