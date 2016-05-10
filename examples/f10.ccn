@@ -29,10 +29,10 @@ function incmodp(uint<8> v): uint<8>
     }
 (*assume (uint<8> v) (not (incmodp(v) == v)) and (incmodp(v) < p()) *)
 
-function tree(uint<48> addr): bool (*= addr[0:0]   *)
-function i1(uint<48> addr): uint<8>   (*= addr[15:8]  *)
-function i0(uint<48> addr): uint<8>   (*= addr[23:16] *)
-function port(uint<48> addr): uint<8> (*= addr[31:24] *)
+function tree(uint<48> addr): bool    = addr[0:0] == 1'd1
+function i1(uint<48> addr): uint<8>   = addr[15:8]
+function i0(uint<48> addr): uint<8>   = addr[23:16]
+function port(uint<48> addr): uint<8> = addr[31:24]
 
 function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = 
     i1 < p() and i0 < p() and port < p()
@@ -183,5 +183,19 @@ refine L10In {
 }
 
 refine {
+    role L2Switch[uint<8> x, uint<8> y] | x < p() and y < p() = filter false
+    switch L2Switch( (L2In, L2Out) )
+
+    role L1Switch[bool tree, uint<8> i1, uint<8> r] | i1 < p() and r < p() = filter false
+    switch L1Switch( (L10In, L10Out), (L12In, L12Out) )
+
+    role L0Switch[bool tree, uint<8> i1, uint<8> i0] | i1 < p() and i0 < p() = filter false
+    switch L0Switch( (L0In, L0Out), (L01In, L01Out) )
+}
+
+refine {
     function p(): uint<8> = 8'd3
+
+
+    
 }
