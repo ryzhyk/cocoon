@@ -22,7 +22,7 @@ typedef struct {
 } VLANTag
 
 typedef struct {
-    HEth     ethernet,
+    HEth     eth,
     HIP4     ip4,
     VLANTag  vlan
 } Packet

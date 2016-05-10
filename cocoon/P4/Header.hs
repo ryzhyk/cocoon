@@ -44,7 +44,7 @@ p4HeaderDecls = [str|
 |    }
 |}
 |
-|header ethernet_t ethernet;
+|header ethernet_t eth;
 |header vlan_tag_t vlan;
 |header ipv4_t ip4;
 |
@@ -64,7 +64,7 @@ p4HeaderDecls = [str|
 |}
 |
 |parser parse_ethernet {
-|    extract(ethernet);
+|    extract(eth);
 |    return select(latest.etherType) {
 |        ETHERTYPE_VLAN : parse_vlan;
 |        ETHERTYPE_IPV4 : parse_ipv4;
@@ -80,7 +80,7 @@ p4HeaderDecls = [str|
 |
 |action a_add_vlan() {
 |    add_header(vlan);
-|    modify_field(ethernet.etherType, 0x8100);
+|    modify_field(eth.etherType, 0x8100);
 |    modify_field(vlan.etherType, ETHERTYPE_IPV4);
 |}
 |table add_vlan {
@@ -89,7 +89,7 @@ p4HeaderDecls = [str|
 |
 |action a_rm_vlan() {
 |    remove_header(vlan);
-|    modify_field(ethernet.etherType, ETHERTYPE_IPV4);
+|    modify_field(eth.etherType, ETHERTYPE_IPV4);
 |}
 |table rm_vlan {
 |    actions {a_rm_vlan;}
