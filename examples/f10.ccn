@@ -34,6 +34,13 @@ function i1(uint<48> addr): uint<8>   = addr[15:8]
 function i0(uint<48> addr): uint<8>   = addr[23:16]
 function port(uint<48> addr): uint<8> = addr[31:24]
 
+typedef struct {
+    bool tree, 
+    uint<8> i1,
+    uint<8> i0,
+    uint<8> h
+} Location
+
 function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = 
     i1 < p() and i0 < p() and port < p()
 
@@ -45,13 +52,22 @@ role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port)
         send L0Out[tree(pkt.eth.dstAddr), i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)]
 
 role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
-     send HostIn[tree, i1, i0, port, 8'd0]
+     send HostIn[mac2ip(tree, i1, i0, port), 8'd0]
 
-function iHost(bool tree, uint<8> i1, uint<8> i0, uint<8> h): bool = i1 < p() and i0 < p() and h < p()
+function ip2mac(IP4 addr) : Location = Location {addr.ip2[0:0] == 1'd1, addr.ip2 >> 8'd1 , addr.ip1, addr.ip0}
+function mac2ip(bool tree, uint<8> i1, uint<8> i0, uint<8> port) : IP4 = 
+    IP4 { 8'd10
+        , (i1 << 8'd1) + (case {tree: 8'd1; default: 8'd0;})
+        , i0
+        , port
+        }
 
-role HostIn[bool tree, uint<8> i1, uint<8> i0, uint<8> h, uint<8> port] | iHost(tree, i1, i0, h) and port == 8'd0 = (filter false)
-role HostOut[bool tree, uint<8> i1, uint<8> i0, uint<8> h, uint<8> port] | iHost(tree, i1, i0, h) and port == 8'd0 =
-    send L0In[tree, i1, i0, h]
+function iHost(IP4 addr): bool = 
+    (addr.ip2>>8'd1) < p() and (addr.ip1 < p()) and (addr.ip0 < p()) and addr.ip3 == 8'd10
+
+role HostIn[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 = (filter false)
+role HostOut[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 =
+    send L0In[ip2mac(addr).tree, ip2mac(addr).i1, ip2mac(addr).i0, ip2mac(addr).h]
 
 
 refine L0In {
@@ -201,7 +217,7 @@ refine {
     switch L0Switch( (L0In, L0Out), (L01In, L01Out) )
 
 
-    role Host[bool tree, uint<8> i1, uint<8> i0, uint<8> h] | iHost(tree, i1, i0, h) = (filter false)
+    role Host[IP4 addr] | iHost(addr) = (filter false)
     host Host((HostIn, HostOut))
 }
 
