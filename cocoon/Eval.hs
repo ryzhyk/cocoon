@@ -78,16 +78,18 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                Or  -> lhs'
                                                _   -> error $ "Eval.evalExpr " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
-                                               Eq    -> EBool nopos (v1 == v2)
-                                               Neq   -> EBool nopos (v1 /= v2)
-                                               Lt    -> EBool nopos (v1 < v2)
-                                               Gt    -> EBool nopos (v1 > v2)
-                                               Lte   -> EBool nopos (v1 <= v2)
-                                               Gte   -> EBool nopos (v1 >= v2)
-                                               Plus  -> EInt  nopos w ((v1 + v2) `mod` (1 `shiftL` w))
-                                               Minus -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
-                                               Mod   -> EInt  nopos w1 (v1 `mod` v2)
-                                               _     -> error $ "Eval.evalExpr " ++ show e
+                                               Eq     -> EBool nopos (v1 == v2)
+                                               Neq    -> EBool nopos (v1 /= v2)
+                                               Lt     -> EBool nopos (v1 < v2)
+                                               Gt     -> EBool nopos (v1 > v2)
+                                               Lte    -> EBool nopos (v1 <= v2)
+                                               Gte    -> EBool nopos (v1 >= v2)
+                                               Plus   -> EInt  nopos w ((v1 + v2) `mod` (1 `shiftL` w))
+                                               Minus  -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
+                                               ShiftR -> EInt  nopos w (v1 `shiftR` fromInteger(v2))
+                                               ShiftL -> EInt  nopos w ((v1 `shiftL` fromInteger(v2)) `mod` (1 `shiftL` w))
+                                               Mod    -> EInt  nopos w1 (v1 `mod` v2)
+                                               _      -> error $ "Eval.evalExpr " ++ show e
             (EStruct _ _ fs1, EStruct _ _ fs2) -> case op of 
                                                        Eq  -> evalExpr $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
                                                        Neq -> evalExpr $ disj $ map (\(f1,f2) -> EBinOp nopos Neq f1 f2) $ zip fs1 fs2

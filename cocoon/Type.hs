@@ -37,18 +37,20 @@ instance WithType Expr where
     typ r _             (EStruct _ n _)    = TUser (pos tdef) (name tdef)
                                              where tdef = getType r n
     typ r ctx           (EBinOp _ op e1 e2) = case op of
-                                         Eq    -> TBool nopos
-                                         Neq   -> TBool nopos
-                                         Lt    -> TBool nopos
-                                         Gt    -> TBool nopos
-                                         Lte   -> TBool nopos
-                                         Gte   -> TBool nopos
-                                         And   -> TBool nopos
-                                         Or    -> TBool nopos
-                                         Impl  -> TBool nopos
-                                         Plus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
-                                         Minus -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
-                                         Mod   -> t1
+                                         Eq     -> TBool nopos
+                                         Neq    -> TBool nopos
+                                         Lt     -> TBool nopos
+                                         Gt     -> TBool nopos
+                                         Lte    -> TBool nopos
+                                         Gte    -> TBool nopos
+                                         And    -> TBool nopos
+                                         Or     -> TBool nopos
+                                         Impl   -> TBool nopos
+                                         Plus   -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
+                                         Minus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
+                                         ShiftR -> TUInt nopos (typeWidth t1)
+                                         ShiftL -> TUInt nopos (typeWidth t1)
+                                         Mod    -> t1
         where t1 = typ' r ctx e1
               t2 = typ' r ctx e2
     typ _ _             (EUnOp _ Not _)     = TBool nopos

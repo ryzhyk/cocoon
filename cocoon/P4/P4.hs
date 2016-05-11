@@ -123,26 +123,27 @@ printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e
 printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 printBOp :: BOp -> Doc
-printBOp Eq    = pp "=="
-printBOp Neq   = pp "!="
-printBOp Lt    = pp "<"
-printBOp Gt    = pp ">"
-printBOp Lte   = pp "<="
-printBOp Gte   = pp ">="
-printBOp And   = pp "and"
-printBOp Or    = pp "or"
-printBOp Plus  = pp "+"
-printBOp Minus = pp "-"
-printBOp Mod   = pp "%"
-printBOp Impl  = error "P4.printBOp =>"
+printBOp Eq     = pp "=="
+printBOp Neq    = pp "!="
+printBOp Lt     = pp "<"
+printBOp Gt     = pp ">"
+printBOp Lte    = pp "<="
+printBOp Gte    = pp ">="
+printBOp And    = pp "and"
+printBOp Or     = pp "or"
+printBOp Plus   = pp "+"
+printBOp Minus  = pp "-"
+printBOp Mod    = pp "%"
+printBOp ShiftR = pp ">>"
+printBOp ShiftL = pp "<<"
+printBOp Impl   = error "P4.printBOp =>"
 
 printUOp :: UOp -> Doc
 printUOp Not   = pp "not"
 
 -- True if expression cannot be interpreted at compile time and requires a P4 table.
 exprNeedsTable :: Expr -> Bool
-exprNeedsTable e = trace ("exprNeedsTable " ++ show e ++ " = " ++ show res) res
-   where res = exprNeedsTable' e
+exprNeedsTable e = exprNeedsTable' e
 
 exprNeedsTable' :: Expr -> Bool
 exprNeedsTable' (EVar _ _)         = False
@@ -413,7 +414,7 @@ matchFields = fields (EPacket nopos) ++ [ingressPort]
 -----------------------------------------------------------------
 
 populateTable :: Refine -> P4DynAction -> [Doc]
-populateTable r P4DynAction{..} = trace ("populateTable " ++ p4dynTable ++ " " ++ show p4dynExpr) $
+populateTable r P4DynAction{..} = 
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -453,7 +454,7 @@ mkTableEntry table action args mask priority =
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
 exprToMasks :: (?r::Refine, ?c::ECtx) => Expr -> [Doc]
-exprToMasks e = trace ("exprToMasks " ++ show e) $ map disjunctToMask $ exprToDNF e
+exprToMasks e = map disjunctToMask $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?c::ECtx) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)

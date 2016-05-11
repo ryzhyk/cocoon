@@ -16,6 +16,8 @@ data BOp = Eq
          | Plus
          | Minus
          | Mod
+         | ShiftR
+         | ShiftL
          deriving (Eq)
 
 instance PP BOp where
@@ -31,6 +33,8 @@ instance PP BOp where
     pp Plus   = pp "+"
     pp Minus  = pp "-"
     pp Mod    = pp "%"
+    pp ShiftR = pp ">>"
+    pp ShiftL = pp "<<"
 
 instance Show BOp where
     show = render . pp

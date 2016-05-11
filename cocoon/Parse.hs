@@ -231,6 +231,8 @@ etable = [[postf $ choice [postSlice, postField]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
            binary "-" Minus AssocLeft]
+         ,[binary ">>" ShiftR AssocLeft,
+           binary "<<" ShiftL AssocLeft]
          ,[binary "==" Eq  AssocLeft,          
            binary "!=" Neq AssocLeft,          
            binary "<"  Lt  AssocNone, 

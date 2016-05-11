@@ -91,18 +91,20 @@ instance SMTPP Expr where
     smtpp (EApply f as)      = parens $ pp f <+> (hsep $ map smtpp as)
 
 instance SMTPP BOp where
-    smtpp Eq    = pp "="
-    smtpp Neq   = error "SMTLib2.smtpp !="
-    smtpp Lt    = pp "bvult"
-    smtpp Gt    = pp "bvugt"
-    smtpp Lte   = pp "bvule"
-    smtpp Gte   = pp "bvuge"
-    smtpp And   = pp "and"
-    smtpp Or    = pp "or"
-    smtpp Impl  = pp "=>"
-    smtpp Plus  = pp "bvadd"
-    smtpp Minus = pp "bvsub"
-    smtpp Mod   = pp "bvurem"
+    smtpp Eq     = pp "="
+    smtpp Neq    = error "SMTLib2.smtpp !="
+    smtpp Lt     = pp "bvult"
+    smtpp Gt     = pp "bvugt"
+    smtpp Lte    = pp "bvule"
+    smtpp Gte    = pp "bvuge"
+    smtpp And    = pp "and"
+    smtpp Or     = pp "or"
+    smtpp Impl   = pp "=>"
+    smtpp Plus   = pp "bvadd"
+    smtpp Minus  = pp "bvsub"
+    smtpp ShiftR = pp "bvlshr"
+    smtpp ShiftL = pp "bvshl"
+    smtpp Mod    = pp "bvurem"
 
 instance SMTPP UOp where
     smtpp Not   = pp "not"
