@@ -53,7 +53,11 @@ renderNode voffset node ((descr, _), hoffset) = do
                , ("hostname"   , JSString $ toJSString ndname) 
                , ("nodeNum"    , JSRational False $ fromIntegral number)
                , ("switchType" , JSString $ toJSString "bmv2")] ++
-               if' (nodeType node == NodeHost) [("ip4", JSString $ toJSString $ formatIP (head $ idescKeys descr))] []
+               if nodeType node == NodeHost 
+                  then case head $ idescKeys descr of
+                            e@(EStruct _ _ _) -> [("ip4", JSString $ toJSString $ formatIP e)] 
+                            _                 -> []
+                  else []
         attrs = [ ("number", JSString $ toJSString $ show number)
                 , ("opts"  , JSObject $ toJSObject opts)
                 , ("x"     , JSString $ toJSString $ show $ hoffset)
