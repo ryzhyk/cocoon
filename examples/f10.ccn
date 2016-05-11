@@ -44,7 +44,15 @@ role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port)
     if goodPacket(pkt) then
         send L0Out[tree(pkt.eth.dstAddr), i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)]
 
-role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = filter false
+role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
+     send HostIn[tree, i1, i0, port, 8'd0]
+
+function iHost(bool tree, uint<8> i1, uint<8> i0, uint<8> h): bool = i1 < p() and i0 < p() and h < p()
+
+role HostIn[bool tree, uint<8> i1, uint<8> i0, uint<8> h, uint<8> port] | iHost(tree, i1, i0, h) and port == 8'd0 = (filter false)
+role HostOut[bool tree, uint<8> i1, uint<8> i0, uint<8> h, uint<8> port] | iHost(tree, i1, i0, h) and port == 8'd0 =
+    send L0In[tree, i1, i0, h]
+
 
 refine L0In {
 
@@ -191,11 +199,12 @@ refine {
 
     role L0Switch[bool tree, uint<8> i1, uint<8> i0] | i1 < p() and i0 < p() = filter false
     switch L0Switch( (L0In, L0Out), (L01In, L01Out) )
+
+
+    role Host[bool tree, uint<8> i1, uint<8> i0, uint<8> h] | iHost(tree, i1, i0, h) = (filter false)
+    host Host((HostIn, HostOut))
 }
 
 refine {
     function p(): uint<8> = 8'd3
-
-
-    
 }
