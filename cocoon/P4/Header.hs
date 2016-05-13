@@ -1,6 +1,9 @@
 {-# LANGUAGE QuasiQuotes #-}
 
-module P4.Header (p4HeaderDecls, p4DefaultDecls) where
+module P4.Header ( p4HeaderDecls
+                 , p4DefaultDecls
+                 , p4InitHeader
+                 , p4CleanupHeader) where
 
 import Text.Heredoc
 
@@ -12,7 +15,7 @@ p4HeaderDecls = [str|
 |    }
 |}
 |
-|header_type ethernet_t {
+|header_type eth_t {
 |    fields {
 |        dstAddr : 48;
 |        srcAddr : 48;
@@ -65,8 +68,8 @@ p4HeaderDecls = [str|
 |}
 |   
 |metadata intrinsic_metadata_t intrinsic_metadata;
-|header ethernet_t eth;
-|metadata ethernet_t _tmp_ethernet_t;
+|header eth_t eth;
+|metadata eth_t _tmp_eth_t;
 |header vlan_tag_t vlan;
 |metadata vlan_tag_t _tmp_vlan_tag_t;
 |header ipv4_t ip4;
@@ -120,46 +123,26 @@ p4HeaderDecls = [str|
 |action broadcast() {
 |    modify_field(intrinsic_metadata.mgid, 1);
 |}
-|
-|action a_add_vlan() {
-|    add_header(vlan);
-|    modify_field(eth.etherType, 0x8100);
-|    modify_field(vlan.etherType, ETHERTYPE_IPV4);
-|}
-|table add_vlan {
-|    actions {a_add_vlan;}
-|}
-|
-|action a_rm_vlan() {
-|    remove_header(vlan);
-|    modify_field(eth.etherType, ETHERTYPE_IPV4);
-|}
-|table rm_vlan {
-|    actions {a_rm_vlan;}
-|}
-|
-|action a_add_arp() {
-|    add_header(arp);
-|    modify_field(eth.etherType, ETHERTYPE_ARP);
-|    modify_field(arp.htype, 0x1);
-|    modify_field(arp.ptype, 0x0800);
-|    modify_field(arp.hlen, 0x6);
-|    modify_field(arp.plen, 0x4);
-|}
-|table add_arp {
-|    actions {a_add_arp;}
-|}
-|
-|action a_rm_arp() {
-|    remove_header(arp);
-|}
-|table rm_arp {
-|    actions {a_rm_arp;}
-|}
 |]
 
 p4DefaultDecls::String
 p4DefaultDecls = [str|
-|table_set_default add_vlan a_add_vlan
-|table_set_default rm_vlan a_rm_vlan
 |]
+
+
+p4InitHeader :: String -> String
+p4InitHeader h = case h of
+                      "vlan" -> "modify_field(eth.etherType, 0x8100);\n" ++
+                                "modify_field(vlan.etherType, ETHERTYPE_IPV4);"
+                      "arp"  -> "modify_field(eth.etherType, ETHERTYPE_ARP);\n" ++
+                                "modify_field(arp.htype, 0x1);\n" ++
+                                "modify_field(arp.ptype, 0x0800);\n" ++
+                                "modify_field(arp.hlen, 0x6);\n" ++
+                                "modify_field(arp.plen, 0x4);"
+                      _      -> error $ "P4.Header.p4InitHeader: unknown header " ++ h
+
+p4CleanupHeader :: String -> String
+p4CleanupHeader h = case h of
+                         "vlan" -> "modify_field(eth.etherType, ETHERTYPE_IPV4);"
+                         "arp"  -> ""
+                         _      -> error $ "P4.Header.p4InitHeader: unknown header " ++ h

@@ -10,7 +10,7 @@ typedef struct {
 typedef struct {
     uint<48> dstAddr,
     uint<48> srcAddr
-} HEth
+} eth_t
 
 typedef struct {
     bool valid,
@@ -19,11 +19,11 @@ typedef struct {
     uint<32> spa,
     uint<48> tha,
     uint<32> tpa
-} HARP
+} arp_t
 
 typedef struct {
-    HEth     eth,
-    HARP     arp
+    eth_t    eth,
+    arp_t    arp
 } Packet
 
 function p(): uint<8>
@@ -61,13 +61,13 @@ function goodPacket(Packet p): bool =
 function macEncode(Location loc): uint<48> = 
     16'd0 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd0;}
 
-function arpResponse(HARP arp): HARP = 
-    HARP { true
-         , 16'd2 (* ARP response *)
-         , arp.sha
-         , arp.spa
-         , macEncode(ip2mac(IP4{arp.tpa[31:24], arp.tpa[23:16], arp.tpa[15:8], arp.tpa[7:0]}))
-         , arp.tpa}
+function arpResponse(arp_t arp): arp_t = 
+    arp_t { true
+          , 16'd2 (* ARP response *)
+          , arp.sha
+          , arp.spa
+          , macEncode(ip2mac(IP4{arp.tpa[31:24], arp.tpa[23:16], arp.tpa[15:8], arp.tpa[7:0]}))
+          , arp.tpa}
 
 role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
     if pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
@@ -101,8 +101,8 @@ role HostOut[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 =
 
 refine L0In {
 
-    function hash(HEth eth): uint<8>
-    assume (HEth e) hash(e) < p()
+    function hash(eth_t eth): uint<8>
+    assume (eth_t e) hash(e) < p()
 
     function l1SwitchUp(bool tree, uint<8> i1, uint<8> r): bool
     assume (bool tree, uint<8> i1, uint<8> r1, uint<8> r2) 

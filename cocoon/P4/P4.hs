@@ -118,18 +118,14 @@ printExpr (EVar _ k)                            = if k == name pkey
 printExpr (EPacket _)                           = pp "pkt"
 printExpr (EField _ e f) | f == "valid"         = pp "valid" <> (parens $ printExpr e)
 printExpr (EField _ (EPacket _) f)              = pp f
+printExpr (EField _ (EVar _ v) f)               = pp v <> char '.' <> pp f
 printExpr (EField _ (EField _ (EPacket _) h) f) = pp h <> char '.' <> pp f
 printExpr (EField _ e f)                        = printExpr e <> char '_' <> pp f
 printExpr (EBool _ True)                        = pp "true"
 printExpr (EBool _ False)                       = pp "false"
 printExpr (EInt _ _ v)                          = pp $ show v
 printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
-printExpr (EBinOp _ Concat l r)                 = parens $ pp w <> pp "'d0" <+> pp "|" <+> 
-                                                           (parens $ printExpr l <+> pp "<<" <+> pp w2) <+> pp "|" <+> 
-                                                           printExpr r
-                                                  where TUInt _ w1 = typ' ?r (CtxRole ?role) l
-                                                        TUInt _ w2 = typ' ?r (CtxRole ?role) r
-                                                        w = w1 + w2
+printExpr (EBinOp _ Concat l r)                 = parens $ printExpr l <+> pp "++" <+> printExpr r
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
@@ -259,7 +255,7 @@ mkStatement (STest _ e)     = do
 mkStatement (SSet  _ lhs rhs) | exprIsValidFlag lhs = do
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-    return $ setValid lhs' rhs'
+    setValid lhs' rhs'
 
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
@@ -285,8 +281,9 @@ mkStatement (SSet  _ lhs rhs) = do
                                    -- Does it have a valid flag? 
                                    --     Yes: apply add_/rm_ first
                                    copyv <- case find (exprIsValidFlag . fst) $ zip lscalars rscalars of
-                                                 Nothing                 -> return []
-                                                 Just (l, r)             -> return [setValid l r]
+                                                 Nothing     -> return []
+                                                 Just (l, r) -> do s <- setValid l r
+                                                                   return [s]
                                    -- For all fields that are not valid flags
                                    --     copy tmp to lhs
                                    copy2 <- mapM (\(l,_,t) -> table l t) atoms
@@ -313,12 +310,60 @@ mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
 
-setValid :: (?r::Refine, ?role::Role, ?pmap::PMap) => Expr -> Expr -> P4Statement
-setValid l r =
-    let EField _ h _ = l in
+mkAddHeader :: String -> State P4State P4Statement
+mkAddHeader h = do
+    tableid <- incTableCnt
+    let tablename = "add" ++ show tableid
+        actname = "a_" ++ tablename
+        action = pp "action" <+> pp actname <> pp "()" <+> lbrace
+                 $$
+                 (nest' $ pp "add_header" <> (parens $ pp h) <> semi)
+                 $$
+                 (nest' $ pp $ p4InitHeader h)
+                 $$
+                 rbrace
+        table = (pp "table" <+> pp tablename <+> lbrace)
+                $$
+                (nest' $ pp "actions" <+> (braces $ pp actname <> semi))
+                $$
+                rbrace
+        command = pp "table_set_default" <+> pp tablename <+> pp actname
+    modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [action $$ table]
+                     , p4Commands = p4Commands p4 ++ [command]})
+    return $ P4SApply tablename Nothing
+
+mkRmHeader :: String -> State P4State P4Statement
+mkRmHeader h = do
+    tableid <- incTableCnt
+    let tablename = "rm" ++ show tableid
+        actname = "a_" ++ tablename
+        action = pp "action" <+> pp actname <> pp "()" <+> lparen
+                 $$
+                 (nest' $ pp "remove_header" <> (parens $ pp h) <> semi)
+                 $$
+                 (nest' $ pp $ p4CleanupHeader h)
+                 $$
+                 rparen
+        table = pp "table" <+> pp tablename <+> lparen
+                $$
+                (nest' $ pp "actions" <+> (braces $ pp actname <> semi))
+                $$
+                rparen
+        command = pp "table_set_default" <+> pp tablename <+> pp actname
+    modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [action $$ table]
+                     , p4Commands = p4Commands p4 ++ [command]})
+    return $ P4SApply tablename Nothing
+
+
+setValid :: (?r::Refine, ?role::Role, ?pmap::PMap) => Expr -> Expr -> State P4State P4Statement
+setValid l r = do
+    let EField _ h _ = l 
+    let hname = render $ printExpr h
     case r of
-         EBool _ True  -> P4SITE (printExpr $ EUnOp nopos Not l) (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
-         EBool _ False -> P4SITE (printExpr l) (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
+         EBool _ True  -> do add <- mkAddHeader hname
+                             return $ P4SITE (printExpr $ EUnOp nopos Not l) add Nothing
+         EBool _ False -> do rm <- mkRmHeader (render $ printExpr h)
+                             return $ P4SITE (printExpr l) rm Nothing
          _             -> error $ "setValid " ++ show l ++ " " ++ show r
 
 
