@@ -48,6 +48,9 @@ impossible, since P4 match tables do not allow actions with non-const parameters
 maxExprTable :: Integer
 maxExprTable = 1000
 
+tmpVarName :: String -> String
+tmpVarName sname = "_tmp_" ++ sname
+
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
 data P4DynAction = P4DynAction { p4dynTable  :: String       -- name of the table
@@ -99,9 +102,14 @@ instance PP P4Statement where
     pp (P4SDrop)              = pp "drop" <> semi
     pp (P4SNop)               = pp "{}"
 
+p4seq :: [P4Statement] -> P4Statement
+p4seq []      = P4SNop
+p4seq [s]     = s
+p4seq (s1:ss) = P4SSeq s1 $ p4seq ss
+
 -- We don't use a separate type for P4 expressions for now, 
 -- just represent them as Expr
-printExpr :: (?role::Role, ?pmap::PMap) => Expr -> Doc
+printExpr :: (?r::Refine, ?role::Role, ?pmap::PMap) => Expr -> Doc
 printExpr (EVar _ k)                            = if k == name pkey 
                                                      then printExpr $ EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)
                                                      else pp k
@@ -116,6 +124,12 @@ printExpr (EBool _ True)                        = pp "true"
 printExpr (EBool _ False)                       = pp "false"
 printExpr (EInt _ _ v)                          = pp $ show v
 printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
+printExpr (EBinOp _ Concat l r)                 = parens $ pp w <> pp "'d0" <+> pp "|" <+> 
+                                                           (parens $ printExpr l <+> pp "<<" <+> pp w2) <+> pp "|" <+> 
+                                                           printExpr r
+                                                  where TUInt _ w1 = typ' ?r (CtxRole ?role) l
+                                                        TUInt _ w2 = typ' ?r (CtxRole ?role) r
+                                                        w = w1 + w2
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
@@ -136,6 +150,7 @@ printBOp Minus  = pp "-"
 printBOp Mod    = pp "%"
 printBOp ShiftR = pp ">>"
 printBOp ShiftL = pp "<<"
+printBOp Concat = error "P4.printBOp ++"
 printBOp Impl   = error "P4.printBOp =>"
 
 printUOp :: UOp -> Doc
@@ -241,14 +256,10 @@ mkStatement (STest _ e)     = do
        else iteFromCascade (Left P4SDrop) Nothing e'
 
 -- Make sure that assignment statements do not contain case-expressions in the RHS.
-mkStatement s@(SSet  _ lhs rhs) | exprIsValidFlag lhs = do
+mkStatement (SSet  _ lhs rhs) | exprIsValidFlag lhs = do
     let lhs' = evalExpr lhs
         rhs' = evalExpr rhs
-        EField _ h _ = lhs'
-    case rhs' of 
-         EBool _ True  -> return $ P4SITE (printExpr $ EUnOp nopos Not lhs') (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
-         EBool _ False -> return $ P4SITE (printExpr lhs') (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
-         _             -> error $ "mkStatement " ++ show s
+    return $ setValid lhs' rhs'
 
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr lhs
@@ -256,12 +267,32 @@ mkStatement (SSet  _ lhs rhs) = do
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
         assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
+    let table l r = do tableid <- incTableCnt
+                       let tablename = "set" ++ show tableid
+                       mkAssignTable tablename l r
+                       return $ P4SApply tablename Nothing
     case rhs' of 
          ECond _ _ _ -> mkStatement $ assignToCascade lhs' rhs'
-         _           -> do tableid <- incTableCnt
-                           let tablename = "set" ++ show tableid
-                           mkAssignTable tablename lhs' rhs'
-                           return $ P4SApply tablename Nothing
+         _           -> if isStruct ?r ?c lhs'
+                           then do let TUser _ sname = typ'' ?r ?c lhs'
+                                       lscalars = map evalExpr $ exprScalars ?r ?c lhs
+                                       rscalars = map evalExpr $ exprScalars ?r ?c rhs
+                                       tscalars = map (exprSubst lhs (EVar nopos $ tmpVarName sname)) lscalars
+                                       atoms = filter (\(l,_,_) -> not $ exprIsValidFlag l) $ zip3 lscalars rscalars tscalars
+                                   -- For all fields that are not valid flags
+                                   --     copy field to tmp
+                                   copy1 <- mapM (\(_,r,t) -> table t r) atoms
+                                   -- Does it have a valid flag? 
+                                   --     Yes: apply add_/rm_ first
+                                   copyv <- case find (exprIsValidFlag . fst) $ zip lscalars rscalars of
+                                                 Nothing                 -> return []
+                                                 Just (l, r)             -> return [setValid l r]
+                                   -- For all fields that are not valid flags
+                                   --     copy tmp to lhs
+                                   copy2 <- mapM (\(l,_,t) -> table l t) atoms
+                                   return $ p4seq $ copy1 ++ copyv ++ copy2
+                           else table lhs' rhs'
+
 
 mkStatement (SSend _ dst) = do
     let dst' = liftConds True $ evalExpr dst
@@ -281,6 +312,15 @@ mkStatement (SSend _ dst) = do
 mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
+
+setValid :: (?r::Refine, ?role::Role, ?pmap::PMap) => Expr -> Expr -> P4Statement
+setValid l r =
+    let EField _ h _ = l in
+    case r of
+         EBool _ True  -> P4SITE (printExpr $ EUnOp nopos Not l) (P4SApply ("add_" ++ (render $ printExpr h)) Nothing) Nothing
+         EBool _ False -> P4SITE (printExpr l) (P4SApply ("rm_" ++ (render $ printExpr h)) Nothing) Nothing
+         _             -> error $ "setValid " ++ show l ++ " " ++ show r
+
 
 iteFromCascade :: (?r::Refine, ?role::Role, ?c::ECtx, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
 iteFromCascade t e (ECond _ [] d)                 = iteFromCascade t e d
@@ -477,7 +517,7 @@ exprToTable e | null (exprDeps e) = [([], e)]
                             let ?kmap = M.empty in
                             concatMap (\v -> let vdnf = exprToDNF (EBinOp nopos Eq a v) in
                                              concatMap (\(es, eval) -> map ((, eval) . (++es)) vdnf) 
-                                                       $ exprToTable $ evalExpr $ exprSubstArg a v e) vals
+                                                       $ exprToTable $ evalExpr $ exprSubst a v e) vals
 
 disjunctToMask :: (?r::Refine, ?c::ECtx) => [Expr] -> Doc
 disjunctToMask atoms = mkMatch $ map atomToMatch atoms

@@ -105,6 +105,7 @@ instance SMTPP BOp where
     smtpp ShiftR = pp "bvlshr"
     smtpp ShiftL = pp "bvshl"
     smtpp Mod    = pp "bvurem"
+    smtpp Concat = pp "concat"
 
 instance SMTPP UOp where
     smtpp Not   = pp "not"

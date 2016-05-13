@@ -117,7 +117,7 @@ refreshTables workdir basename instmap base prev switches cfname = do
                                   Just old -> filter (any (not . null . intersect modFNames . map name . exprFuncsRec old . p4dynExpr) . p4DynActs) switches
            mapM_ (\P4Switch{..} -> do let swname = fromJust $ lookup p4Descr instmap
                                           cmds = vcat $ punctuate (pp "") $ p4Init : map (vcat . populateTable combined) p4DynActs
-                                      putStrLn $ "Switch " ++ show p4Descr ++ " " ++ swname  
+                                      --putStrLn $ "Switch " ++ show p4Descr ++ " " ++ swname  
                                       writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmds))
                  modSwitches
            putStrLn $ "Switches updated: " ++ (intercalate " " $ map (\sw -> fromJust $ lookup (p4Descr sw) instmap) modSwitches)

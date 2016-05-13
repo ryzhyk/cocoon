@@ -233,6 +233,7 @@ etable = [[postf $ choice [postSlice, postField]]
            binary "-" Minus AssocLeft]
          ,[binary ">>" ShiftR AssocLeft,
            binary "<<" ShiftL AssocLeft]
+         ,[binary "++" Concat AssocLeft]
          ,[binary "==" Eq  AssocLeft,          
            binary "!=" Neq AssocLeft,          
            binary "<"  Lt  AssocNone, 

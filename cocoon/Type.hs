@@ -51,6 +51,7 @@ instance WithType Expr where
                                          ShiftR -> TUInt nopos (typeWidth t1)
                                          ShiftL -> TUInt nopos (typeWidth t1)
                                          Mod    -> t1
+                                         Concat -> TUInt nopos (typeWidth t1 + typeWidth t2)
         where t1 = typ' r ctx e1
               t2 = typ' r ctx e2
     typ _ _             (EUnOp _ Not _)     = TBool nopos

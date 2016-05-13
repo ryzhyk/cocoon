@@ -274,7 +274,7 @@ exprValidate r ctx (EBinOp _ op left right) = do
      $ if' (elem op [And, Or, Impl]) (
           do assertR r (isBool r ctx left)  (pos left)  $ "Not a boolean expression"
              assertR r (isBool r ctx right) (pos right) $ "Not a boolean expression")
-     $ if' (elem op [Mod]) (
+     $ if' (elem op [Mod, Concat]) (
           do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
              assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression") 
      $ undefined

@@ -5,7 +5,7 @@ module Expr ( exprIsValidFlag
             , exprFuncsRec
             , exprRefersToPkt
             , exprScalars
-            , exprDeps, exprSubstArg) where
+            , exprDeps, exprSubst) where
 
 import Data.List
 
@@ -102,19 +102,19 @@ exprDeps'   (ESlice _ e _ _)   = exprDeps' e
 exprDeps'   (ECond _ cs d)     = (concatMap (\(c,v) -> exprDeps' c ++ exprDeps' v) cs) ++ exprDeps' d
 
 
-exprSubstArg :: Expr -> Expr -> Expr -> Expr
-exprSubstArg arg val e               | e == arg = val
-exprSubstArg _   _   e@(EVar _ _)               = e
-exprSubstArg _   _   e@(EDotVar _ _)            = e
-exprSubstArg _   _   e@(EPacket _)              = e
-exprSubstArg arg val   (EApply _ f as)          = EApply nopos f $ map (exprSubstArg arg val) as
-exprSubstArg _   _   e@(EField _ _ _)           = e
-exprSubstArg _   _     (ELocation _ _ _)        = error "Not implemented: exprSubstArg ELocation"
-exprSubstArg _   _   e@(EBool _ _)              = e
-exprSubstArg _   _   e@(EInt _ _ _)             = e
-exprSubstArg arg val   (EStruct _ n fs)         = EStruct nopos n $ map (exprSubstArg arg val) fs
-exprSubstArg arg val   (EBinOp _ op e1 e2)      = EBinOp nopos op (exprSubstArg arg val e1) (exprSubstArg arg val e2)
-exprSubstArg arg val   (EUnOp _ op e)           = EUnOp nopos op $ exprSubstArg arg val e
-exprSubstArg arg val   (ESlice _ e h l)         = ESlice nopos (exprSubstArg arg val e) h l
-exprSubstArg arg val   (ECond _ cs d)           = ECond nopos (map (\(c,e) -> (exprSubstArg arg val c, exprSubstArg arg val e)) cs) $ exprSubstArg arg val d
+exprSubst :: Expr -> Expr -> Expr -> Expr
+exprSubst arg val e               | e == arg = val
+exprSubst _   _   e@(EVar _ _)               = e
+exprSubst _   _   e@(EDotVar _ _)            = e
+exprSubst _   _   e@(EPacket _)              = e
+exprSubst arg val   (EApply _ f as)          = EApply nopos f $ map (exprSubst arg val) as
+exprSubst arg val   (EField _ s f)           = EField nopos (exprSubst arg val s) f
+exprSubst _   _     (ELocation _ _ _)        = error "Not implemented: exprSubst ELocation"
+exprSubst _   _   e@(EBool _ _)              = e
+exprSubst _   _   e@(EInt _ _ _)             = e
+exprSubst arg val   (EStruct _ n fs)         = EStruct nopos n $ map (exprSubst arg val) fs
+exprSubst arg val   (EBinOp _ op e1 e2)      = EBinOp nopos op (exprSubst arg val e1) (exprSubst arg val e2)
+exprSubst arg val   (EUnOp _ op e)           = EUnOp nopos op $ exprSubst arg val e
+exprSubst arg val   (ESlice _ e h l)         = ESlice nopos (exprSubst arg val e) h l
+exprSubst arg val   (ECond _ cs d)           = ECond nopos (map (\(c,e) -> (exprSubst arg val c, exprSubst arg val e)) cs) $ exprSubst arg val d
 

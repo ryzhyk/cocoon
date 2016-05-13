@@ -23,6 +23,16 @@ outputVar = "_outp"
 depthVar  = "_depth"
 locationVar = "_loc"
 
+boogieHeader = pp $ 
+    "function _div(x: int, y: int): int;\n" ++
+    "axiom (forall x: int, y: int :: (y>0) ==> ((_div(x,y) <= x) && (_div(x,y)>=0)));\n" ++
+    "function _mod(x: int, y: int): int;\n" ++
+    "axiom (forall x: int, y: int :: (y>0) ==> ((_mod(x,y) <= x) && (_mod(x,y) < y) && (_mod(x,y)>=0)));\n" ++
+    "function _slice(x: int, h: int, l: int, m: int): int;\n" ++
+    "axiom (forall x: int, h: int, l: int, m: int :: (_slice(x,h,l,m) < m) && (_slice(x,h,l,m)>=0));\n" ++
+    "function _concat(x: int, y: int, m: int): int;\n" ++
+    "axiom (forall x: int, y: int, m: int :: (_concat(x,y,m) < m) && (_concat(x,y,m)>=0));\n"
+
 refinementToBoogie :: Maybe Refine -> Refine -> Int -> ([(Assume, Doc)], Maybe [(String, Doc)])
 refinementToBoogie mabst conc maxdepth = (assums, roles)
     where assums = mapMaybe (\assm -> fmap (assm,) $ assumeToBoogie1 mabst conc assm) $ refineAssumes conc
@@ -40,6 +50,7 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
     vcat $ punctuate (pp " ") $ 
     [ pp "/*" <+> pp asm <+> pp "*/"
 --    , mkBVOps conc
+    , boogieHeader
     , mkBoundsCheckers conc
     , vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc]
     , vcat $ map (mkFunction conc . getFunc conc) fs
@@ -62,7 +73,7 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 type RMap = M.Map String String
 
 refinementToBoogie1 :: Refine -> Refine -> String -> Int -> Doc
-refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} bounds, types, gvars, funcs, arole, croles, assums, check]
+refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, arole, croles, assums, check]
     where --ops    = mkBVOps conc
           bounds = mkBoundsCheckers conc
           new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
@@ -261,14 +272,18 @@ mkExpr' (EBinOp _ Lte e1 e2)    = parens $ mkExpr' e1 .<= mkExpr' e2
 mkExpr' (EBinOp _ Gte e1 e2)    = parens $ mkExpr' e1 .>= mkExpr' e2
 mkExpr' (EBinOp _ Plus e1 e2)   = parens $ mkExpr' e1 .+  mkExpr' e2
 mkExpr' (EBinOp _ Minus e1 e2)  = parens $ mkExpr' e1 .-  mkExpr' e2
-mkExpr' (EBinOp _ ShiftR e1 (EInt _ _ i)) = parens $ mkExpr' e1 ./ (pp $ (2^i::Integer))
+mkExpr' (EBinOp _ ShiftR e1 (EInt _ _ i)) = apply "_div" [mkExpr' e1, pp $ (2^i::Integer)]
 mkExpr' e@(EBinOp _ ShiftR _ _) = error $ "Not implemented Boogie.mkExpr' " ++ show e
-mkExpr' (EBinOp _ ShiftL e1 (EInt _ _ i)) = parens $ (parens $ mkExpr' e1 .* (pp $ (2^i::Integer))) .% (pp $ (2^w::Integer))
+mkExpr' (EBinOp _ ShiftL e1 (EInt _ _ i)) = apply "_mod" [mkExpr' e1 .* (pp $ (2^i::Integer)), pp $ (2^w::Integer)]
                                   where TUInt _ w = typ' ?r ?c e1
 mkExpr' e@(EBinOp _ ShiftL _ _) = error $ "Not implemented Boogie.mkExpr' " ++ show e
-mkExpr' (EBinOp _ Mod e1 e2)    = parens $ mkExpr' e1 .%  mkExpr' e2
+mkExpr' (EBinOp _ Mod e1 e2)    = apply "_mod" [mkExpr' e1, mkExpr' e2]
+mkExpr' (EBinOp _ Concat e1 e2) = apply "_concat" [mkExpr' e1, mkExpr' e2, pp $ (2^(w1+w2)::Integer)]
+                                  where TUInt _ w1 = typ' ?r ?c e1
+                                        TUInt _ w2 = typ' ?r ?c e2
 mkExpr' (EUnOp _ Not e)         = parens $ char '!' <> mkExpr' e
-mkExpr' (ESlice _ e h l)        = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
+--mkExpr' (ESlice _ e h l)        = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
+mkExpr' (ESlice _ e h l)        = apply "_slice" [mkExpr' e, pp h, pp l, pp $ (2^(h-l+1)::Integer)]
 mkExpr' (ECond _ cs d)          = mkCond cs d 
 
 mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc
@@ -699,14 +714,8 @@ assume c = if c == pp "true" then empty else pp "assume" <+> c <> semi
 (.-) :: Doc -> Doc -> Doc
 (.-) x y = x <+> pp "-" <+> y
 
-(.%) :: Doc -> Doc -> Doc
-(.%) x y = x <+> pp "%" <+> y
-
 (.*) :: Doc -> Doc -> Doc
 (.*) x y = x <+> pp "*" <+> y
-
-(./) :: Doc -> Doc -> Doc
-(./) x y = x <+> pp "/" <+> y
 
 apply :: String -> [Doc] -> Doc
 apply f as = pp f <> (parens $ hsep $ punctuate comma as)

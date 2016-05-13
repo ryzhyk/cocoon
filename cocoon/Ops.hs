@@ -18,6 +18,7 @@ data BOp = Eq
          | Mod
          | ShiftR
          | ShiftL
+         | Concat
          deriving (Eq)
 
 instance PP BOp where
@@ -35,6 +36,7 @@ instance PP BOp where
     pp Mod    = pp "%"
     pp ShiftR = pp ">>"
     pp ShiftL = pp "<<"
+    pp Concat = pp "++"
 
 instance Show BOp where
     show = render . pp
