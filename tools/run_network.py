@@ -159,6 +159,7 @@ def main():
         hostname = sw['opts']['hostname']
         cmd = [args.p4c, 
                os.path.join(netdir, netname) + '.' + hostname + '.' + 'p4', 
+               "--p4-v1.1",
                "--json", os.path.join(netdir, netname) + '.' + hostname + '.' + 'json']
         print " ".join(cmd)
         subprocess.check_call(cmd)
@@ -191,7 +192,7 @@ def main():
         h.cmd("sysctl -w net.ipv4.tcp_congestion_control=reno")
         h.cmd("iptables -I OUTPUT -p icmp --icmp-type destination-unreachable -j DROP")
 
-    sleep(1)
+    sleep(3)
 
     newts = oldts
     applyConfig(loadedTopology, netdir, netname, oldts)

@@ -125,12 +125,18 @@ printExpr (EBool _ True)                        = pp "true"
 printExpr (EBool _ False)                       = pp "false"
 printExpr (EInt _ _ v)                          = pp $ show v
 printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
-printExpr (EBinOp _ Concat l r)                 = parens $ printExpr l <+> pp "++" <+> printExpr r
+printExpr (EBinOp _ Concat l r)                 = parens $ (parens $ (cast w (printExpr l)) <+> pp "<<" <+> pp w2) <+> pp "|" <+> (cast w $ printExpr r)
+    where TUInt _ w1 = typ' ?r (CtxRole ?role) l
+          TUInt _ w2 = typ' ?r (CtxRole ?role) r
+          w = w1 + w2
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
-printExpr (ESlice _ e h l)                      = parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
-                                                           (pp $ "0x" ++ showHex (2^(h-l+1) - 1::Integer) "")
+printExpr (ESlice _ e h l)                      = cast (h-l+1) $ parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
+                                                                          (pp $ "0x" ++ showHex (2^(h-l+1) - 1::Integer) "")
 printExpr e                                     = error $ "P4.printExpr " ++ show e
+
+cast :: Int -> Doc -> Doc
+cast w e = parens $ (parens $ pp "bit<" <> pp w <> pp ">") <> e
 
 printBOp :: BOp -> Doc
 printBOp Eq     = pp "=="
@@ -439,9 +445,10 @@ cascadeToDisj x              = x
 mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
+        TUInt _ w = typ' ?r (CtxRole ?role) rhs 
         isdyn = exprNeedsTable rhs
         action = if isdyn
-                    then (pp "action" <+> pp actname <> parens (pp "_val") <+> lbrace)
+                    then (pp "action" <+> pp actname <> parens (pp "in" <+> pp ("bit<" ++ show w ++ ">") <+> pp "_val") <+> lbrace)
                          $$
                          (nest' $ pp "modify_field" <> (parens $ printExpr lhs <> comma <+> pp "_val") <> semi)
                          $$

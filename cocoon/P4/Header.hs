@@ -11,59 +11,59 @@ p4HeaderDecls :: String
 p4HeaderDecls = [str|
 |header_type intrinsic_metadata_t {
 |    fields {
-|        mgid : 4;
+|        bit<4> mgid;
 |    }
 |}
 |
 |header_type eth_t {
 |    fields {
-|        dstAddr : 48;
-|        srcAddr : 48;
-|        etherType : 16;
+|        bit<48> dstAddr;
+|        bit<48> srcAddr;
+|        bit<16> etherType;
 |    }
 |}
 |
 |header_type vlan_tag_t {
 |    fields {
-|        tag : 16;
-|        etherType : 16;
+|        bit<16> tag;
+|        bit<16> etherType;
 |    }
 |}
 |
 |header_type ipv4_t {
 |    fields {
-|        version : 4;
-|        ihl : 4;
-|        diffserv : 8;
-|        totalLen : 16;
-|        identification : 16;
-|        flags : 3;
-|        fragOffset : 13;
-|        ttl : 8;
-|        protocol : 8;
-|        hdrChecksum : 16;
-|        src_ip3 : 8;
-|        src_ip2 : 8;
-|        src_ip1 : 8;
-|        src_ip0 : 8;
-|        dst_ip3 : 8;
-|        dst_ip2 : 8;
-|        dst_ip1 : 8;
-|        dst_ip0 : 8;
+|        bit<4>  version;
+|        bit<4>  ihl;
+|        bit<8>  diffserv;
+|        bit<16> totalLen;
+|        bit<16> identification;
+|        bit<3>  flags;
+|        bit<13> fragOffset;
+|        bit<8>  ttl;
+|        bit<8>  protocol;
+|        bit<16> hdrChecksum;
+|        bit<8>  src_ip3;
+|        bit<8>  src_ip2;
+|        bit<8>  src_ip1;
+|        bit<8>  src_ip0;
+|        bit<8>  dst_ip3;
+|        bit<8>  dst_ip2;
+|        bit<8>  dst_ip1;
+|        bit<8>  dst_ip0;
 |    }
 |}
 |
 |header_type arp_t {
 |    fields {
-|        htype : 16;
-|        ptype : 16;
-|        hlen  : 8;
-|        plen  : 8;
-|        oper  : 16;
-|        sha   : 48;
-|        spa   : 32;
-|        tha   : 48;
-|        tpa   : 32;
+|        bit<16> htype;
+|        bit<16> ptype;
+|        bit<8>  hlen;
+|        bit<8>  plen;
+|        bit<16> oper;
+|        bit<48> sha;
+|        bit<32> spa;
+|        bit<48> tha;
+|        bit<32> tpa;
 |    }
 |}
 |   
