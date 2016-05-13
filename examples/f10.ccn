@@ -13,7 +13,17 @@ typedef struct {
 } HEth
 
 typedef struct {
-    HEth     eth
+    bool valid,
+    uint<16> oper,
+    uint<48> sha,
+    uint<32> spa,
+    uint<48> tha,
+    uint<32> tpa
+} HARP
+
+typedef struct {
+    HEth     eth,
+    HARP     arp
 } Packet
 
 function p(): uint<8>
@@ -47,9 +57,28 @@ function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool =
 function goodPacket(Packet p): bool = 
     iL0Port(i1(p.eth.dstAddr), i0(p.eth.dstAddr), port(p.eth.dstAddr))
 
+
+function macEncode(Location loc): uint<48> = 
+    16'd0 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd0;}
+
+function arpResponse(HARP arp): HARP = 
+    HARP { true
+         , 16'd2 (* ARP response *)
+         , arp.sha
+         , arp.spa
+         , macEncode(ip2mac(IP4{arp.tpa[31:24], arp.tpa[23:16], arp.tpa[15:8], arp.tpa[7:0]}))
+         , arp.tpa}
+
 role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
-    if goodPacket(pkt) then
+    if pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+        pkt.arp := arpResponse(pkt.arp);
+        pkt.eth.srcAddr := pkt.arp.sha;
+        send L0Out[tree, i1, i0, port]
+    } else if goodPacket(pkt) (* Validate packets at the edge *) then {
+        pkt.eth.srcAddr := macEncode(Location{tree, i1, i0, port});
+        (*pkt.eth.dstAddr := 48'hffffffffffff;*)
         send L0Out[tree(pkt.eth.dstAddr), i1(pkt.eth.dstAddr), i0(pkt.eth.dstAddr), port(pkt.eth.dstAddr)]
+    }
 
 role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
      send HostIn[mac2ip(tree, i1, i0, port), 8'd0]
@@ -99,20 +128,26 @@ refine L0In {
         }
 
     role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
-        (* Validate packets at the edge *)
-        if goodPacket(pkt) then {
+        if pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+            pkt.arp := arpResponse(pkt.arp);
+            pkt.eth.srcAddr := pkt.arp.sha;
+            send L0Out[tree, i1, i0, port]
+        } else if goodPacket(pkt) then {
+            pkt.eth.srcAddr := macEncode(Location{tree, i1, i0, port});
             if tree(pkt.eth.dstAddr) == tree and i1(pkt.eth.dstAddr) == i1 and i0(pkt.eth.dstAddr) == i0 then {
+                (*pkt.eth.dstAddr := 48'hffffffffffff;*)
                 send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
             } else {
                 send L01Out[tree, i1, i0, pick01port(tree, i1, pickdef01port(tree, pkt))]
             }
         }
-        
+
     role L01Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) / goodPacket(pkt) = 
         if l1SwitchUp(tree, i1, port) then
             send L10In[tree, i1, port, i0]
 
     role L01In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) / goodPacket(pkt) = 
+        (*pkt.eth.dstAddr := 48'hffffffffffff;*)
         send L0Out[tree, i1, i0, port(pkt.eth.dstAddr)]
 
     function iL1Port(uint<8> i1, uint<8> r, uint<8> port): bool = 
