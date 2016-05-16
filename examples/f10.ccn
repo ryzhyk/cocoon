@@ -59,20 +59,22 @@ function goodPacket(Packet p): bool =
 
 
 function macEncode(Location loc): uint<48> = 
-    16'd0 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd0;}
+    16'h0300 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd2;}
 
 function arpResponse(arp_t arp): arp_t = 
     arp_t { true
           , 16'd2 (* ARP response *)
+          , macEncode(ip2mac(IP4{arp.tpa[31:24], arp.tpa[23:16], arp.tpa[15:8], arp.tpa[7:0]}))
+          , arp.tpa
           , arp.sha
           , arp.spa
-          , macEncode(ip2mac(IP4{arp.tpa[31:24], arp.tpa[23:16], arp.tpa[15:8], arp.tpa[7:0]}))
-          , arp.tpa}
+          }
 
 role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
     if pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
         pkt.arp := arpResponse(pkt.arp);
         pkt.eth.srcAddr := pkt.arp.sha;
+        pkt.eth.dstAddr := pkt.arp.tha;
         send L0Out[tree, i1, i0, port]
     } else if goodPacket(pkt) (* Validate packets at the edge *) then {
         pkt.eth.srcAddr := macEncode(Location{tree, i1, i0, port});
@@ -83,16 +85,16 @@ role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port)
 role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
      send HostIn[mac2ip(tree, i1, i0, port), 8'd0]
 
-function ip2mac(IP4 addr) : Location = Location {addr.ip2[0:0] == 1'd1, addr.ip2 >> 8'd1 , addr.ip1, addr.ip0}
+function ip2mac(IP4 addr) : Location = Location {addr.ip2[0:0] == 1'd1, addr.ip2 >> 8'd1 , addr.ip1, addr.ip0 - 8'd1}
 function mac2ip(bool tree, uint<8> i1, uint<8> i0, uint<8> port) : IP4 = 
     IP4 { 8'd10
         , (i1 << 8'd1) + (case {tree: 8'd1; default: 8'd0;})
         , i0
-        , port
+        , port + 8'd1 
         }
 
 function iHost(IP4 addr): bool = 
-    (addr.ip2>>8'd1) < p() and (addr.ip1 < p()) and (addr.ip0 < p()) and addr.ip3 == 8'd10
+    (addr.ip2>>8'd1) < p() and (addr.ip1 < p()) and (addr.ip0 > 8'd0) and (addr.ip0 <= p()) and addr.ip3 == 8'd10
 
 role HostIn[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 = (filter false)
 role HostOut[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 =
@@ -131,6 +133,7 @@ refine L0In {
         if pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
             pkt.arp := arpResponse(pkt.arp);
             pkt.eth.srcAddr := pkt.arp.sha;
+            pkt.eth.dstAddr := pkt.arp.tha;
             send L0Out[tree, i1, i0, port]
         } else if goodPacket(pkt) then {
             pkt.eth.srcAddr := macEncode(Location{tree, i1, i0, port});

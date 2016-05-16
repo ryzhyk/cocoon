@@ -70,7 +70,7 @@ class MyTopo(Topo):
                                     json_path   = os.path.join(netdir, netname) + '.' + hostname + '.' + 'json',
                                     thrift_port = _THRIFT_BASE_PORT + sw['opts']['nodeNum'],
                                     log_file    = os.path.join("/tmp", netname) + '.' + hostname + '.' + 'log',
-                                    pcap_dump   = False,
+                                    pcap_dump   = True,
                                     device_id   = sw['opts']['nodeNum'])
 
         for h in topology['hosts']:
@@ -190,6 +190,7 @@ def main():
         h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
         h.cmd("sysctl -w net.ipv6.conf.lo.disable_ipv6=1")
         h.cmd("sysctl -w net.ipv4.tcp_congestion_control=reno")
+        h.cmd("ifconfig eth0 promisc")
         h.cmd("iptables -I OUTPUT -p icmp --icmp-type destination-unreachable -j DROP")
 
     sleep(3)
