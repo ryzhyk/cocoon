@@ -49,6 +49,7 @@ data Expr = EVar    String
           | EStruct String [Expr]
           | EBinOp  BOp Expr Expr
           | EUnOp   UOp Expr 
+          | ESlice  Expr Int Int
           | ECond   [(Expr, Expr)] Expr
           deriving Show
 
@@ -66,6 +67,7 @@ typ _ (EStruct n _)     = TStruct n
 typ q (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                         | elem op [Plus, Minus, Mod] = typ q e1
 typ _ (EUnOp Not _)     = TBool 
+typ _ (ESlice _ h l)    = TUInt (h-l+1)
 typ q (ECond _ d)       = typ q d
 typ q (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
 typ _ e                 = error $ "SMTSolver.typ " ++ show e
