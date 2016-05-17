@@ -94,3 +94,6 @@ msb :: (Bits b, Num b) => b -> Int
 msb 0 = 0
 msb 1 = 0
 msb n = 1 + (msb $ n `shiftR` 1)
+
+bitSlice :: Integer -> Int -> Int -> Integer
+bitSlice v h l = (v `shiftR` l) .&. (2^(h-l+1) - 1)

@@ -13,6 +13,7 @@ import Type
 import Pos
 import Name
 import NS
+import Util
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
@@ -88,6 +89,7 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                Minus  -> EInt  nopos w ((v1 - v2) `mod` (1 `shiftL` w))
                                                ShiftR -> EInt  nopos w (v1 `shiftR` fromInteger(v2))
                                                ShiftL -> EInt  nopos w ((v1 `shiftL` fromInteger(v2)) `mod` (1 `shiftL` w))
+                                               Concat -> EInt  nopos (w1+w2) ((v1 `shiftL` w2) + v2)
                                                Mod    -> EInt  nopos w1 (v1 `mod` v2)
                                                _      -> error $ "Eval.evalExpr " ++ show e
             (EStruct _ _ fs1, EStruct _ _ fs2) -> case op of 
@@ -103,7 +105,7 @@ evalExpr (EUnOp _ op e)                =
            _           -> EUnOp nopos op e'
 
 evalExpr (ESlice _ e h l)              = case evalExpr e of
-                                              EInt _ _ v -> EInt nopos (h-l+1) $ (v `shiftR` l) .&. (2^(h-l+1) - 1)
+                                              EInt _ _ v -> EInt nopos (h-l+1) $ bitSlice v h l
                                               e'         -> ESlice nopos e' h l
 evalExpr (ECond _ cs d)                = 
     let cs1 = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
