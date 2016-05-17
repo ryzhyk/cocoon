@@ -59,7 +59,7 @@ function goodPacket(Packet p): bool =
 
 
 function macEncode(Location loc): uint<48> = 
-    16'h0300 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd2;}
+    16'h0200 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd2;}
 
 function arpResponse(arp_t arp): arp_t = 
     arp_t { true
@@ -83,7 +83,7 @@ role L0In[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port)
     }
 
 role L0Out[bool tree, uint<8> i1, uint<8> i0, uint<8> port] | iL0Port(i1,i0,port) = 
-     send HostIn[mac2ip(tree, i1, i0, port), 8'd0]
+     send HostIn[macEncode(Location{tree, i1, i0, port}), mac2ip(tree, i1, i0, port), 8'd0]
 
 function ip2mac(IP4 addr) : Location = Location {addr.ip2[0:0] == 1'd1, addr.ip2 >> 8'd1 , addr.ip1, addr.ip0 - 8'd1}
 function mac2ip(bool tree, uint<8> i1, uint<8> i0, uint<8> port) : IP4 = 
@@ -93,12 +93,14 @@ function mac2ip(bool tree, uint<8> i1, uint<8> i0, uint<8> port) : IP4 =
         , port + 8'd1 
         }
 
-function iHost(IP4 addr): bool = 
-    (addr.ip2>>8'd1) < p() and (addr.ip1 < p()) and (addr.ip0 > 8'd0) and (addr.ip0 <= p()) and addr.ip3 == 8'd10
+function iHost(uint<48> mac, IP4 ip): bool = 
+    (i1(mac) < p()) and (i0(mac) < p()) and (port(mac) < p()) and (mac[47:32] == 16'h0200) and (mac[7:0] == 8'd1 or mac[7:0] == 8'd2)
+    and
+    (ip == mac2ip(tree(mac), i1(mac), i0(mac), port(mac)))
 
-role HostIn[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 = (filter false)
-role HostOut[IP4 addr, uint<8> port] | iHost(addr) and port == 8'd0 =
-    send L0In[ip2mac(addr).tree, ip2mac(addr).i1, ip2mac(addr).i0, ip2mac(addr).h]
+role HostIn[uint<48> mac, IP4 ip, uint<8> port] | iHost(mac, ip) and port == 8'd0 = (filter false)
+role HostOut[uint<48> mac, IP4 ip, uint<8> port] | iHost(mac, ip) and port == 8'd0 =
+    send L0In[tree(mac), i1(mac), i0(mac), port(mac)]
 
 
 refine L0In {
@@ -255,7 +257,7 @@ refine {
     switch L0Switch( (L0In, L0Out), (L01In, L01Out) )
 
 
-    role Host[IP4 addr] | iHost(addr) = (filter false)
+    role Host[uint<48> mac, IP4 ip] | iHost(mac, ip) = (filter false)
     host Host((HostIn, HostOut))
 }
 
