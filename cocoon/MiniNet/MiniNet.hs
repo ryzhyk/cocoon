@@ -6,6 +6,7 @@ import Text.JSON
 import Data.Maybe
 import Control.Monad.State
 import Data.List
+import Numeric
 
 import Topology
 import Util
@@ -56,8 +57,14 @@ renderNode voffset node ((descr, _), hoffset) = do
                if nodeType node == NodeHost 
                   then case head $ idescKeys descr of
                             e@(EStruct _ _ _) -> [("ip4", JSString $ toJSString $ formatIP e)] 
+                            (EInt _ 48 m)     -> [("mac", JSString $ toJSString $ formatMAC m)] ++
+                                                 if length (idescKeys descr) >= 2
+                                                    then case idescKeys descr !! 1 of
+                                                              e@(EStruct _ _ _) -> [("ip4", JSString $ toJSString $ formatIP e)] 
+                                                              _                 -> []
+                                                    else []
                             _                 -> []
-                  else []
+                  else []                  
         attrs = [ ("number", JSString $ toJSString $ show number)
                 , ("opts"  , JSObject $ toJSObject opts)
                 , ("x"     , JSString $ toJSString $ show $ hoffset)
@@ -69,6 +76,18 @@ renderNode voffset node ((descr, _), hoffset) = do
 formatIP :: Expr -> String
 formatIP (EStruct _ _ fs) = intercalate "." $ map (show . exprIVal) fs
 formatIP e                = error $ "MiniNet.formatIP " ++ show e
+
+formatMAC :: Integer -> String
+formatMAC i = 
+    ( showHex b0 . colon . showHex b1 . colon . showHex b2 . colon
+    . showHex b3 . colon . showHex b4 . colon . showHex b5) ""
+  where colon = showString ":"
+        b5 = bitSlice i 7 0
+        b4 = bitSlice i 15 8
+        b3 = bitSlice i 23 16
+        b2 = bitSlice i 31 24
+        b1 = bitSlice i 39 32
+        b0 = bitSlice i 47 40
 
 renderLink :: (?t::Topology,?r::Refine) => NodeMap -> (PortInstDescr, PortInstDescr) -> Maybe JSValue
 renderLink nmap (srcport, dstport) = if (srcndname, srcpnum) < (dstndname,dstpnum)

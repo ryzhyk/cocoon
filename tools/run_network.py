@@ -185,6 +185,10 @@ def main():
             ip = n['opts']['ip4']
             print hostname + ": set IP address " + ip
             h.cmd("ifconfig eth0 " + ip)
+        if 'mac' in n['opts']:
+            mac = n['opts']['mac']
+            print hostname + ": set MAC address " + mac
+            h.cmd("sudo ifconfig eth0 hw ether " + mac)
         print "disable ipv6"
         h.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
         h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
