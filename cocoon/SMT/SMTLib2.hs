@@ -86,9 +86,10 @@ instance SMTPP Expr where
     smtpp (EBinOp Neq e1 e2) = smtpp $ EUnOp Not $ EBinOp Eq e1 e2
     smtpp (EBinOp op e1 e2)  = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
     smtpp (EUnOp op e)       = parens $ smtpp op <+> smtpp e
+    smtpp (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtpp e
     smtpp (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
-    smtpp (EApply f [])      = pp f
-    smtpp (EApply f as)      = parens $ pp f <+> (hsep $ map smtpp as)
+    smtpp (EApply f [])      = ppFName f
+    smtpp (EApply f as)      = parens $ ppFName f <+> (hsep $ map smtpp as)
 
 instance SMTPP BOp where
     smtpp Eq     = pp "="
@@ -111,10 +112,13 @@ instance SMTPP UOp where
     smtpp Not   = pp "not"
 
 instance SMTPP Function where
-    smtpp Function{..} = parens $   pp "define-fun" <+> pp funcName 
+    smtpp Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
                                 <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp t) funcArgs) 
                                 <+> smtpp funcType
                                 <+> smtpp funcDef
+
+ppFName :: String -> Doc
+ppFName f = pp $ "__fun_" ++ f
 
 --------------------------------------------------------
 ---- Running solver in different modes
