@@ -13,7 +13,6 @@ data BOp = Eq
          | And
          | Or
          | Impl
-         | Equiv
          | Plus
          | Minus
          | Mod
@@ -32,7 +31,6 @@ instance PP BOp where
     pp And    = pp "and"
     pp Or     = pp "or"
     pp Impl   = pp "=>"
-    pp Equiv  = pp "<=>"
     pp Plus   = pp "+"
     pp Minus  = pp "-"
     pp Mod    = pp "%"

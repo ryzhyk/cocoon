@@ -101,7 +101,6 @@ instance SMTPP BOp where
     smtpp And    = pp "and"
     smtpp Or     = pp "or"
     smtpp Impl   = pp "=>"
-    smtpp Equiv  = pp "="
     smtpp Plus   = pp "bvadd"
     smtpp Minus  = pp "bvsub"
     smtpp ShiftR = pp "bvlshr"

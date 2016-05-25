@@ -268,18 +268,17 @@ mkExpr' (EBool _ True)          = pp "true"
 mkExpr' (EBool _ False)         = pp "false"
 mkExpr' (EInt _ _ v)            = pp v -- <> text "bv" <> pp w
 mkExpr' (EStruct _ n fs)        = apply n $ map mkExpr' fs
-mkExpr' (EBinOp _ Eq e1 e2)     = parens $ mkExpr' e1 .==  mkExpr' e2
-mkExpr' (EBinOp _ Neq e1 e2)    = parens $ mkExpr' e1 .!=  mkExpr' e2
-mkExpr' (EBinOp _ And e1 e2)    = parens $ mkExpr' e1 .&&  mkExpr' e2
-mkExpr' (EBinOp _ Or e1 e2)     = parens $ mkExpr' e1 .||  mkExpr' e2
-mkExpr' (EBinOp _ Impl e1 e2)   = parens $ mkExpr' e1 .=>  mkExpr' e2
-mkExpr' (EBinOp _ Equiv e1 e2)  = parens $ mkExpr' e1 .<=> mkExpr' e2
-mkExpr' (EBinOp _ Lt e1 e2)     = parens $ mkExpr' e1 .<   mkExpr' e2
-mkExpr' (EBinOp _ Gt e1 e2)     = parens $ mkExpr' e1 .>   mkExpr' e2
-mkExpr' (EBinOp _ Lte e1 e2)    = parens $ mkExpr' e1 .<=  mkExpr' e2
-mkExpr' (EBinOp _ Gte e1 e2)    = parens $ mkExpr' e1 .>=  mkExpr' e2
-mkExpr' (EBinOp _ Plus e1 e2)   = parens $ mkExpr' e1 .+   mkExpr' e2
-mkExpr' (EBinOp _ Minus e1 e2)  = parens $ mkExpr' e1 .-   mkExpr' e2
+mkExpr' (EBinOp _ Eq e1 e2)     = parens $ mkExpr' e1 .== mkExpr' e2
+mkExpr' (EBinOp _ Neq e1 e2)    = parens $ mkExpr' e1 .!= mkExpr' e2
+mkExpr' (EBinOp _ And e1 e2)    = parens $ mkExpr' e1 .&& mkExpr' e2
+mkExpr' (EBinOp _ Or e1 e2)     = parens $ mkExpr' e1 .|| mkExpr' e2
+mkExpr' (EBinOp _ Impl e1 e2)   = parens $ mkExpr' e1 .=> mkExpr' e2
+mkExpr' (EBinOp _ Lt e1 e2)     = parens $ mkExpr' e1 .<  mkExpr' e2
+mkExpr' (EBinOp _ Gt e1 e2)     = parens $ mkExpr' e1 .>  mkExpr' e2
+mkExpr' (EBinOp _ Lte e1 e2)    = parens $ mkExpr' e1 .<= mkExpr' e2
+mkExpr' (EBinOp _ Gte e1 e2)    = parens $ mkExpr' e1 .>= mkExpr' e2
+mkExpr' (EBinOp _ Plus e1 e2)   = parens $ mkExpr' e1 .+  mkExpr' e2
+mkExpr' (EBinOp _ Minus e1 e2)  = parens $ mkExpr' e1 .-  mkExpr' e2
 mkExpr' (EBinOp _ ShiftR e1 (EInt _ _ i)) = apply "_div" [mkExpr' e1, pp $ (2^i::Integer)]
 mkExpr' e@(EBinOp _ ShiftR _ _) = error $ "Not implemented Boogie.mkExpr' " ++ show e
 mkExpr' (EBinOp _ ShiftL e1 (EInt _ _ i)) = apply "_mod" [mkExpr' e1 .* (pp $ (2^i::Integer)), pp $ (2^w::Integer)]
@@ -712,9 +711,6 @@ assume c = if c == pp "true" then empty else pp "assume" <+> c <> semi
 
 (.=>) :: Doc -> Doc -> Doc
 (.=>) x y = x <+> pp "==>" <+> y
-
-(.<=>) :: Doc -> Doc -> Doc
-(.<=>) x y = x <+> pp "<==>" <+> y
 
 (.<) :: Doc -> Doc -> Doc
 (.<) x y = x <+> pp "<" <+> y

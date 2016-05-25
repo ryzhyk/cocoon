@@ -124,7 +124,6 @@ printExpr (EBool _ True)                        = pp "true"
 printExpr (EBool _ False)                       = pp "false"
 printExpr (EInt _ _ v)                          = pp $ show v
 printExpr (EBinOp _ Impl l r)                   = printExpr $ EBinOp nopos Or (EUnOp nopos Not l) r
-printExpr (EBinOp _ Equiv l r)                  = printExpr $ EBinOp nopos Or (EBinOp nopos And l r) (EBinOp nopos And (EUnOp nopos Not l) (EUnOp nopos Not r))
 printExpr (EBinOp _ Concat l r)                 = parens $ (parens $ (cast w (printExpr l)) <+> pp "<<" <+> pp w2) <+> pp "|" <+> (cast w $ printExpr r)
     where TUInt _ w1 = typ' ?r (CtxRole ?role) l
           TUInt _ w2 = typ' ?r (CtxRole ?role) r
@@ -154,7 +153,6 @@ printBOp ShiftR = pp ">>"
 printBOp ShiftL = pp "<<"
 printBOp Concat = error "P4.printBOp ++"
 printBOp Impl   = error "P4.printBOp =>"
-printBOp Equiv  = error "P4.printBOp <=>"
 
 printUOp :: UOp -> Doc
 printUOp Not   = pp "not"
