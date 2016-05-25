@@ -46,6 +46,7 @@ instance WithType Expr where
                                          And    -> TBool nopos
                                          Or     -> TBool nopos
                                          Impl   -> TBool nopos
+                                         Equiv  -> TBool nopos
                                          Plus   -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          Minus  -> TUInt nopos (max (typeWidth t1) (typeWidth t2))
                                          ShiftR -> TUInt nopos (typeWidth t1)
