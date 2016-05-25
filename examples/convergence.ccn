@@ -28,7 +28,7 @@ typedef struct {
     IP4 dst
 } ip4_t
 
-typedef struct 
+typedef struct {
     bool     valid,
     uint<24> vni,
     eth_t    eth,
