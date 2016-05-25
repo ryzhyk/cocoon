@@ -209,6 +209,8 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                                     $$
                                     pp pktVar .:= pp "_pkt"
                                     $$
+                                    (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleLocals rl)
+                                    $$
                                     mkStatement r rl roleBody)
                            $$
                            rbrace
@@ -225,26 +227,31 @@ mkExpr r c e = mkExprP pktVar r c e
 
 -- Set of modified fields. Includes expressions of the form pkt.f1.f2.....fn
 type MSet = [Expr]
+type Locals = M.Map String Doc
 
-mkAbstExpr :: (?r::Refine) => ECtx -> MSet -> Expr -> Doc
-mkAbstExpr c mset e = let ?mset = mset 
-                          ?c = c
-                          ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
-                          ?p = "_pkt" in 
-                      mkExpr' e
+mkAbstExpr :: (?r::Refine) => ECtx -> MSet -> Locals -> Expr -> Doc
+mkAbstExpr c mset locals e = let ?mset = mset 
+                                 ?locals = locals
+                                 ?c = c
+                                 ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
+                                 ?p = "_pkt" in 
+                              mkExpr' e
 
 mkExprP :: String -> Refine -> ECtx -> Expr -> Doc
 mkExprP p r c e = let ?c = c
                       ?p = p 
                       ?r = r 
                       ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
-                      ?mset = [] in
+                      ?mset = [] 
+                      ?locals = M.empty in
                   mkExpr' e
 
 -- Generage Boogie expression.
 -- Replace packet fields in ?mset with field of outputVar
-mkExpr' :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => Expr -> Doc
-mkExpr' (EVar _ v)              = pp v
+mkExpr' :: (?p::String, ?mset::MSet, ?locals::Locals, ?r::Refine, ?c::ECtx, ?loc::Doc) => Expr -> Doc
+mkExpr' (EVar _ v)              = case M.lookup v ?locals of 
+                                       Nothing  -> pp v
+                                       Just val -> val
 mkExpr' (EDotVar _ v)           = let CtxSend _ rl = ?c in 
                                   apply (v ++ "#" ++ (name rl)) [?loc]
 mkExpr' e@(EPacket _)           = mkPktField e
@@ -309,7 +316,7 @@ mkPktField e =
           field _ e'             = error $ "Boogie.mkPktField.field " ++ show e'
 
 
-mkCond :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => [(Expr,Expr)] -> Expr -> Doc
+mkCond :: (?p::String, ?mset::MSet, ?locals::Locals, ?r::Refine, ?c::ECtx, ?loc::Doc) => [(Expr,Expr)] -> Expr -> Doc
 mkCond [] d             = mkExpr' d
 mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "then" <+> mkExpr' e
                                                                       <+> pp "else" <+> mkCond cs d
@@ -374,6 +381,7 @@ mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                                    $$
                                                    (let ?p = pktVar
                                                         ?mset = []
+                                                        ?locals = M.empty
                                                         ?r = r
                                                         ?c = CtxSend rl rl'
                                                         ?loc = pp locationVar in
@@ -385,6 +393,9 @@ mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
                                                          $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
 mkStatement r rl (SHavoc _ e)    = havoc' r (mkExpr r (CtxRole rl) e, typ r (CtxRole rl) e)
 mkStatement r rl (SAssume _ e)   = assume $ mkExpr r (CtxRole rl) e
+mkStatement r rl (SLet _ _ n v)  = checkBounds r (CtxRole rl) v
+                                   $$
+                                   mkAssign r rl (EVar nopos n) [] v
 
 checkDepth :: (?maxdepth::Int) => Doc
 checkDepth = (pp depthVar .:= (pp depthVar .+ pp "1"))
@@ -434,25 +445,25 @@ mkAbstRoleBody :: Refine -> Role -> Doc
 mkAbstRoleBody r rl = 
     (let ?r = r
          ?rl = rl in
-     mkAbstStatement [] [] $ roleBody rl)
+     mkAbstStatement [] M.empty [] $ roleBody rl)
     $$
     checkDropped
 
-mkAbstStatement :: (?r::Refine, ?rl::Role) => MSet -> [Statement] -> Statement -> Doc
-mkAbstStatement mset nxt (SSeq _ s1 s2) = mkAbstStatement mset (s2:nxt) s1
-mkAbstStatement _    _   (SPar _ _ _)   = error "Not implemented: Boogie.mkAbstStatement SPar" {- run in sequence, copying packet -}
-mkAbstStatement mset nxt (SITE _ c t e) = stat
+mkAbstStatement :: (?r::Refine, ?rl::Role) => MSet -> Locals -> [Statement] -> Statement -> Doc
+mkAbstStatement mset locals nxt (SSeq _ s1 s2) = mkAbstStatement mset locals (s2:nxt) s1
+mkAbstStatement _    _      _   (SPar _ _ _)   = error "Not implemented: Boogie.mkAbstStatement SPar" {- run in sequence, copying packet -}
+mkAbstStatement mset locals nxt (SITE _ c t e) = stat
     where clone = (isNothing $ statMSet t) || (statMSet t /= maybe (Just []) statMSet e)
           tbranch = if clone
-                       then mkAbstStatement mset nxt t
-                       else mkAbstStatement mset []  t
+                       then mkAbstStatement mset locals nxt t
+                       else mkAbstStatement mset locals []  t
           ebranch = if clone
-                       then mkAbstStatement mset nxt $ fromJust e
-                       else mkAbstStatement mset []  $ fromJust e
+                       then mkAbstStatement mset locals nxt $ fromJust e
+                       else mkAbstStatement mset locals []  $ fromJust e
           suffix = if clone 
                       then empty
-                      else mkNext (msetUnion mset $ fromJust $ statMSet t) nxt
-          stat = (pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset c) <+> lbrace)
+                      else mkNext (msetUnion mset $ fromJust $ statMSet t) locals nxt
+          stat = (pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset locals c) <+> lbrace)
                  $$
                  (nest' tbranch)
                  $$
@@ -465,37 +476,39 @@ mkAbstStatement mset nxt (SITE _ c t e) = stat
                         e)
                  $$
                  suffix
-mkAbstStatement mset nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
-                                          $$
-                                          mkNext mset nxt
-mkAbstStatement mset nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr (CtxRole ?rl) mset' l .== mkAbstExpr (CtxRole ?rl) mset rhs))
-                                          $$
-                                          mkNext mset' nxt
+mkAbstStatement mset locals nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset locals (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
+                                                 $$
+                                                 mkNext mset locals nxt
+mkAbstStatement mset locals nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr (CtxRole ?rl) mset' locals l .== mkAbstExpr (CtxRole ?rl) mset locals rhs))
+                                                 $$
+                                                 mkNext mset' locals nxt
     where mset' = msetUnion [l] mset
-mkAbstStatement mset []  (SSend _ dst)  = checkNotDropped
-                                          $$
-                                          (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset) ks))
-                                          $$
-                                          (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e .== mkAbstExpr (CtxRole ?rl) mset e) mset')
-                                          $$
-                                          ret
+mkAbstStatement mset locals []  (SSend _ dst)  = checkNotDropped
+                                                 $$
+                                                 (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset locals) ks))
+                                                 $$
+                                                 (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' locals e .== mkAbstExpr (CtxRole ?rl) mset locals e) mset')
+                                                 $$
+                                                 ret
     where mset' = msetComplement mset
           ELocation _ rname ks = dst
-mkAbstStatement mset []  (SSendND _ rl c) = checkNotDropped
-                                            $$
-                                            (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
-                                            $$
-                                            (assrt $ mkAbstExpr (CtxSend ?rl $ getRole ?r rl) mset c)
-                                            $$
-                                            (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' e .== mkAbstExpr (CtxRole ?rl) mset e) mset')
-                                            $$
-                                            ret
+mkAbstStatement mset locals []  (SSendND _ rl c) = checkNotDropped
+                                                   $$
+                                                   (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
+                                                   $$
+                                                   (assrt $ mkAbstExpr (CtxSend ?rl $ getRole ?r rl) mset locals c)
+                                                   $$
+                                                   (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' locals e .== mkAbstExpr (CtxRole ?rl) mset locals e) mset')
+                                                   $$
+                                                   ret
     where mset' = msetComplement mset
-mkAbstStatement mset nxt (SHavoc _ e)   = mkNext (msetUnion mset [e]) nxt
-mkAbstStatement mset nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr (CtxRole ?rl) mset c)
-                                          $$
-                                          mkNext mset nxt
-mkAbstStatement _    nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
+mkAbstStatement mset locals nxt (SHavoc _ e)   = mkNext (msetUnion mset [e]) locals nxt
+mkAbstStatement mset locals nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr (CtxRole ?rl) mset locals c)
+                                                 $$
+                                                 mkNext mset locals nxt
+mkAbstStatement mset locals nxt (SLet _ _ n v) = mkNext mset locals' nxt
+    where locals' = M.insert n (mkAbstExpr (CtxRole ?rl) mset locals v) locals
+mkAbstStatement _    _      nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
 
 isDropped :: Doc
 isDropped = apply "is#Dropped" [pp outputVar]
@@ -509,10 +522,10 @@ checkDropped = assrt isDropped
 checkNotDropped :: Doc
 checkNotDropped = assrt notDropped
 
-mkNext :: (?r::Refine, ?rl::Role) => MSet -> [Statement] -> Doc
-mkNext mset nxt = case nxt of
-                       []     -> empty
-                       (s:ss) -> mkAbstStatement mset ss s
+mkNext :: (?r::Refine, ?rl::Role) => MSet -> Locals -> [Statement] -> Doc
+mkNext mset locals nxt = case nxt of
+                              []     -> empty
+                              (s:ss) -> mkAbstStatement mset locals ss s
 
 statMSet :: Statement -> Maybe MSet
 statMSet (SSeq _ l r)    = maybe Nothing (\mset -> maybe Nothing (Just . msetUnion mset) $ statMSet r) $ statMSet l
@@ -528,6 +541,7 @@ statMSet (SSend  _ _)    = Nothing
 statMSet (SSendND _ _ _) = Nothing
 statMSet (SHavoc _ l)    = Just [l]
 statMSet (SAssume _ _)   = Just []
+statMSet (SLet _ _ _ _)  = Just []
 
 msetEq :: MSet -> MSet -> Bool
 msetEq ms1 ms2 = length ms1 == length ms2 && (length $ intersect ms1 ms2) == length ms1
@@ -601,6 +615,8 @@ statCollectTypes rl (SSend _ d)     = exprCollectTypes (CtxRole rl) d
 statCollectTypes rl (SSendND _ n c) = exprCollectTypes (CtxSend rl $ getRole ?r n) c
 statCollectTypes _  (SHavoc _ _)    = []
 statCollectTypes rl (SAssume _ c)   = exprCollectTypes (CtxRole rl) c
+statCollectTypes rl (SLet _ t _ v)  = (typ' ?r (CtxRole rl) t) : exprCollectTypes (CtxRole rl) v
+
 
 exprCollectTypes :: (?r::Refine) => ECtx -> Expr -> [Type]
 exprCollectTypes c e = (typ' ?r c e) : exprCollectTypes' c e

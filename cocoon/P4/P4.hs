@@ -13,7 +13,6 @@ import Data.List
 import Data.Bits
 import qualified Data.Map as M
 import Numeric
-import Debug.Trace
 
 import Util
 import PP
@@ -317,6 +316,7 @@ mkStatement (SSend _ dst) = do
 mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
+mkStatement (SLet _ _ _ _)  = error "Not implemented: P4.mkStatement SLet"
 
 mkAddHeader :: String -> State P4State P4Statement
 mkAddHeader h = do

@@ -6,6 +6,7 @@ module Syntax( pktVar
              , errR, assertR
              , Field(..)
              , Role(..)
+             , roleLocals
              , NodeType(..)
              , Node(..)
              , Function(..)
@@ -19,6 +20,7 @@ module Syntax( pktVar
              , conj
              , disj
              , Statement(..)
+             , statLocals
              , statSendsTo) where
 
 import Data.List
@@ -95,6 +97,9 @@ instance WithName Role where
 data NodeType = NodeSwitch
               | NodeHost
               deriving Eq
+
+roleLocals :: Role -> [Field]
+roleLocals role = statLocals $ roleBody role
 
 data Node = Node { nodePos   :: Pos
                  , nodeType  :: NodeType
@@ -271,6 +276,7 @@ data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: St
                | SSendND {statPos :: Pos, statSndRole :: String, statCond :: Expr}
                | SHavoc  {statPos :: Pos, statLVal :: Expr}
                | SAssume {statPos :: Pos, statCond :: Expr}
+               | SLet    {statPos :: Pos, statVType :: Type, statVName :: String, statVal :: Expr}
 
 statSendsTo :: Statement -> [Expr]
 statSendsTo st = nub $ statSendsTo' st
@@ -284,7 +290,20 @@ statSendsTo' (SSet  _ _ _)     = []
 statSendsTo' (SSend _ loc)     = [loc]
 statSendsTo' (SHavoc _ _)      = []
 statSendsTo' (SAssume _ _)     = []
+statSendsTo' (SLet _ _ _ _)    = []
 statSendsTo' (SSendND _ _ _)   = error "Syntax.statSendsTo' SSendND"
+
+statLocals :: Statement -> [Field]
+statLocals (SSeq _ l r)      = statLocals l ++ statLocals r
+statLocals (SPar _ l r)      = statLocals l ++ statLocals r
+statLocals (SITE _ _ t me)   = statLocals t ++ maybe [] statLocals me
+statLocals (STest _ _)       = []
+statLocals (SSet _ _ _)      = []
+statLocals (SSend _ _)       = []
+statLocals (SSendND _ _ _)   = []
+statLocals (SHavoc _ _)      = []
+statLocals (SAssume _ _)     = []
+statLocals (SLet p t n _)    = [Field p n t]
 
 instance WithPos Statement where
     pos = statPos
@@ -306,6 +325,7 @@ instance PP Statement where
     pp (SSendND _ rl c) = pp "?send" <+> pp rl <> (brackets $ pp c)
     pp (SHavoc _ e)     = pp "havoc" <+> pp e
     pp (SAssume _ e)    = pp "assume" <+> pp e
+    pp (SLet _ t n v)   = pp "let" <+> pp t <+> pp n <+> pp "=" <+> pp v
 
 instance Show Statement where
     show = render . pp

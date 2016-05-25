@@ -54,7 +54,7 @@ getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
 lookupVar :: ECtx -> String -> Maybe Field
-lookupVar (CtxRole Role{..})     n = find ((==n) . name) roleKeys
+lookupVar (CtxRole rl@Role{..})  n = find ((==n) . name) $ roleKeys ++ roleLocals rl
 lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
 lookupVar (CtxSend Role{..} _)   n = find ((==n) . name) roleKeys

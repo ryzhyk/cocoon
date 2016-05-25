@@ -15,7 +15,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-", "."]
+reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
 reservedNames = ["and",
                  "assume",
                  "bool",
