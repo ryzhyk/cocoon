@@ -35,6 +35,8 @@ typedef struct {
     ip4_t    ip4
 } vxlan_t
 
+function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, ip4_t{false, 8'd0, IP4{8'd0, 8'd0, 8'd0, 8'd0}, IP4{8'd0, 8'd0, 8'd0, 8'd0}}}
+
 typedef struct {
     eth_t    eth,
     ip4_t    ip4,
@@ -74,8 +76,10 @@ role VHostIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
 role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
     (* Deliver to destination MAC within virtual network *)
     let VHPortId vhport = mac2VHPort(vHPortVNet(VHPortId{vhost, port}), pkt.eth.dstAddr);
-    if iVHostPort(vhport) then
+    if iVHostPort(vhport) then {
+       pkt.vxlan := novxlan();
        send VHostIn[vhport.vhost, vhport.vport]
+    }
 
 refine VHostOut {
 
@@ -86,6 +90,7 @@ refine VHostOut {
     assume (IP4 hst, uint<16> swport) iVSwitchPort(hst, swport) => iHost(hst)
 
     function vHostLocation(VHostId vhost): IP4
+    assume (VHostId vhost) iVHost(vhost) => iHost(vHostLocation(vhost))
 
     function vH2SwLink(VHPortId hport): uint<16>
     function vSw2HLink(IP4 addr, uint<16> swport): VHPortId
@@ -107,7 +112,7 @@ refine VHostOut {
     function vxlanDecapsulate(Packet p): Packet =
         Packet{ p.vxlan.eth
               , p.vxlan.ip4
-              , vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, ip4_t{false, 8'd0, IP4{8'd0, 8'd0, 8'd0, 8'd0}, IP4{8'd0, 8'd0, 8'd0, 8'd0}}}}
+              , novxlan()}
 
     role VSwitchIn[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
         (* Destination exists? *)
@@ -116,6 +121,7 @@ refine VHostOut {
         if iVHostPort(vhport) then {
             if (vHostLocation(vhport.vhost) == hst) then { 
                 (* Local destination -- deliver *)
+                pkt.vxlan := novxlan();
                 send VSwitchOut[hst, vH2SwLink(vhport)]
             } else {
                 (* Remote destination -- encapsulate *)
