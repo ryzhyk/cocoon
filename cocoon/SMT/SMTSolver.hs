@@ -27,10 +27,13 @@ instance WithName Struct where
     name (Struct n _) = n
 
 data Var = Var { varName :: String
-               , varType :: Type}
+               , varType :: Type} 
+               deriving Show
+
 
 instance WithName Var where
     name (Var n _) = n
+
 
 data Function = Function { funcName :: String
                          , funcArgs :: [(String, Type)]
@@ -56,21 +59,23 @@ data Expr = EVar    String
 -- Assigns values to variables.
 type Assignment = M.Map String Expr
 
-typ :: SMTQuery -> Expr -> Type
-typ q (EVar n)      = varType $ fromJust $ find ((==n) . name) $ smtVars q
-typ q (EField e f)  = fromJust $ lookup f fs
-                      where TStruct n = typ q e
-                            Struct _ fs = fromJust $ find ((== n) . name) $ smtStructs q
-typ _ (EBool _)         = TBool
-typ _ (EInt w _)        = TUInt w
-typ _ (EStruct n _)     = TStruct n
-typ q (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
-                        | elem op [Plus, Minus, Mod] = typ q e1
-typ _ (EUnOp Not _)     = TBool 
-typ _ (ESlice _ h l)    = TUInt (h-l+1)
-typ q (ECond _ d)       = typ q d
-typ q (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
-typ _ e                 = error $ "SMTSolver.typ " ++ show e
+typ :: SMTQuery -> Maybe Function -> Expr -> Type
+typ q mf (EVar n)      = maybe (varType $ fromJust $ find ((==n) . name) $ smtVars q)
+                               (snd . fromJust . find ((==n) . fst) . funcArgs)
+                               mf
+typ q mf (EField e f)  = fromJust $ lookup f fs
+                         where TStruct n = typ q mf e
+                               Struct _ fs = fromJust $ find ((== n) . name) $ smtStructs q
+typ _ _  (EBool _)         = TBool
+typ _ _  (EInt w _)        = TUInt w
+typ _ _  (EStruct n _)     = TStruct n
+typ q mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
+                           | elem op [Plus, Minus, Mod] = typ q mf e1
+typ _ _  (EUnOp Not _)     = TBool 
+typ _ _  (ESlice _ h l)    = TUInt (h-l+1)
+typ q mf (ECond _ d)       = typ q mf d
+typ q _  (EApply f _)      = funcType $ fromJust $ find ((==f) . name) $ smtFuncs q
+typ _ _  e                 = error $ "SMTSolver.typ " ++ show e
 
 data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtVars    :: [Var]
@@ -108,7 +113,7 @@ allSolutions' solver q var =
          Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
          Just Nothing      -> []
          Just (Just model) -> case M.lookup var model of
-                                   Nothing  -> allValues q $ typ q $ EVar var
+                                   Nothing  -> allValues q $ typ q Nothing $ EVar var
                                    Just val -> let q' = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)}
                                                in val:(allSolutions' solver q' var)
                               

@@ -58,7 +58,7 @@ printQuery q@SMTQuery{..} =
         (vcat $ map smtpp smtFuncs)
         $+$
         (vcat $ mapIdx (\e i -> parens $ text "assert" 
-                                         <+> (parens $ char '!' <+> smtpp e <+> text ":named" <+> text assertName <> int i)) smtExprs)
+                                         <+> (parens $ char '!' <+> smtppExpr Nothing e <+> text ":named" <+> text assertName <> int i)) smtExprs)
 
 instance SMTPP Var where
     smtpp (Var n t) = parens $  pp "declare-const"
@@ -75,21 +75,21 @@ instance SMTPP Struct where
                                  <+> (parens $ parens $ pp n 
                                       <+> parens (pp ("mk-" ++ n) <+> (hsep $ map (\(f,t) -> parens $ pp (n ++ f) <+> smtpp t) fs)))
 
-instance SMTPP Expr where
-    smtpp (EVar n)           = pp n
-    smtpp (EField e f)       = parens $ text (s ++ f) <+> smtpp e
-                               where TStruct s = typ ?q e
-    smtpp (EBool True)       = pp "true"
-    smtpp (EBool False)      = pp "false"
-    smtpp (EInt w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
-    smtpp (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map smtpp fs))
-    smtpp (EBinOp Neq e1 e2) = smtpp $ EUnOp Not $ EBinOp Eq e1 e2
-    smtpp (EBinOp op e1 e2)  = parens $ smtpp op <+> smtpp e1 <+> smtpp e2
-    smtpp (EUnOp op e)       = parens $ smtpp op <+> smtpp e
-    smtpp (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtpp e
-    smtpp (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtpp c <+> smtpp v <+> e) (smtpp d) cs
-    smtpp (EApply f [])      = ppFName f
-    smtpp (EApply f as)      = parens $ ppFName f <+> (hsep $ map smtpp as)
+smtppExpr :: (?q::SMTQuery) => Maybe Function -> Expr -> Doc
+smtppExpr _  (EVar n)           = pp n
+smtppExpr mf (EField e f)       = parens $ text (s ++ f) <+> smtppExpr mf e
+                                  where TStruct s = typ ?q mf e
+smtppExpr _  (EBool True)       = pp "true"
+smtppExpr _  (EBool False)      = pp "false"
+smtppExpr _  (EInt w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
+smtppExpr mf (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map (smtppExpr mf) fs))
+smtppExpr mf (EBinOp Neq e1 e2) = smtppExpr mf $ EUnOp Not $ EBinOp Eq e1 e2
+smtppExpr mf (EBinOp op e1 e2)  = parens $ smtpp op <+> smtppExpr mf e1 <+> smtppExpr mf e2
+smtppExpr mf (EUnOp op e)       = parens $ smtpp op <+> smtppExpr mf e
+smtppExpr mf (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtppExpr mf e
+smtppExpr mf (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtppExpr mf c <+> smtppExpr mf v <+> e) (smtppExpr mf d) cs
+smtppExpr _  (EApply f [])      = ppFName f
+smtppExpr mf (EApply f as)      = parens $ ppFName f <+> (hsep $ map (smtppExpr mf) as)
 
 instance SMTPP BOp where
     smtpp Eq     = pp "="
@@ -112,10 +112,10 @@ instance SMTPP UOp where
     smtpp Not   = pp "not"
 
 instance SMTPP Function where
-    smtpp Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
-                                <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp t) funcArgs) 
-                                <+> smtpp funcType
-                                <+> smtpp funcDef
+    smtpp f@Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
+                                  <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp t) funcArgs) 
+                                  <+> smtpp funcType
+                                  <+> smtppExpr (Just f) funcDef
 
 ppFName :: String -> Doc
 ppFName f = pp $ "__fun_" ++ f

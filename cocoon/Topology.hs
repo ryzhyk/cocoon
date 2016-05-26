@@ -4,6 +4,7 @@
 
 module Topology ( Topology
                 , topologyLinks
+                , isPort
                 , InstanceDescr(..)
                 , PortInstDescr(..)
                 , InstanceMap(..)
@@ -71,6 +72,9 @@ phyPortNum t inst pname pnum = base + pnum
     where plinks = getInstPortMap t inst
           (_, (base, _), _) = fromJust $ find ((\(i,o) -> i == pname || o == pname) . sel1) plinks
 
+isPort :: Refine -> String -> Bool
+isPort r pname = isJust $ find (isJust . find (\(i,o) -> i == pname || o == pname) . nodePorts) $ refineNodes r
+
 nodeFromPort :: Refine -> PortInstDescr -> InstanceDescr
 nodeFromPort r (PortInstDescr pname keys) = InstanceDescr noderole $ init keys
     where noderole = name $ fromJust $ find (isJust . find (\(i,o) -> i == pname || o == pname) . nodePorts) $ refineNodes r
@@ -100,7 +104,8 @@ flipPort p = p{pdescPort = pname}
 validateTopology :: (?r::Refine, MonadError String me) => Topology -> me ()
 validateTopology t = do
     let links = topologyLinks t
-    mapM_ (\(s,d) -> assert (not $ null $ filter (\(s',d') -> s' == flipPort d && d' == flipPort s) links) nopos 
+    mapM_ (\(s,d) -> assert (not $ isPort ?r (pdescPort s) && isPort ?r (pdescPort d) &&
+                                   (null $ filter (\(s',d') -> s' == flipPort d && d' == flipPort s) links)) nopos 
                             $ "Link " ++ show s ++ "->" ++ show d ++ " does not have a reverse") links
     mapM_ (\(s,_) -> case filter (\(s',_) -> s' == s) links of
                           [_] -> return ()
@@ -139,9 +144,8 @@ mkNodePortLinks' kmap (i,o) = mapM (\e@(EInt _ _ pnum) -> liftM (fromInteger pnu
 -- Compute remote port role is connected to.  Role must be an output port of a switch.
 mkLink :: (?r::Refine, MonadError String me) => Role -> KMap -> me (Maybe PortInstDescr)
 mkLink role kmap = do
-    let ?kmap = kmap
-        ?c    = CtxRole role
-    case portSendsTo (roleBody role) of
+    let ?c    = CtxRole role
+    case portSendsTo kmap (roleBody role) of
          []                         -> return Nothing
          [ELocation _ n ks]         -> if all (\k -> (null $ exprFuncs ?r k) && (not $ exprRefersToPkt k)) ks
                                           then return $ Just $ PortInstDescr n ks
@@ -150,24 +154,31 @@ mkLink role kmap = do
 
 -- Evaluate output port body.  Assume that it can only consist of 
 -- conditions and send statements, i.e., it cannot modify or clone packets.
-portSendsTo :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Statement -> [Expr]
-portSendsTo = nub . portSendsTo'
+portSendsTo :: (?r::Refine, ?c::ECtx) => KMap -> Statement -> [Expr]
+portSendsTo kmap = nub . fst . portSendsTo' kmap
 
-portSendsTo' :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Statement -> [Expr]
-portSendsTo' (SSend _ e)     = [evalExpr e]
-portSendsTo' (SITE _ c t e)  = case evalExpr c of
-                                   EBool _ True  -> portSendsTo' t
-                                   EBool _ False -> case e of
-                                                         Nothing -> []
-                                                         Just e' -> portSendsTo' e'
-                                   _             -> (portSendsTo' t) ++ (maybe [] portSendsTo' e)
-portSendsTo' (SSeq  _ s1 s2) = case s1 of 
-                                    STest _ c   -> case evalExpr c of 
-                                                        EBool _ False -> []
-                                                        _             -> portSendsTo' s2
-                                    _           -> (portSendsTo' s1) ++ (portSendsTo' s2)
-portSendsTo' (STest _ _)     = []
-portSendsTo' s               = error $ "Topology.portSendsTo' " ++ show s
+portSendsTo' :: (?r::Refine, ?c::ECtx) => KMap -> Statement -> ([Expr], KMap)
+portSendsTo' kmap (SSend _ e)     = ([evalExpr kmap e], kmap)
+portSendsTo' kmap (SITE _ c t e)  = case evalExpr kmap c of
+                                         EBool _ True  -> let (s, _) = portSendsTo' kmap t
+                                                          in (s, kmap)
+                                         EBool _ False -> case e of
+                                                               Nothing -> ([], kmap)
+                                                               Just e' -> let (s, _) = portSendsTo' kmap e'
+                                                                          in (s, kmap)
+                                         _             -> let (s1, _) = portSendsTo' kmap t 
+                                                              (s2, _) = maybe ([], kmap) (portSendsTo' kmap) e
+                                                          in (s1 ++ s2, kmap)
+portSendsTo' kmap (SSeq  _ s1 s2) = case s1 of 
+                                         STest _ c   -> case evalExpr kmap c of 
+                                                             EBool _ False -> ([], kmap)
+                                                             _             -> portSendsTo' kmap s2
+                                         _           -> let (send1, kmap')  = portSendsTo' kmap s1
+                                                            (send2, kmap'') = portSendsTo' kmap' s2
+                                                        in (send1 ++ send2, kmap'')
+portSendsTo' kmap (STest _ _)     = ([], kmap)
+portSendsTo' kmap (SLet _ _ n v)  = ([], M.insert n (evalExpr kmap v) kmap)
+portSendsTo' _    s               = error $ "Topology.portSendsTo' " ++ show s
 
 -- Solve equation e for variable var; returns all satisfying assignments.
 solveFor :: (?r::Refine) => Role -> [Expr] -> String -> [Expr]

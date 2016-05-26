@@ -90,8 +90,10 @@ formatMAC i =
         b0 = bitSlice i 47 40
 
 renderLink :: (?t::Topology,?r::Refine) => NodeMap -> (PortInstDescr, PortInstDescr) -> Maybe JSValue
-renderLink nmap (srcport, dstport) = if (srcndname, srcpnum) < (dstndname,dstpnum)
-                                        then Just $ JSObject $ toJSObject attrs
+renderLink nmap (srcport, dstport) = if isPort ?r $ pdescPort dstport
+                                        then if (srcndname, srcpnum) < (dstndname,dstpnum)
+                                                then Just $ JSObject $ toJSObject attrs
+                                                else Nothing
                                         else Nothing
     where dstnode = nodeFromPort ?r dstport
           srcnode = nodeFromPort ?r srcport

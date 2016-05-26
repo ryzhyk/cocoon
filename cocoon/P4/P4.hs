@@ -237,7 +237,7 @@ mkStatement (SSeq  _ s1 s2) = do
 mkStatement (SPar  _ _ _)   = error "Not implemented: P4.mkStatement: SPar"
 
 mkStatement (SITE  _ c t e) = do
-    let c' = liftConds True $ evalExpr c
+    let c' = liftConds True $ evalExpr' c
     if exprNeedsTable c'
        then do t' <- mkStatement t
                e' <- maybe (return Nothing) (liftM Just . mkStatement) e
@@ -248,7 +248,7 @@ mkStatement (SITE  _ c t e) = do
        else iteFromCascade (Right t) (fmap Right e) c'
 
 mkStatement (STest _ e)     = do
-    let e' = liftConds True $ evalExpr $ EUnOp nopos Not e
+    let e' = liftConds True $ evalExpr' $ EUnOp nopos Not e
     if exprNeedsTable e'
        then do tableid <- incTableCnt
                let tablename = "test" ++ show tableid
@@ -258,13 +258,13 @@ mkStatement (STest _ e)     = do
 
 -- Make sure that assignment statements do not contain case-expressions in the RHS.
 mkStatement (SSet  _ lhs rhs) | exprIsValidFlag lhs = do
-    let lhs' = evalExpr lhs
-        rhs' = evalExpr rhs
+    let lhs' = evalExpr' lhs
+        rhs' = evalExpr' rhs
     setValid lhs' rhs'
 
 mkStatement (SSet  _ lhs rhs) = do
-    let lhs' = evalExpr lhs
-        rhs' = liftConds True $ evalExpr rhs
+    let lhs' = evalExpr' lhs
+        rhs' = liftConds True $ evalExpr' rhs
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
         assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
@@ -276,8 +276,8 @@ mkStatement (SSet  _ lhs rhs) = do
          ECond _ _ _ -> mkStatement $ assignToCascade lhs' rhs'
          _           -> if isStruct ?r ?c lhs'
                            then do let TUser _ sname = typ'' ?r ?c lhs'
-                                       lscalars = map evalExpr $ exprScalars ?r ?c lhs
-                                       rscalars = map evalExpr $ exprScalars ?r ?c rhs
+                                       lscalars = map evalExpr' $ exprScalars ?r ?c lhs
+                                       rscalars = map evalExpr' $ exprScalars ?r ?c rhs
                                        tscalars = map (exprSubst lhs (EVar nopos $ tmpVarName sname)) lscalars
                                        atoms = filter (\(l,_,_) -> not $ exprIsValidFlag l) $ zip3 lscalars rscalars tscalars
                                    -- For all fields that are not valid flags
@@ -297,7 +297,7 @@ mkStatement (SSet  _ lhs rhs) = do
 
 
 mkStatement (SSend _ dst) = do
-    let dst' = liftConds True $ evalExpr dst
+    let dst' = liftConds True $ evalExpr' dst
     let sendToCascade (ECond _ [] d)         = sendToCascade d
         sendToCascade (ECond _ ((c,v):cs) d) = SITE nopos c (sendToCascade v) (Just $ sendToCascade (ECond nopos cs d))
         sendToCascade v                      = SSend nopos v
@@ -305,7 +305,7 @@ mkStatement (SSend _ dst) = do
          ECond _ _ _ -> mkStatement $ sendToCascade dst'
          _           -> do let ELocation _ n ks = dst'
                            let (base, _) = ?pmap M.! n
-                               portnum = evalExpr $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
+                               portnum = evalExpr' $ EBinOp nopos Plus (EInt nopos 32 $ fromIntegral base) (last ks) 
                            tableid <- incTableCnt
                            let tablename = "send" ++ show tableid
                            mkAssignTable tablename egressSpec portnum
@@ -370,7 +370,7 @@ setValid l r = do
                              return $ P4SITE (printExpr $ EUnOp nopos Not l) add Nothing
          EBool _ False -> do rm <- mkRmHeader (render $ printExpr h)
                              return $ P4SITE (printExpr l) rm Nothing
-         _             -> error $ "setValid " ++ show l ++ " " ++ show r
+         _             -> error $ "P4.setValid " ++ show l ++ " " ++ show r
 
 
 iteFromCascade :: (?r::Refine, ?role::Role, ?c::ECtx, ?kmap::KMap, ?pmap::PMap) => Either P4Statement Statement -> Maybe (Either P4Statement Statement) -> Expr -> State P4State P4Statement
@@ -397,7 +397,7 @@ iteFromCascade t e v                              = do t' <- case t of
 -- that their leaf expressions do not contain any EConds
 liftConds :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Bool -> Expr -> Expr
 liftConds todisj e = let ?todisj = (not $ exprNeedsTable e) && todisj
-                     in evalExpr $ liftConds' e
+                     in evalExpr' $ liftConds' e
 
 -- If e is a boolean expression, the cascade can be much more compactly
 -- represented as a boolean expression.  However, this transformation 
@@ -519,7 +519,7 @@ populateTable r P4DynAction{..} =
                concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
                $ flattenConds 
                $ liftConds False
-               $ evalExpr p4dynExpr
+               $ evalExpr' p4dynExpr
 
 -- Flatten cascading cases into a sequence of (condition, value) pairs
 -- in the order of decreasing priority.
@@ -566,10 +566,9 @@ exprToTable :: (?r::Refine, ?c::ECtx) => Expr -> [([Expr], Expr)]
 exprToTable e | null (exprDeps e) = [([], e)]
               | otherwise = let a = head $ exprDeps e
                                 vals = typeEnumerate ?r $ typ ?r ?c a in 
-                            let ?kmap = M.empty in
                             concatMap (\v -> let vdnf = exprToDNF (EBinOp nopos Eq a v) in
                                              concatMap (\(es, eval) -> map ((, eval) . (++es)) vdnf) 
-                                                       $ exprToTable $ evalExpr $ exprSubst a v e) vals
+                                                       $ exprToTable $ evalExpr M.empty $ exprSubst a v e) vals
 
 disjunctToMask :: (?r::Refine, ?c::ECtx) => [Expr] -> Doc
 disjunctToMask atoms = mkMatch $ map atomToMatch atoms

@@ -207,9 +207,9 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                                     $$
                                     var (pp pktVar) (pp packetTypeName) 
                                     $$
-                                    pp pktVar .:= pp "_pkt"
-                                    $$
                                     (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleLocals rl)
+                                    $$
+                                    pp pktVar .:= pp "_pkt"
                                     $$
                                     mkStatement r rl roleBody)
                            $$
@@ -421,7 +421,7 @@ checkBounds r c e = if null es then empty else (assrt $ checkBVBounds r es)
           arithSubExpr (ECond _ cs d)      = arithSubExpr d ++ (concatMap (\(x,v) -> arithSubExpr x ++ arithSubExpr v) cs)
 
 checkBVBounds :: Refine -> [(Doc, Type)] -> Doc
-checkBVBounds r xs = if null cs then pp "true" else (hsep $ punctuate (pp "&&") cs)
+checkBVBounds r xs = if null cs then pp "true" else (hsep $ intersperse (pp "&&") cs)
     where cs = concatMap (\(v, x) -> case typ' r undefined x of
                                           TUInt _ w   -> [apply ("checkBounds" ++ show w) [v]]
                                           TStruct _ _ -> let TUser _ sname = typ'' r undefined x in

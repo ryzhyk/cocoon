@@ -1,7 +1,8 @@
 {-# LANGUAGE ImplicitParams #-}
 
 module Eval ( KMap
-            , evalExpr) where
+            , evalExpr
+            , evalExpr') where
 
 import qualified Data.Map as M
 import Data.Maybe
@@ -22,28 +23,31 @@ type KMap = M.Map String Expr
 -- Expand function definitions, substitute variable values defined in KMap
 -- When all functions are defined and all variables are mapped into values, the result should be an expression without
 -- function calls and with only pkt variables.
-evalExpr  :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> Expr
-evalExpr e@(EVar _ k)                  = case M.lookup k ?kmap of
+evalExpr  :: (?r::Refine, ?c::ECtx) => KMap -> Expr -> Expr
+evalExpr kmap e = let ?kmap = kmap in evalExpr' e
+
+evalExpr'  :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> Expr
+evalExpr' e@(EVar _ k)                  = case M.lookup k ?kmap of
                                               Nothing -> e
                                               Just e' -> e'
-evalExpr (EApply p f as)               = 
+evalExpr' (EApply p f as)               = 
     case funcDef func of
          Nothing -> EApply p f as'
          Just e  -> let ?kmap = foldl' (\m (a,v) -> M.insert (name a) v m) M.empty $ zip (funcArgs func) as'
-                    in evalExpr e
-    where as' = map evalExpr as                                     
+                    in evalExpr' e
+    where as' = map evalExpr' as                                     
           func = getFunc ?r f
-evalExpr (EField _ s f)        = 
-    case evalExpr s of
+evalExpr' (EField _ s f)        = 
+    case evalExpr' s of
          s'@(EStruct _ _ fs) -> let (TStruct _ sfs) = typ' ?r ?c s'
                                     fidx = fromJust $ findIndex ((== f) . name) sfs
                                 in fs !! fidx
          s'                  -> EField nopos s' f
-evalExpr (ELocation _ r ks)            = ELocation nopos r $ map evalExpr ks
-evalExpr (EStruct _ s fs)              = EStruct nopos s $ map evalExpr fs
-evalExpr e@(EBinOp _ op lhs rhs)       = 
-    let lhs' = evalExpr lhs
-        rhs' = evalExpr rhs
+evalExpr' (ELocation _ r ks)            = ELocation nopos r $ map evalExpr' ks
+evalExpr' (EStruct _ s fs)              = EStruct nopos s $ map evalExpr' fs
+evalExpr' e@(EBinOp _ op lhs rhs)       = 
+    let lhs' = evalExpr' lhs
+        rhs' = evalExpr' rhs
         TUInt _ w1 = typ' ?r ?c lhs'
         TUInt _ w2 = typ' ?r ?c rhs'
         w = max w1 w2
@@ -53,31 +57,31 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                Neq -> EBool nopos (v1 /= v2)
                                                And -> EBool nopos (v1 && v2)
                                                Or  -> EBool nopos (v1 || v2)
-                                               _   -> error $ "Eval.evalExpr " ++ show e
+                                               _   -> error $ "Eval.evalExpr' " ++ show e
             (EBool _ True, _)          -> case op of
                                                Eq  -> rhs'
                                                Neq -> EUnOp nopos Not rhs'
                                                And -> rhs'
                                                Or  -> lhs'
-                                               _   -> error $ "Eval.evalExpr " ++ show e
+                                               _   -> error $ "Eval.evalExpr' " ++ show e
             (EBool _ False, _)         -> case op of
                                                Eq  -> EUnOp nopos Not rhs'
                                                Neq -> rhs'
                                                And -> lhs'
                                                Or  -> rhs'
-                                               _   -> error $ "Eval.evalExpr " ++ show e
+                                               _   -> error $ "Eval.evalExpr' " ++ show e
             (_, EBool _ True)          -> case op of
                                                Eq  -> lhs'
                                                Neq -> EUnOp nopos Not lhs'
                                                And -> lhs'
                                                Or  -> rhs'
-                                               _   -> error $ "Eval.evalExpr " ++ show e
+                                               _   -> error $ "Eval.evalExpr' " ++ show e
             (_, EBool _ False)          -> case op of
                                                Eq  -> EUnOp nopos Not lhs'
                                                Neq -> lhs'
                                                And -> rhs'
                                                Or  -> lhs'
-                                               _   -> error $ "Eval.evalExpr " ++ show e
+                                               _   -> error $ "Eval.evalExpr' " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
                                                Eq     -> EBool nopos (v1 == v2)
                                                Neq    -> EBool nopos (v1 /= v2)
@@ -91,30 +95,30 @@ evalExpr e@(EBinOp _ op lhs rhs)       =
                                                ShiftL -> EInt  nopos w ((v1 `shiftL` fromInteger(v2)) `mod` (1 `shiftL` w))
                                                Concat -> EInt  nopos (w1+w2) ((v1 `shiftL` w2) + v2)
                                                Mod    -> EInt  nopos w1 (v1 `mod` v2)
-                                               _      -> error $ "Eval.evalExpr " ++ show e
+                                               _      -> error $ "Eval.evalExpr' " ++ show e
             (EStruct _ _ fs1, EStruct _ _ fs2) -> case op of 
-                                                       Eq  -> evalExpr $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
-                                                       Neq -> evalExpr $ disj $ map (\(f1,f2) -> EBinOp nopos Neq f1 f2) $ zip fs1 fs2
-                                                       _   -> error $ "Eval.evalExpr " ++ show e
+                                                       Eq  -> evalExpr' $ conj $ map (\(f1,f2) -> EBinOp nopos Eq f1 f2) $ zip fs1 fs2
+                                                       Neq -> evalExpr' $ disj $ map (\(f1,f2) -> EBinOp nopos Neq f1 f2) $ zip fs1 fs2
+                                                       _   -> error $ "Eval.evalExpr' " ++ show e
             _                          -> EBinOp nopos op lhs' rhs'
-evalExpr (EUnOp _ op e)                = 
-    let e' = evalExpr e
+evalExpr' (EUnOp _ op e)                = 
+    let e' = evalExpr' e
     in case e' of
            (EBool _ v) -> case op of
                                Not -> EBool nopos (not v)
            _           -> EUnOp nopos op e'
 
-evalExpr (ESlice _ e h l)              = case evalExpr e of
+evalExpr' (ESlice _ e h l)              = case evalExpr' e of
                                               EInt _ _ v -> EInt nopos (h-l+1) $ bitSlice v h l
                                               e'         -> ESlice nopos e' h l
-evalExpr (ECond _ cs d)                = 
-    let cs1 = map (\(e1,e2) -> (evalExpr e1, evalExpr e2)) cs
+evalExpr' (ECond _ cs d)                = 
+    let cs1 = map (\(e1,e2) -> (evalExpr' e1, evalExpr' e2)) cs
         cs2 = filter ((/= EBool nopos False) . fst) cs1
-        d'  = evalExpr d
+        d'  = evalExpr' d
     in case break ((== EBool nopos True) . fst) cs2 of 
             ([],[])       -> d'
             (cs3,[])      -> ECond nopos cs3 d'
             ([],(_,e):_)  -> e
             (cs3,(_,e):_) -> ECond nopos cs3 e
-evalExpr e                             = e
+evalExpr' e                             = e
 

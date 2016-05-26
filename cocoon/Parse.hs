@@ -28,6 +28,7 @@ reservedNames = ["and",
                  "host",
                  "havoc",
                  "if",
+                 "let",
                  "not",
                  "or",
                  "pkt",
@@ -273,6 +274,7 @@ simpleStat = withPos $
           <|> sset
           <|> shavoc
           <|> sassume
+          <|> slet
 
 stest   = STest   nopos <$ reserved "filter" <*> expr
 ssendnd = SSendND nopos <$ reservedOp "?" <* reserved "send" <*> identifier <*> (brackets expr)
@@ -281,6 +283,7 @@ sset    = SSet    nopos <$> expr <*> (reservedOp ":=" *> expr)
 site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (optionMaybe $ reserved "else" *> stat)
 shavoc  = SHavoc  nopos <$ reserved "havoc" <*> expr
 sassume = SAssume nopos <$ reserved "assume" <*> expr
+slet    = SLet    nopos <$ reserved "let" <*> typeSpec <*> identifier <*> (reservedOp "=" *> expr)
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]
