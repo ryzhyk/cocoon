@@ -1,11 +1,6 @@
 (* Secure home network *)
 
-typedef struct {
-    uint<8> ip3,
-    uint<8> ip2,
-    uint<8> ip1,
-    uint<8> ip0
-} IP4
+typedef uint<32> IP4
 
 typedef struct {
     uint<48> dstAddr,
@@ -21,6 +16,8 @@ typedef struct {
     uint<32> tpa
 } arp_t
 
+function noarp(): arp_t = arp_t{false, 16'd0, 48'd0, 32'd0, 48'd0, 32'd0}
+
 typedef struct {
     bool valid,
     uint<8> protocol,
@@ -32,13 +29,15 @@ typedef struct {
     bool     valid,
     uint<24> vni,
     eth_t    eth,
+    arp_t    arp,
     ip4_t    ip4
 } vxlan_t
 
-function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, ip4_t{false, 8'd0, IP4{8'd0, 8'd0, 8'd0, 8'd0}, IP4{8'd0, 8'd0, 8'd0, 8'd0}}}
+function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, noarp(), ip4_t{false, 8'd0, 32'h0, 32'h0}}
 
 typedef struct {
     eth_t    eth,
+    arp_t    arp,
     ip4_t    ip4,
     vxlan_t  vxlan
 } Packet
@@ -58,27 +57,60 @@ typedef struct {
  *)
 
 (* Virtual network topology *)
-function iVNet(VNetId id): bool
+(*function iVNet(VNetId id): bool*)
+function iL2VNet(VNetId id): bool
+function iL3VNet(VNetId id): bool
+function iVNet(VNetId id): bool = iL3VNet(id) or iL2VNet(id)
+assume (VNetId id) not (iL3VNet(id) and iL2VNet(id))
+
 function iVHost(VHostId id): bool
 function iVHostPort(VHPortId port): bool
 assume (VHPortId port) iVHostPort(port) => iVHost(port.vhost)
 
 function vHPortVNet(VHPortId port): VNetId
+assume (VHPortId port) iVHostPort(port) => iVNet(vHPortVNet(port))
 
 function vHPort2Mac(VHPortId port): uint<48>
 function mac2VHPort(VNetId vnet, uint<48> mac): VHPortId
 assume (VHPortId port, uint<48> mac, VNetId vnet) (* bijection *)
        iVHostPort(port) => 
            ((vHPortVNet(port) == vnet and vHPort2Mac(port) == mac) == (mac2VHPort(vnet, mac) == port))
+function bCastMAC(): uint<48> = 48'hffffffffffff
+assume (VHPortId vport) bCastMAC() != vHPort2Mac(vport)
+
+function ip2mac(IP4 ip): uint<48>
 
 role VHostIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = filter false
 
+function arpResponse(Packet p): Packet = 
+    Packet{ eth_t { p.arp.tha
+                  , p.arp.sha
+                  }
+          , arp_t { true
+                  , 16'd2 (* ARP response *)
+                  , ip2mac(p.arp.tpa)
+                  , p.arp.tpa
+                  , p.arp.sha
+                  , p.arp.spa
+                  }
+          , p.ip4
+          , p.vxlan
+          }
+
 role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
-    (* Deliver to destination MAC within virtual network *)
-    let VHPortId vhport = mac2VHPort(vHPortVNet(VHPortId{vhost, port}), pkt.eth.dstAddr);
-    if iVHostPort(vhport) then {
-       pkt.vxlan := novxlan();
-       send VHostIn[vhport.vhost, vhport.vport]
+    let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
+    if bCastMAC() == pkt.eth.dstAddr then {
+        if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+            pkt := arpResponse(pkt);
+            send VHostIn[vhost, port]
+        }
+    } else {
+        (* Deliver to destination MAC within virtual network *)
+        let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+        if iVHostPort(dstvhport) then {
+           havoc pkt.vxlan;
+           send VHostIn[dstvhport.vhost, dstvhport.vport]
+        }
     }
 
 refine VHostOut {
@@ -106,30 +138,39 @@ refine VHostOut {
 
     function vxlanEncapsulate(Packet p, VNetId vnet, IP4 src, IP4 dst): Packet =
         Packet{ eth_t{48'd0, 48'd0}
+              , noarp()
               , ip4_t{true, 8'd17(*UDP*), src, dst}
-              , vxlan_t{true, vnet, p.eth, p.ip4}}
+              , vxlan_t{true, vnet, p.eth, p.arp, p.ip4}}
 
     function vxlanDecapsulate(Packet p): Packet =
         Packet{ p.vxlan.eth
+              , p.vxlan.arp
               , p.vxlan.ip4
               , novxlan()}
 
     role VSwitchIn[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
         (* Destination exists? *)
         let VNetId vnet = vSwPortVNet(hst, vport);
-        let VHPortId vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
-        if iVHostPort(vhport) then {
-            if (vHostLocation(vhport.vhost) == hst) then { 
-                (* Local destination -- deliver *)
-                pkt.vxlan := novxlan();
-                send VSwitchOut[hst, vH2SwLink(vhport)]
-            } else {
-                (* Remote destination -- encapsulate *)
-                pkt := vxlanEncapsulate( pkt
-                                       , vnet
-                                       , hst
-                                       , vHostLocation(vhport.vhost));
-                send HostOut[hst, 8'd0]
+        if bCastMAC() == pkt.eth.dstAddr then {
+            if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+                pkt := arpResponse(pkt);
+                send VSwitchOut[hst, vport]
+            }
+        } else {
+            let VHPortId vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+            if iVHostPort(vhport) then {
+                if (vHostLocation(vhport.vhost) == hst) then { 
+                    (* Local destination -- deliver *)
+                    pkt.vxlan := novxlan();
+                    send VSwitchOut[hst, vH2SwLink(vhport)]
+                } else {
+                    (* Remote destination -- encapsulate *)
+                    pkt := vxlanEncapsulate( pkt
+                                           , vnet
+                                           , hst
+                                           , vHostLocation(vhport.vhost));
+                    send HostOut[hst, 8'd0]
+                }
             }
         }
         
@@ -154,8 +195,8 @@ refine VHostOut {
 }
 
 refine {
-    function iVNet(VNetId id): bool = 
-        id == 24'd0 or id == 24'd1
+    function iL2VNet(VNetId id): bool = id == 24'd0
+    function iL3VNet(VNetId id): bool = id == 24'd1
     function iVHost(VHostId id): bool = 
         id == 32'd0 or id == 32'd1 or id == 32'd2 or id == 32'd3 or id == 32'd4 or id == 32'd5
     function iVHostPort(VHPortId port): bool = 
@@ -187,16 +228,16 @@ refine {
         }
 
     function iHost(IP4 addr): bool = 
-        addr == IP4{8'd10, 8'd0, 8'd0, 8'd1} or addr == IP4{8'd10, 8'd0, 8'd0, 8'd2}
+        addr == 32'h10000001 or addr == 32'h10000002
 
     function iVSwitchPort(IP4 hst, uint<16> swport): bool = 
-        (hst == IP4{8'd10, 8'd0, 8'd0, 8'd1} and (swport == 16'd0 or swport == 16'd1 or swport == 16'd2)) or
-        (hst == IP4{8'd10, 8'd0, 8'd0, 8'd2} and (swport == 16'd0 or swport == 16'd1 or swport == 16'd2))
+        (hst == 32'h10000001 and (swport == 16'd0 or swport == 16'd1 or swport == 16'd2)) or
+        (hst == 32'h10000002 and (swport == 16'd0 or swport == 16'd1 or swport == 16'd2))
 
     function vHostLocation(VHostId vhost): IP4 = 
         case {
-            vhost == 32'd0 or vhost == 32'd2 or vhost == 32'd4: IP4{8'd10, 8'd0, 8'd0, 8'd1};
-            default: IP4{8'd10, 8'd0, 8'd0, 8'd2};
+            vhost == 32'd0 or vhost == 32'd2 or vhost == 32'd4: 32'h10000001;
+            default: 32'h10000002;
         }
     function vH2SwLink(VHPortId hport): uint<16> = 
         case {
@@ -210,12 +251,12 @@ refine {
         }
     function vSw2HLink(IP4 addr, uint<16> swport): VHPortId = 
         case {
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd1} and swport == 16'd0: VHPortId{32'd0, 8'd0};
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd1} and swport == 16'd1: VHPortId{32'd2, 8'd0};
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd1} and swport == 16'd2: VHPortId{32'd4, 8'd0};
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd2} and swport == 16'd0: VHPortId{32'd1, 8'd0};
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd2} and swport == 16'd1: VHPortId{32'd3, 8'd0};
-            addr == IP4{8'd10, 8'd0, 8'd0, 8'd2} and swport == 16'd2: VHPortId{32'd5, 8'd0};
+            addr == 32'h10000001 and swport == 16'd0: VHPortId{32'd0, 8'd0};
+            addr == 32'h10000001 and swport == 16'd1: VHPortId{32'd2, 8'd0};
+            addr == 32'h10000001 and swport == 16'd2: VHPortId{32'd4, 8'd0};
+            addr == 32'h10000002 and swport == 16'd0: VHPortId{32'd1, 8'd0};
+            addr == 32'h10000002 and swport == 16'd1: VHPortId{32'd3, 8'd0};
+            addr == 32'h10000002 and swport == 16'd2: VHPortId{32'd5, 8'd0};
             default: VHPortId{32'd0, 8'd0};
         }
 
