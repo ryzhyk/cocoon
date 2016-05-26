@@ -177,13 +177,13 @@ refine {
         }
     function mac2VHPort(VNetId vnet, uint<48> mac): VHPortId = 
         case {
-            mac == 48'h020000000001: VHPortId{32'd0, 8'd0};
-            mac == 48'h020000000002: VHPortId{32'd1, 8'd0};
-            mac == 48'h020000000003: VHPortId{32'd2, 8'd0};
-            mac == 48'h020000000004: VHPortId{32'd3, 8'd0};
-            mac == 48'h020000000005: VHPortId{32'd4, 8'd0};
-            mac == 48'h020000000006: VHPortId{32'd5, 8'd0};
-            default: VHPortId{32'd0, 8'd0};
+            vnet == 24'd0 and mac == 48'h020000000001: VHPortId{32'd0, 8'd0};
+            vnet == 24'd0 and mac == 48'h020000000002: VHPortId{32'd1, 8'd0};
+            vnet == 24'd0 and mac == 48'h020000000003: VHPortId{32'd2, 8'd0};
+            vnet == 24'd1 and mac == 48'h020000000004: VHPortId{32'd3, 8'd0};
+            vnet == 24'd1 and mac == 48'h020000000005: VHPortId{32'd4, 8'd0};
+            vnet == 24'd1 and mac == 48'h020000000006: VHPortId{32'd5, 8'd0};
+            default: VHPortId{32'hffffffff, 8'hff};
         }
 
     function iHost(IP4 addr): bool = 
