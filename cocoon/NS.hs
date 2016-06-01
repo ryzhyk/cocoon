@@ -3,6 +3,7 @@
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
+          lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
           packetTypeName) where
@@ -54,10 +55,10 @@ getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
 lookupVar :: ECtx -> String -> Maybe Field
-lookupVar (CtxRole rl@Role{..})  n = find ((==n) . name) $ roleKeys ++ roleLocals rl
 lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
-lookupVar (CtxSend Role{..} _)   n = find ((==n) . name) roleKeys
+lookupVar ctx                    n = find ((==n) . name) $ roleKeys rl ++ roleLocals rl ++ ctxForkVars ctx
+    where rl = ctxRole ctx
 
 checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
 checkVar p c n = case lookupVar c n of
@@ -66,6 +67,17 @@ checkVar p c n = case lookupVar c n of
 
 getVar :: ECtx -> String -> Field
 getVar c n = fromJust $ lookupVar c n
+
+lookupKey :: Role -> String -> Maybe Field
+lookupKey rl n = find ((==n) . name) $ roleKeys rl
+
+checkKey :: (MonadError String me) => Pos -> Role -> String -> me Field
+checkKey p rl n = case lookupKey rl n of
+                       Nothing -> err p $ "Unknown key: " ++ n
+                       Just k  -> return k
+
+getKey :: Role -> String -> Field
+getKey rl n = fromJust $ lookupKey rl n
 
 lookupNode :: Refine -> String -> Maybe Node
 lookupNode Refine{..} n = find ((==n) . name) refineNodes

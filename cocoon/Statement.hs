@@ -20,6 +20,7 @@ statFold f acc s =
         SHavoc  _ _     -> acc'
         SAssume _ _     -> acc'
         SLet    _ _ _ _ -> acc'
+        SFork   _ _ _ b -> f acc' b
    where acc' = f acc s
 
 statFuncsRec :: Refine -> Statement -> [String]
@@ -32,6 +33,7 @@ statFuncsRec r s = nub $ statFold f [] s
           f fs (SHavoc _ e)    = fs ++ exprFuncsRec r e
           f fs (SAssume _ c)   = fs ++ exprFuncsRec r c
           f fs (SLet _ _ _ v)  = fs ++ exprFuncsRec r v
+          f fs (SFork _ _ c _) = fs ++ exprFuncsRec r c
           f fs _               = fs
 
 statIsDeterministic :: Statement -> Bool
@@ -45,3 +47,4 @@ statIsDeterministic (SSendND _ _ _)   = False
 statIsDeterministic (SHavoc  _ _)     = False
 statIsDeterministic (SAssume _ _)     = False
 statIsDeterministic (SLet    _ _ _ _) = True
+statIsDeterministic (SFork   _ _ _ _) = True

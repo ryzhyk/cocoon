@@ -211,7 +211,7 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                                     $$
                                     pp pktVar .:= pp "_pkt"
                                     $$
-                                    mkStatement r rl roleBody)
+                                    mkStatement r (CtxRole rl) roleBody)
                            $$
                            rbrace
     where args = map mkField $ roleKeys ++ [Field nopos "_pkt" $ TUser nopos packetTypeName]
@@ -298,7 +298,7 @@ mkPktField e =
     -- Parent or e in mset -- outp.field
     if isInMSet e
        then field (apply ("pkt#" ++ outputTypeName) [pp outputVar]) e
-       else if not (overlapsMSet e ?mset)
+       else if not (overlapsMSet ?c e ?mset)
                then -- None of the children overlaps with mset -- generate as is
                     field (pp ?p) e
                else -- otherwise -- constructor with recursive calls for fields
@@ -331,70 +331,70 @@ mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "th
 --bvbopname Minus = "SUB"
 --bvbopname op    = error $ "Not implemented: Boogie.bvbopname " ++ show op
 
-mkStatement :: (?rmap::RMap, ?maxdepth::Int) => Refine -> Role -> Statement -> Doc
-mkStatement r rl (SSeq _ s1 s2) = mkStatement r rl s1 $$ mkStatement r rl s2
-mkStatement _ _  (SPar _ _ _)   = error "Not implemented: Boogie.mkStatement SPar" {- run in sequence, copying packet -}
-mkStatement r rl (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r (CtxRole rl) c) <+> lbrace)
+mkStatement :: (?rmap::RMap, ?maxdepth::Int) => Refine -> ECtx -> Statement -> Doc
+mkStatement r ctx (SSeq _ s1 s2) = mkStatement r ctx s1 $$ mkStatement r ctx s2
+mkStatement _ _   (SPar _ _ _)   = error "Not implemented: Boogie.mkStatement SPar" {- run in sequence, copying packet -}
+mkStatement r ctx (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r ctx c) <+> lbrace)
                                   $$
-                                  (nest' $ mkStatement r rl t)
+                                  (nest' $ mkStatement r ctx t)
                                   $$
                                   (maybe rbrace
                                          (\s -> (rbrace <+> pp "else" <+> lbrace) 
                                                 $$
-                                                (nest' $ mkStatement r rl s)
+                                                (nest' $ mkStatement r ctx s)
                                                 $$
                                                 rbrace)
                                          e)
-mkStatement r rl (STest _ c)    = pp "if" <> (parens $ mkExpr r (CtxRole rl) (EUnOp nopos Not c)) <+> (braces $ pp "return" <> semi)
-mkStatement r rl (SSet _ l rhs) = checkBounds r (CtxRole rl) rhs
-                                  $$
-                                  mkAssign r rl l [] rhs
-mkStatement r rl (SSend _ dst)  = let ELocation _ rname ks = dst in
-                                  checkBounds r (CtxRole rl) dst
-                                  $$
-                                  checkDepth
-                                  $$
-                                  case M.lookup rname ?rmap of
-                                       Nothing -> pp outputVar .:= (pp outputTypeName <> 
-                                                                   (parens $ pp pktVar <> comma <+>
-                                                                             (apply rname $ map (mkExpr r (CtxRole rl)) ks)))
-                                       Just _  -> call (mkRoleName rname) $ map (mkExpr r (CtxRole rl)) $ ks ++ [EPacket nopos]
-mkStatement r rl (SSendND _ n c) = let rl' = getRole r n in
-                                   checkBounds r (CtxSend rl rl') c
+mkStatement r ctx (STest _ c)    = pp "if" <> (parens $ mkExpr r ctx (EUnOp nopos Not c)) <+> (braces $ pp "return" <> semi)
+mkStatement r ctx (SSet _ l rhs) = checkBounds r ctx rhs
+                                   $$
+                                   mkAssign r ctx l [] rhs
+mkStatement r ctx (SSend _ dst)  = let ELocation _ rname ks = dst in
+                                   checkBounds r ctx dst
                                    $$
                                    checkDepth
                                    $$
-                                   case M.lookup n ?rmap of
-                                        Nothing -> (havoc $ pp outputVar)
-                                                   $$
-                                                   assume notDropped
-                                                   $$
-                                                   (assume $ apply ("is#" ++ n) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
-                                                   $$
-                                                   (assume $ checkBVBounds r (map (\k -> (mkExpr r (CtxSend rl rl') (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
-                                                   $$
-                                                   (assume $ mkExpr r (CtxSend rl rl') c)
-                                        Just _  -> (havoc $ pp locationVar)
-                                                   $$
-                                                   (assume $ apply ("is#" ++ n) [pp locationVar])
-                                                   $$
-                                                   (let ?p = pktVar
-                                                        ?mset = []
-                                                        ?locals = M.empty
-                                                        ?r = r
-                                                        ?c = CtxSend rl rl'
-                                                        ?loc = pp locationVar in
-                                                    (assume $ checkBVBounds r (map (\k -> (mkExpr' (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
+                                   case M.lookup rname ?rmap of
+                                        Nothing -> pp outputVar .:= (pp outputTypeName <> 
+                                                                    (parens $ pp pktVar <> comma <+>
+                                                                              (apply rname $ map (mkExpr r ctx) ks)))
+                                        Just _  -> call (mkRoleName rname) $ map (mkExpr r ctx) $ ks ++ [EPacket nopos]
+mkStatement r ctx (SSendND _ n c) = let rl' = getRole r n in
+                                    checkBounds r (CtxSend ctx rl') c
+                                    $$
+                                    checkDepth
+                                    $$
+                                    case M.lookup n ?rmap of
+                                         Nothing -> (havoc $ pp outputVar)
                                                     $$
-                                                    (assume $ mkExpr' c))
-                                                   $$
-                                                   (call (mkRoleName n) 
-                                                         $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
-mkStatement r rl (SHavoc _ e)    = havoc' r (mkExpr r (CtxRole rl) e, typ r (CtxRole rl) e)
-mkStatement r rl (SAssume _ e)   = assume $ mkExpr r (CtxRole rl) e
-mkStatement r rl (SLet _ _ n v)  = checkBounds r (CtxRole rl) v
-                                   $$
-                                   mkAssign r rl (EVar nopos n) [] v
+                                                    assume notDropped
+                                                    $$
+                                                    (assume $ apply ("is#" ++ n) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
+                                                    $$
+                                                    (assume $ checkBVBounds r (map (\k -> (mkExpr r (CtxSend ctx rl') (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
+                                                    $$
+                                                    (assume $ mkExpr r (CtxSend ctx rl') c)
+                                         Just _  -> (havoc $ pp locationVar)
+                                                    $$
+                                                    (assume $ apply ("is#" ++ n) [pp locationVar])
+                                                    $$
+                                                    (let ?p = pktVar
+                                                         ?mset = []
+                                                         ?locals = M.empty
+                                                         ?r = r
+                                                         ?c = CtxSend ctx rl'
+                                                         ?loc = pp locationVar in
+                                                     (assume $ checkBVBounds r (map (\k -> (mkExpr' (EDotVar nopos $ name k), fieldType k)) $ roleKeys rl'))
+                                                     $$
+                                                     (assume $ mkExpr' c))
+                                                    $$
+                                                    (call (mkRoleName n) 
+                                                          $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
+mkStatement r ctx (SHavoc _ e)    = havoc' r (mkExpr r ctx e, typ r ctx e)
+mkStatement r ctx (SAssume _ e)   = assume $ mkExpr r ctx e
+mkStatement r ctx (SLet _ _ n v)  = checkBounds r ctx v
+                                    $$
+                                    mkAssign r ctx (EVar nopos n) [] v
 
 checkDepth :: (?maxdepth::Int) => Doc
 checkDepth = (pp depthVar .:= (pp depthVar .+ pp "1"))
@@ -429,40 +429,39 @@ checkBVBounds r xs = if null cs then pp "true" else (hsep $ intersperse (pp "&&"
                                           _           -> []) xs
 
 
-mkAssign :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
-mkAssign rf rl (EField _ e f) fs r = mkAssign rf rl e (f:fs) r
-mkAssign rf rl l fs r              = mkExpr rf (CtxRole rl) l .:= mkAssignRHS rf rl l fs r
+mkAssign :: Refine -> ECtx -> Expr -> [String] -> Expr -> Doc
+mkAssign rf ctx (EField _ e f) fs r = mkAssign rf ctx e (f:fs) r
+mkAssign rf ctx l fs r              = mkExpr rf ctx l .:= mkAssignRHS rf ctx l fs r
 
-mkAssignRHS :: Refine -> Role -> Expr -> [String] -> Expr -> Doc
-mkAssignRHS rf rl _ []     r                = mkExpr rf (CtxRole rl) r
-mkAssignRHS rf rl l (f:fs) r                = apply n $ map (\fn -> if' (fn == f) (mkAssignRHS rf rl l' fs r) (mkExpr rf (CtxRole rl) $ EField nopos l fn)) fns
+mkAssignRHS :: Refine -> ECtx -> Expr -> [String] -> Expr -> Doc
+mkAssignRHS rf ctx _ []     r                = mkExpr rf ctx r
+mkAssignRHS rf ctx l (f:fs) r                = apply n $ map (\fn -> if' (fn == f) (mkAssignRHS rf ctx l' fs r) (mkExpr rf ctx $ EField nopos l fn)) fns
     where l' = EField nopos l f
-          fns = map name $ typeFields $ typ' rf (CtxRole rl) l
-          n = typeName $ typ'' rf (CtxRole rl) l
+          fns = map name $ typeFields $ typ' rf ctx l
+          n = typeName $ typ'' rf ctx l
 
 mkAbstRoleBody :: Refine -> Role -> Doc
 mkAbstRoleBody r rl = 
-    (let ?r = r
-         ?rl = rl in
-     mkAbstStatement [] M.empty [] $ roleBody rl)
+    (let ?r = r in
+     mkAbstStatement (CtxRole rl) [] M.empty [] $ roleBody rl)
     $$
     checkDropped
 
-mkAbstStatement :: (?r::Refine, ?rl::Role) => MSet -> Locals -> [Statement] -> Statement -> Doc
-mkAbstStatement mset locals nxt (SSeq _ s1 s2) = mkAbstStatement mset locals (s2:nxt) s1
-mkAbstStatement _    _      _   (SPar _ _ _)   = error "Not implemented: Boogie.mkAbstStatement SPar" {- run in sequence, copying packet -}
-mkAbstStatement mset locals nxt (SITE _ c t e) = stat
+mkAbstStatement :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Statement -> Doc
+mkAbstStatement ctx mset locals nxt (SSeq _ s1 s2) = mkAbstStatement ctx mset locals (s2:nxt) s1
+mkAbstStatement _   _    _      _   (SPar _ _ _)   = error "Not implemented: Boogie.mkAbstStatement SPar" {- run in sequence, copying packet -}
+mkAbstStatement ctx mset locals nxt (SITE _ c t e) = stat
     where clone = (isNothing $ statMSet t) || (statMSet t /= maybe (Just []) statMSet e)
           tbranch = if clone
-                       then mkAbstStatement mset locals nxt t
-                       else mkAbstStatement mset locals []  t
+                       then mkAbstStatement ctx mset locals nxt t
+                       else mkAbstStatement ctx mset locals []  t
           ebranch = if clone
-                       then mkAbstStatement mset locals nxt $ fromJust e
-                       else mkAbstStatement mset locals []  $ fromJust e
+                       then mkAbstStatement ctx mset locals nxt $ fromJust e
+                       else mkAbstStatement ctx mset locals []  $ fromJust e
           suffix = if clone 
                       then empty
-                      else mkNext (msetUnion mset $ fromJust $ statMSet t) locals nxt
-          stat = (pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset locals c) <+> lbrace)
+                      else mkNext ctx (msetUnion mset $ fromJust $ statMSet t) locals nxt
+          stat = (pp "if" <> (parens $ mkAbstExpr ctx mset locals c) <+> lbrace)
                  $$
                  (nest' tbranch)
                  $$
@@ -475,39 +474,39 @@ mkAbstStatement mset locals nxt (SITE _ c t e) = stat
                         e)
                  $$
                  suffix
-mkAbstStatement mset locals nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr (CtxRole ?rl) mset locals (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
-                                                 $$
-                                                 mkNext mset locals nxt
-mkAbstStatement mset locals nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr (CtxRole ?rl) mset' locals l .== mkAbstExpr (CtxRole ?rl) mset locals rhs))
-                                                 $$
-                                                 mkNext mset' locals nxt
+mkAbstStatement ctx mset locals nxt (STest _ c)    = pp "if" <> (parens $ mkAbstExpr ctx mset locals (EUnOp nopos Not c)) <+> (braces $ checkDropped <+> ret)
+                                                     $$
+                                                     mkNext ctx mset locals nxt
+mkAbstStatement ctx mset locals nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr ctx mset' locals l .== mkAbstExpr ctx mset locals rhs))
+                                                     $$
+                                                     mkNext ctx mset' locals nxt
     where mset' = msetUnion [l] mset
-mkAbstStatement mset locals []  (SSend _ dst)  = checkNotDropped
-                                                 $$
-                                                 (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr (CtxRole ?rl) mset locals) ks))
-                                                 $$
-                                                 (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' locals e .== mkAbstExpr (CtxRole ?rl) mset locals e) mset')
-                                                 $$
-                                                 ret
-    where mset' = msetComplement mset
+mkAbstStatement ctx mset locals []  (SSend _ dst)  = checkNotDropped
+                                                     $$
+                                                     (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr ctx mset locals) ks))
+                                                     $$
+                                                     (vcat $ map (\e -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
+                                                     $$
+                                                     ret
+    where mset' = msetComplement ctx mset
           ELocation _ rname ks = dst
-mkAbstStatement mset locals []  (SSendND _ rl c) = checkNotDropped
-                                                   $$
-                                                   (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
-                                                   $$
-                                                   (assrt $ mkAbstExpr (CtxSend ?rl $ getRole ?r rl) mset locals c)
-                                                   $$
-                                                   (vcat $ map (\e -> assrt $ mkAbstExpr (CtxRole ?rl) mset' locals e .== mkAbstExpr (CtxRole ?rl) mset locals e) mset')
-                                                   $$
-                                                   ret
-    where mset' = msetComplement mset
-mkAbstStatement mset locals nxt (SHavoc _ e)   = mkNext (msetUnion mset [e]) locals nxt
-mkAbstStatement mset locals nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr (CtxRole ?rl) mset locals c)
-                                                 $$
-                                                 mkNext mset locals nxt
-mkAbstStatement mset locals nxt (SLet _ _ n v) = mkNext mset locals' nxt
-    where locals' = M.insert n (mkAbstExpr (CtxRole ?rl) mset locals v) locals
-mkAbstStatement _    _      nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
+mkAbstStatement ctx mset locals []  (SSendND _ rl c) = checkNotDropped
+                                                       $$
+                                                       (assrt $ apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
+                                                       $$
+                                                       (assrt $ mkAbstExpr (CtxSend ctx $ getRole ?r rl) mset locals c)
+                                                       $$
+                                                       (vcat $ map (\e -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
+                                                       $$
+                                                       ret
+    where mset' = msetComplement ctx mset
+mkAbstStatement ctx mset locals nxt (SHavoc _ e)   = mkNext ctx (msetUnion mset [e]) locals nxt
+mkAbstStatement ctx mset locals nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr ctx mset locals c)
+                                                     $$
+                                                     mkNext ctx mset locals nxt
+mkAbstStatement ctx mset locals nxt (SLet _ _ n v) = mkNext ctx mset locals' nxt
+    where locals' = M.insert n (mkAbstExpr ctx mset locals v) locals
+mkAbstStatement _   _    _      nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
 
 isDropped :: Doc
 isDropped = apply "is#Dropped" [pp outputVar]
@@ -521,10 +520,10 @@ checkDropped = assrt isDropped
 checkNotDropped :: Doc
 checkNotDropped = assrt notDropped
 
-mkNext :: (?r::Refine, ?rl::Role) => MSet -> Locals -> [Statement] -> Doc
-mkNext mset locals nxt = case nxt of
-                              []     -> empty
-                              (s:ss) -> mkAbstStatement mset locals ss s
+mkNext :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
+mkNext ctx mset locals nxt = case nxt of
+                                  []     -> empty
+                                  (s:ss) -> mkAbstStatement ctx mset locals ss s
 
 statMSet :: Statement -> Maybe MSet
 statMSet (SSeq _ l r)    = maybe Nothing (\mset -> maybe Nothing (Just . msetUnion mset) $ statMSet r) $ statMSet l
@@ -541,6 +540,7 @@ statMSet (SSendND _ _ _) = Nothing
 statMSet (SHavoc _ l)    = Just [l]
 statMSet (SAssume _ _)   = Just []
 statMSet (SLet _ _ _ _)  = Just []
+statMSet (SFork _ _ _ _) = Nothing
 
 msetEq :: MSet -> MSet -> Bool
 msetEq ms1 ms2 = length ms1 == length ms2 && (length $ intersect ms1 ms2) == length ms1
@@ -549,19 +549,18 @@ msetEq ms1 ms2 = length ms1 == length ms2 && (length $ intersect ms1 ms2) == len
 msetUnion :: MSet -> MSet -> MSet
 msetUnion s1 s2 = union s1 s2
 
-overlapsMSet :: (?r::Refine, ?c::ECtx) => Expr -> MSet -> Bool
-overlapsMSet x mset = elem x mset ||
-                      case typ' ?r ?c x of
-                           TStruct _ fs -> any (\f -> overlapsMSet (EField nopos x $ name f) mset) fs
-                           _            -> False 
+overlapsMSet :: (?r::Refine) => ECtx -> Expr -> MSet -> Bool
+overlapsMSet ctx x mset = elem x mset ||
+                          case typ' ?r ctx x of
+                               TStruct _ fs -> any (\f -> overlapsMSet ctx (EField nopos x $ name f) mset) fs
+                               _            -> False 
 
 
-msetComplement :: (?r::Refine, ?rl::Role) => MSet -> MSet
-msetComplement mset = msetComplement' (EPacket nopos)
-    where ctx = CtxRole ?rl
-          msetComplement' e = if elem e mset
+msetComplement :: (?r::Refine) => ECtx -> MSet -> MSet
+msetComplement ctx mset = msetComplement' (EPacket nopos)
+    where msetComplement' e = if elem e mset
                                  then []
-                                 else if (let ?c = ctx in overlapsMSet e mset)
+                                 else if (overlapsMSet ctx e mset)
                                          then let TStruct _ fs = typ' ?r ctx e in
                                               concatMap (msetComplement' . EField nopos e . name) fs
                                          else [e]
@@ -602,19 +601,20 @@ collectTypes r@Refine{..} = let ?r = r in
                                   concatMap (\a -> exprCollectTypes (CtxAssume a) $ assExpr a) refineAssumes ++
                                   concatMap (\rl -> exprCollectTypes (CtxRole rl) $ roleKeyRange rl) refineRoles ++
                                   concatMap (\rl -> exprCollectTypes (CtxRole rl) $ rolePktGuard rl) refineRoles ++
-                                  concatMap (\rl -> statCollectTypes rl $ roleBody rl) refineRoles
+                                  concatMap (\rl -> statCollectTypes (CtxRole rl) $ roleBody rl) refineRoles
 
-statCollectTypes :: (?r::Refine) => Role -> Statement -> [Type]
-statCollectTypes rl (SSeq _ l r)    = statCollectTypes rl l ++ statCollectTypes rl r
-statCollectTypes rl (SPar  _ l r)   = statCollectTypes rl l ++ statCollectTypes rl r
-statCollectTypes rl (SITE _ c t me) = exprCollectTypes (CtxRole rl) c ++ statCollectTypes rl t ++ maybe [] (statCollectTypes rl) me
-statCollectTypes rl (STest _ c)     = exprCollectTypes (CtxRole rl) c
-statCollectTypes rl (SSet _ l r)    = exprCollectTypes (CtxRole rl) l ++ exprCollectTypes (CtxRole rl) r
-statCollectTypes rl (SSend _ d)     = exprCollectTypes (CtxRole rl) d
-statCollectTypes rl (SSendND _ n c) = exprCollectTypes (CtxSend rl $ getRole ?r n) c
-statCollectTypes _  (SHavoc _ _)    = []
-statCollectTypes rl (SAssume _ c)   = exprCollectTypes (CtxRole rl) c
-statCollectTypes rl (SLet _ t _ v)  = (typ' ?r (CtxRole rl) t) : exprCollectTypes (CtxRole rl) v
+statCollectTypes :: (?r::Refine) => ECtx -> Statement -> [Type]
+statCollectTypes ctx (SSeq _ l r)     = statCollectTypes ctx l ++ statCollectTypes ctx r
+statCollectTypes ctx (SPar  _ l r)    = statCollectTypes ctx l ++ statCollectTypes ctx r
+statCollectTypes ctx (SITE _ c t me)  = exprCollectTypes ctx c ++ statCollectTypes ctx t ++ maybe [] (statCollectTypes ctx) me
+statCollectTypes ctx (STest _ c)      = exprCollectTypes ctx c
+statCollectTypes ctx (SSet _ l r)     = exprCollectTypes ctx l ++ exprCollectTypes ctx r
+statCollectTypes ctx (SSend _ d)      = exprCollectTypes ctx d
+statCollectTypes ctx (SSendND _ n c)  = exprCollectTypes (CtxSend ctx $ getRole ?r n) c
+statCollectTypes _   (SHavoc _ _)     = []
+statCollectTypes ctx (SAssume _ c)    = exprCollectTypes ctx c
+statCollectTypes ctx (SLet _ t _ v)   = (typ' ?r ctx t) : exprCollectTypes ctx v
+statCollectTypes ctx (SFork _ vs c b) = map (typ' ?r ctx) vs ++ exprCollectTypes (CtxFork ctx vs) c ++ statCollectTypes (CtxFork ctx vs) b
 
 
 exprCollectTypes :: (?r::Refine) => ECtx -> Expr -> [Type]

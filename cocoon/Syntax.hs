@@ -17,6 +17,9 @@ module Syntax( pktVar
              , UOp(..)
              , Expr(..)
              , ECtx(..)
+             , isRoleCtx
+             , ctxRole
+             , ctxForkVars
              , conj
              , disj
              , Statement(..)
@@ -256,16 +259,35 @@ disj (e:es) = EBinOp nopos Or e (disj es)
 
 
 
-data ECtx = CtxRole   Role
-          | CtxAssume Assume
+data ECtx = CtxAssume Assume
           | CtxFunc   Function
-          | CtxSend   Role Role
+          | CtxRole   Role
+          | CtxSend   ECtx Role
+          | CtxFork   ECtx [Field]
      
 instance Show ECtx where
-    show (CtxRole r)     = "role " ++ name r
-    show (CtxAssume a)   = "assume " ++ show a
-    show (CtxFunc f)     = "function " ++ name f
-    show (CtxSend r1 r2) = "send " ++ name r1 ++ " " ++ name r2
+    show (CtxAssume a)  = "assume " ++ show a
+    show (CtxFunc f)    = "function " ++ name f
+    show (CtxRole r)    = "role " ++ name r
+    show (CtxSend f t)  = "send " ++ ("(" ++ show f ++ ")") ++ " " ++ name t
+    show (CtxFork c vs) = "fork " ++ ("(" ++ show c ++ ")") ++ " " ++ show vs
+
+isRoleCtx :: ECtx -> Bool
+isRoleCtx (CtxRole _)   = True
+isRoleCtx (CtxSend _ _) = True
+isRoleCtx (CtxFork _ _) = True
+isRoleCtx _             = False
+
+ctxRole :: ECtx -> Role
+ctxRole (CtxRole rl)   = rl
+ctxRole (CtxSend c _)  = ctxRole c
+ctxRole (CtxFork c _)  = ctxRole c
+ctxRole c              = error $ "ctxRole " ++ show c
+
+ctxForkVars :: ECtx -> [Field]
+ctxForkVars (CtxFork c vs) = vs ++ ctxForkVars c
+ctxForkVars (CtxSend c _)  = ctxForkVars c
+ctxForkVars _              = []
 
 data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
                | SPar    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
@@ -277,6 +299,7 @@ data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: St
                | SHavoc  {statPos :: Pos, statLVal :: Expr}
                | SAssume {statPos :: Pos, statCond :: Expr}
                | SLet    {statPos :: Pos, statVType :: Type, statVName :: String, statVal :: Expr}
+               | SFork   {statPos :: Pos, statFrkVars :: [Field], statCond :: Expr, statFrkBody :: Statement}
 
 statSendsTo :: Statement -> [Expr]
 statSendsTo st = nub $ statSendsTo' st
@@ -292,6 +315,7 @@ statSendsTo' (SHavoc _ _)      = []
 statSendsTo' (SAssume _ _)     = []
 statSendsTo' (SLet _ _ _ _)    = []
 statSendsTo' (SSendND _ _ _)   = error "Syntax.statSendsTo' SSendND"
+statSendsTo' (SFork _ _ _ _)   = error "Syntax.statSendsTo' SFork"
 
 statLocals :: Statement -> [Field]
 statLocals (SSeq _ l r)      = statLocals l ++ statLocals r
@@ -304,6 +328,7 @@ statLocals (SSendND _ _ _)   = []
 statLocals (SHavoc _ _)      = []
 statLocals (SAssume _ _)     = []
 statLocals (SLet p t n _)    = [Field p n t]
+statLocals (SFork _ _ _ _)   = []
 
 instance WithPos Statement where
     pos = statPos
@@ -326,6 +351,7 @@ instance PP Statement where
     pp (SHavoc _ e)     = pp "havoc" <+> pp e
     pp (SAssume _ e)    = pp "assume" <+> pp e
     pp (SLet _ t n v)   = pp "let" <+> pp t <+> pp n <+> pp "=" <+> pp v
+    pp (SFork _ vs c b) = pp "fork" <+> (parens $ (hsep $ punctuate (pp ",") $ map pp vs) <+> pp "|" <+> pp c) <+> pp b
 
 instance Show Statement where
     show = render . pp

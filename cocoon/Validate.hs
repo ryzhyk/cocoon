@@ -139,7 +139,7 @@ roleValidate r role@Role{..} = do
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) [] roleKeyRange
     exprValidate r (CtxRole role) [] rolePktGuard
-    _ <- statValidate r role [] [] roleBody
+    _ <- statValidate r (CtxRole role) [] [] roleBody
     return ()
 
 roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
@@ -152,7 +152,7 @@ assumeValidate r a@Assume{..} = do
     uniqNames (\v -> "Multiple definitions of variable " ++ v) assVars
     mapM_ (typeValidate r . fieldType) assVars
     exprValidate r (CtxAssume a) [] assExpr
-    assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a boolean expression"
+    assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a Boolean expression"
     return ()
 
 nodeValidate :: (MonadError String me) => Refine -> Node -> me ()
@@ -194,6 +194,7 @@ checkLinkSt :: (MonadError String me) => Statement -> me ()
 checkLinkSt (SSeq _ s1 s2)  = do checkLinkSt s1
                                  checkLinkSt s2
 checkLinkSt (SPar p _  _)   = err p "Parallel composition not allowed in output port body" 
+checkLinkSt (SFork p _ _ _) = err p "Fork not allowed in output port body" 
 checkLinkSt (SITE _ c t e)  = do checkLinkExpr c
                                  checkLinkSt t
                                  maybe (return ()) checkLinkSt e
@@ -224,10 +225,10 @@ checkLinkExpr (ECond _ cs d)      = do mapM_ (\(c,v) -> do checkLinkExpr c
                                        checkLinkExpr d
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> [String] -> Expr -> me ()
-exprValidate r (CtxRole role) vset (EVar p v) =
+exprValidate r ctx vset (EVar p v) | isRoleCtx ctx =
     if elem v vset
        then return ()
-       else case find ((==v) . name) $ roleKeys role of
+       else case find ((==v) . name) $ roleKeys (ctxRole ctx) ++ ctxForkVars ctx of
                  Nothing -> errR r p $ "Unknown variable: " ++ v
                  Just _  -> return ()
 exprValidate _ ctx _ (EVar p v) = do
@@ -235,7 +236,8 @@ exprValidate _ ctx _ (EVar p v) = do
    return ()
 exprValidate r ctx _ (EDotVar p v) = 
    case ctx of
-        CtxSend _ t -> assertR r (isJust $ find ((== v) . name) $ roleKeys t) p $ "Unknown key " ++ v
+        CtxSend _ t -> do _ <- checkKey p t v
+                          return()
         _           -> errR r p "Dot-variable is not allowed here"
 exprValidate r ctx _ (EPacket p) = do 
    case ctx of
@@ -243,6 +245,7 @@ exprValidate r ctx _ (EPacket p) = do
         CtxFunc _   -> errR r p "Functions cannot refer to pkt"
         CtxRole _   -> return ()
         CtxSend _ _ -> return ()
+        CtxFork _ _ -> return ()
    return ()
 exprValidate r ctx vset (EApply p f as) = do
     func <- checkFunc p r f
@@ -280,8 +283,8 @@ exprValidate r ctx vset (EBinOp _ op left right) = do
              assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression"
              matchType r ctx left right)
      $ if' (elem op [And, Or, Impl]) (
-          do assertR r (isBool r ctx left)  (pos left)  $ "Not a boolean expression"
-             assertR r (isBool r ctx right) (pos right) $ "Not a boolean expression")
+          do assertR r (isBool r ctx left)  (pos left)  $ "Not a Boolean expression"
+             assertR r (isBool r ctx right) (pos right) $ "Not a Boolean expression")
      $ if' (elem op [Mod, Concat]) (
           do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
              assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression") 
@@ -290,7 +293,7 @@ exprValidate r ctx vset (EBinOp _ op left right) = do
 exprValidate r ctx vset (EUnOp _ op e) = do
     exprValidate r ctx vset e
     case op of
-         Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a boolean expression"
+         Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a Boolean expression"
 
 exprValidate r ctx vset (ESlice p e h l) = do
     exprValidate r ctx vset e
@@ -303,7 +306,7 @@ exprValidate r ctx vset (ECond _ cs def) = do
     exprValidate r ctx vset def
     mapM_ (\(cond, e)-> do exprValidate r ctx vset cond
                            exprValidate r ctx vset e
-                           assertR r (isBool r ctx cond) (pos cond) $ "Not a boolean expression"
+                           assertR r (isBool r ctx cond) (pos cond) $ "Not a Boolean expression"
                            matchType r ctx e def) cs
 
 exprValidate _ _ _ _ = return ()
@@ -345,67 +348,82 @@ checkNotModified r ctx mset e = do
          _            -> return()
 
 
-statValidate :: (MonadError String me) => Refine -> Role -> [Expr] -> [String] -> Statement -> me (Bool, [Expr], [String])
-statValidate r role mset vset (SSeq _ h t) = do
-    (sends, mset', vset') <- statValidate r role mset vset h
-    assertR r (not sends) (pos h) "Send not allowed in the middle of a sequence"
-    statValidate r role mset' vset' t
+statValidate :: (MonadError String me) => Refine -> ECtx -> [Expr] -> [String] -> Statement -> me (Bool, [Expr], [String])
+statValidate r ctx mset vset (SSeq _ h t) = do
+    (sends, mset', vset') <- statValidate r ctx mset vset h
+    assertR r (not sends) (pos h) "Send/fork not allowed in the middle of a sequence"
+    statValidate r ctx mset' vset' t
 
-statValidate r role mset vset (SPar _ h t) = do
-    (sends1, mset1, _) <- statValidate r role mset vset h
-    (sends2, mset2, _) <- statValidate r role mset vset t
+statValidate r ctx mset vset (SPar _ h t) = do
+    (_, mset1, _) <- statValidate r ctx mset vset h
+    (_, mset2, _) <- statValidate r ctx mset vset t
+    return $ (True, union mset1 mset2, vset)
+
+statValidate r ctx mset vset (SITE _ c t e) = do
+    exprValidate r ctx vset c
+    assertR r (isBool r ctx c) (pos c) "Condition must be a Boolean expression"
+    (sends1, mset1, _) <- statValidate r ctx mset vset t
+    (sends2, mset2, _) <- maybe (return (False,[],[])) (statValidate r ctx mset vset) e
     return $ (sends1 || sends2, union mset1 mset2, vset)
 
-statValidate r role mset vset (SITE _ c t e) = do
-    exprValidate r (CtxRole role) vset c
-    assertR r (isBool r (CtxRole role) c) (pos c) "Condition must be a boolean expression"
-    (sends1, mset1, _) <- statValidate r role mset vset t
-    (sends2, mset2, _) <- maybe (return (False,[],[])) (statValidate r role mset vset) e
-    return $ (sends1 || sends2, union mset1 mset2, vset)
-
-statValidate r role mset vset (STest _ c) = do
-    exprValidate r (CtxRole role) vset c
-    assertR r (isBool r (CtxRole role) c) (pos c) "Filter must be a boolean expression"
+statValidate r ctx mset vset (STest _ c) = do
+    exprValidate r ctx vset c
+    assertR r (isBool r ctx c) (pos c) "Filter must be a Boolean expression"
     return (False, mset, vset)
 
-statValidate r role mset vset (SSet _ lval rval) = do
-    exprValidate r (CtxRole role) vset rval
-    lexprValidate r (CtxRole role) mset vset lval
-    matchType r (CtxRole role) lval rval
+statValidate r ctx mset vset (SSet _ lval rval) = do
+    exprValidate r ctx vset rval
+    lexprValidate r ctx mset vset lval
+    matchType r ctx lval rval
     when (exprIsValidFlag lval) $ case rval of
                                        EBool _ _ -> return ()
-                                       _         -> errR r (pos rval) $ "Not a boolean constant"
+                                       _         -> errR r (pos rval) $ "Not a Boolean constant"
     return (False, union [lval] mset, vset)
 
-statValidate r role mset vset (SSend _ dst) = do
-    exprValidate r (CtxRole role) vset dst
-    assertR r (isLocation r (CtxRole role) dst) (pos dst) "Not a valid location"
+statValidate r ctx mset vset (SSend _ dst) = do
+    exprValidate r ctx vset dst
+    assertR r (isLocation r ctx dst) (pos dst) "Not a valid location"
     case dst of
          ELocation _ _ _ -> return ()
          _               -> errR r (pos dst)  "send destination must be of the form Role[args]"
     let ELocation p rl _ = dst
-    assertR r (rl /= name role) p "role cannot send to itself"
+    assertR r (rl /= name (ctxRole ctx)) p "role cannot send to itself"
     return (True, mset, vset)
 
-statValidate r role mset vset (SSendND p rl c) = do
+statValidate r ctx mset vset (SSendND p rl c) = do
     role' <- checkRole p r rl
-    exprValidate r (CtxSend role role') vset c
-    assertR r (isBool r (CtxSend role role') c) (pos c) "Condition must be a boolean expression"
-    assertR r (rl /= name role) p "role cannot send to itself"
+    exprValidate r (CtxSend ctx role') vset c
+    assertR r (isBool r (CtxSend ctx role') c) (pos c) "Condition must be a Boolean expression"
+    assertR r (rl /= name (ctxRole ctx)) p "role cannot send to itself"
     return (True, mset, vset)
 
-statValidate r role mset vset (SHavoc _ lval) = do
-    lexprValidate r (CtxRole role) mset vset lval
+statValidate r ctx mset vset (SHavoc _ lval) = do
+    lexprValidate r ctx mset vset lval
     return (False, union [lval] mset, vset)
 
-statValidate r role mset vset (SAssume _ c) = do
-    exprValidate r (CtxRole role) vset c
-    assertR r (isBool r (CtxRole role) c) (pos c) "Assumption must be a boolean expression"
+statValidate r ctx mset vset (SAssume _ c) = do
+    exprValidate r ctx vset c
+    assertR r (isBool r ctx c) (pos c) "Assumption must be a Boolean expression"
     return (False, mset, vset)
 
-statValidate r role mset vset (SLet p t n v) = do
-    assertR r (not $ elem n $ map name $ roleKeys role) p $ "Local variable name shadows key name"
+statValidate r ctx mset vset (SLet p t n v) = do
+    assertR r (not $ elem n $ map name $ roleKeys $ ctxRole ctx) p $ "Local variable name shadows key name"
+    assertR r (not $ elem n $ vset) p $ "Local variable name shadows previously declared variable"
+    assertR r (not $ elem n $ map name $ ctxForkVars ctx) p $ "Local variable name shadows fork variable"
     typeValidate r t
-    exprValidate r (CtxRole role) vset v
-    matchType r (CtxRole role) t v 
+    exprValidate r ctx vset v
+    matchType r ctx t v 
     return (False, mset, union [n] vset)
+
+statValidate r ctx mset vset (SFork p vs c b) = do
+    let ctx' = CtxFork ctx vs
+    mapM_ (\v -> do typeValidate r $ fieldType v
+                    assertR r (not $ elem (name v) $ map name $ roleKeys $ ctxRole ctx) p $ "Fork variable name shadows key name"
+                    assertR r (not $ elem (name v) $ vset) p $ "Fork variable name shadows previously declared variable"
+                    assertR r (not $ elem (name v) $ map name $ ctxForkVars ctx) p $ "Fork variable name shadows containing fork variable")
+           vs
+    uniqNames (\n -> "Multiple definitions of variable " ++ n) vs
+    exprValidate r ctx' vset c
+    assertR r (isBool r ctx' c) (pos c) "Fork condition must be a Boolean expression"
+    (_, mset', vset') <- statValidate r ctx' mset vset b
+    return (True, mset', vset')
