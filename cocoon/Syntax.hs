@@ -7,6 +7,7 @@ module Syntax( pktVar
              , Field(..)
              , Role(..)
              , roleLocals
+             , roleForkVars
              , NodeType(..)
              , Node(..)
              , Function(..)
@@ -103,6 +104,9 @@ data NodeType = NodeSwitch
 
 roleLocals :: Role -> [Field]
 roleLocals role = statLocals $ roleBody role
+
+roleForkVars :: Role -> [Field]
+roleForkVars role = statForkVarsRec $ roleBody role
 
 data Node = Node { nodePos   :: Pos
                  , nodeType  :: NodeType
@@ -329,6 +333,19 @@ statLocals (SHavoc _ _)      = []
 statLocals (SAssume _ _)     = []
 statLocals (SLet p t n _)    = [Field p n t]
 statLocals (SFork _ _ _ _)   = []
+
+statForkVarsRec :: Statement -> [Field]
+statForkVarsRec (SSeq _ l r)      = statForkVarsRec l ++ statForkVarsRec r
+statForkVarsRec (SPar _ l r)      = statForkVarsRec l ++ statForkVarsRec r
+statForkVarsRec (SITE _ _ t me)   = statForkVarsRec t ++ maybe [] statForkVarsRec me
+statForkVarsRec (STest _ _)       = []
+statForkVarsRec (SSet _ _ _)      = []
+statForkVarsRec (SSend _ _)       = []
+statForkVarsRec (SSendND _ _ _)   = []
+statForkVarsRec (SHavoc _ _)      = []
+statForkVarsRec (SAssume _ _)     = []
+statForkVarsRec (SLet _ _ _ _)    = []
+statForkVarsRec (SFork _ vs _ b)  = vs ++ statForkVarsRec b
 
 instance WithPos Statement where
     pos = statPos

@@ -8,12 +8,15 @@ NC='\033[0m' # No Color
 for file in $1/*.bpl
 do
     printf "Verifying $file "
+    start=`date +%s`
     corral.exe "$file" /main:main /k:100 /recursionBound:10 &> "$file".log
     ERR=$?
+    end=`date +%s`
+    runtime=$((end-start))
     if [ $ERR -eq 0 ]
     then
       if grep -q "Program has no bugs" "$file".log; then
-          printf "${GREEN}OK${NC}\n"
+          printf "${GREEN}OK (${runtime}s)${NC}\n"
       else
           printf "${RED}Bug found${NC}\n"
           cat "$file".log

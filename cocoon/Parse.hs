@@ -286,7 +286,7 @@ site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) 
 shavoc  = SHavoc  nopos <$ reserved "havoc" <*> expr
 sassume = SAssume nopos <$ reserved "assume" <*> expr
 slet    = SLet    nopos <$ reserved "let" <*> typeSpec <*> identifier <*> (reservedOp "=" *> expr)
-sfork   = SFork   nopos <$ reserved "fork" <*> (char '(' *> (commaSep1 arg)) <*> (reservedOp "|" *> expr) <*> (char ')' *> stat)
+sfork   = (\(vs,c) st -> SFork nopos vs c st) <$ reserved "fork" <*> (parens $ (,) <$> (commaSep1 arg) <*> (reservedOp "|" *> expr)) <*> stat
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]

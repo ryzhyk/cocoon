@@ -136,6 +136,7 @@ roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     uniqNames (\v -> "Multiple definitions of local variable " ++ v) $ roleLocals role
+    uniqNames (\v -> "Multiple definitions of fork variable " ++ v) $ roleForkVars role
     mapM_ (typeValidate r . fieldType) roleKeys
     exprValidate r (CtxRole role) [] roleKeyRange
     exprValidate r (CtxRole role) [] rolePktGuard
@@ -409,7 +410,7 @@ statValidate r ctx mset vset (SAssume _ c) = do
 statValidate r ctx mset vset (SLet p t n v) = do
     assertR r (not $ elem n $ map name $ roleKeys $ ctxRole ctx) p $ "Local variable name shadows key name"
     assertR r (not $ elem n $ vset) p $ "Local variable name shadows previously declared variable"
-    assertR r (not $ elem n $ map name $ ctxForkVars ctx) p $ "Local variable name shadows fork variable"
+    assertR r (not $ elem n $ map name $ roleForkVars $ ctxRole ctx) p $ "Local variable name shadows fork variable"
     typeValidate r t
     exprValidate r ctx vset v
     matchType r ctx t v 
@@ -419,7 +420,7 @@ statValidate r ctx mset vset (SFork p vs c b) = do
     let ctx' = CtxFork ctx vs
     mapM_ (\v -> do typeValidate r $ fieldType v
                     assertR r (not $ elem (name v) $ map name $ roleKeys $ ctxRole ctx) p $ "Fork variable name shadows key name"
-                    assertR r (not $ elem (name v) $ vset) p $ "Fork variable name shadows previously declared variable"
+                    assertR r (not $ elem (name v) $ map name $ roleLocals $ ctxRole ctx) p $ "Fork variable name shadows local variable"
                     assertR r (not $ elem (name v) $ map name $ ctxForkVars ctx) p $ "Fork variable name shadows containing fork variable")
            vs
     uniqNames (\n -> "Multiple definitions of variable " ++ n) vs

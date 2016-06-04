@@ -101,8 +101,8 @@ role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
     if bCastMAC() == pkt.eth.dstAddr then {
         if iL2VNet(vnet) then {
-            fork (VHPortId vhport | vHPortVNet(vhport) == vnet and vhport != VHPortId{vhost, port}) {
-                send VHostIn[vhport]
+            fork (VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vhport != VHPortId{vhost, port}) {
+                send VHostIn[vhport.vhost, vhport.vport]
             }
         } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
             pkt := arpResponse(pkt);
@@ -126,7 +126,7 @@ refine VHostOut {
     assume (IP4 hst, uint<16> swport) iVSwitchPort(hst, swport) => iHost(hst)
 
     function hHostsVNet(IP4 hst, VNetId vnet): bool
-    assume (vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst) => hHostsVNet(hst, vnet) 
+    assume (VHPortId vhport, VNetId vnet, IP4 hst) (vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst) => hHostsVNet(hst, vnet) 
 
     function vHostLocation(VHostId vhost): IP4
     assume (VHostId vhost) iVHost(vhost) => iHost(vHostLocation(vhost))
@@ -160,11 +160,11 @@ refine VHostOut {
         let VNetId vnet = vSwPortVNet(hst, vport);
         if bCastMAC() == pkt.eth.dstAddr then {
             if iL2VNet(vnet) then {
-                fork(IP4 ip | hHostsVNet(ip, vnet)) {   
+                fork(IP4 ip | iHost(ip) and hHostsVNet(ip, vnet)) {
                     if ip == hst then {
-                        fork(VHPortId vhport | vHPortVNet(vhport) == vxlan.vni and vHostLocation(vhport.vhost) == hst and vH2SwLink(vhport) != vport) {
+                        fork(VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst and vH2SwLink(vhport) != vport) {
                             send VSwitchOut[hst, vH2SwLink(vhport)]
-                        }       
+                        }
                     } else {
                         pkt := vxlanEncapsulate( pkt
                                                , vnet
@@ -178,18 +178,18 @@ refine VHostOut {
                 send VSwitchOut[hst, vport]
             }
         } else {
-            let VHPortId vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
-            if iVHostPort(vhport) then {
-                if (vHostLocation(vhport.vhost) == hst) then { 
+            let VHPortId to_vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+            if iVHostPort(to_vhport) then {
+                if (vHostLocation(to_vhport.vhost) == hst) then { 
                     (* Local destination -- deliver *)
                     pkt.vxlan := novxlan();
-                    send VSwitchOut[hst, vH2SwLink(vhport)]
+                    send VSwitchOut[hst, vH2SwLink(to_vhport)]
                 } else {
                     (* Remote destination -- encapsulate *)
                     pkt := vxlanEncapsulate( pkt
                                            , vnet
                                            , hst
-                                           , vHostLocation(vhport.vhost));
+                                           , vHostLocation(to_vhport.vhost));
                     send HostOut[hst, 8'd0]
                 }
             }
@@ -212,7 +212,7 @@ refine VHostOut {
             let vxlan_t vxlan = pkt.vxlan;
             pkt := vxlanDecapsulate(pkt);
             if pkt.eth.dstAddr == bCastMAC() then {
-                fork(VHPortId vhport | vHPortVNet(vhport) == vxlan.vni and vHostLocation(vhport.vhost) == hst) {
+                fork(VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vxlan.vni and vHostLocation(vhport.vhost) == hst) {
                     send VSwitchOut[hst, vH2SwLink(vhport)]
                 }
             } else {
@@ -287,9 +287,10 @@ refine {
             default: VHPortId{32'd0, 8'd0};
         }
 
+(*
     role VHost[VHostId vhost] | iVHost(vhost) = filter false
     host VHost( (VHostIn, VHostOut) )
 
     role VSwitch[IP4 hst] | iHost(hst) = filter false
-    switch VSwitch((VSwitchIn, VSwitchOut), (HostIn, HostOut))
+    switch VSwitch((VSwitchIn, VSwitchOut), (HostIn, HostOut)) *)
 }

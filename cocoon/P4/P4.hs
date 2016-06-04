@@ -315,6 +315,7 @@ mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
 mkStatement (SLet _ _ _ _)  = error "Not implemented: P4.mkStatement SLet"
+mkStatement (SFork _ _ _ _) = error "Not implemented: P4.mkStatement SFork"
 
 mkAddHeader :: String -> State P4State P4Statement
 mkAddHeader h = do

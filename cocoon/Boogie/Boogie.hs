@@ -6,6 +6,7 @@ import Text.PrettyPrint
 import qualified Data.Map as M
 import Data.Maybe
 import Data.List
+import Data.String.Utils
 
 import Syntax
 import Name
@@ -15,13 +16,8 @@ import NS
 import Pos
 import Util
 import Expr
-
-outputTypeName = "_Output"
-locTypeName    = "_Location"
-
-outputVar = "_outp"
-depthVar  = "_depth"
-locationVar = "_loc"
+import Boogie.BoogieHelpers
+import Boogie.BoogieExpr
 
 boogieHeader = pp $ 
     "function _div(x: int, y: int): int;\n" ++
@@ -36,7 +32,8 @@ boogieHeader = pp $
 refinementToBoogie :: Maybe Refine -> Refine -> Int -> ([(Assume, Doc)], Maybe [(String, Doc)])
 refinementToBoogie mabst conc maxdepth = (assums, roles)
     where assums = mapMaybe (\assm -> fmap (assm,) $ assumeToBoogie1 mabst conc assm) $ refineAssumes conc
-          roles  = fmap (\abst -> map (\role -> (role, refinementToBoogie1 abst conc role maxdepth)) $ refineTarget conc)
+          roles  = fmap (\abst -> concatMap (\role -> [{-(role, refinementToBoogie1  abst conc role maxdepth),-}
+                                                       ("_" ++ role, refinementToBoogie1' abst conc role maxdepth)]) $ refineTarget conc)
                         mabst
 
 -- Generate verification condition to validate  an assumption.
@@ -87,18 +84,37 @@ refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-
                        ?maxdepth = maxdepth in 
                    vcat $ punctuate (pp "") $ map (mkConcRole conc) $ map (getRole conc) new
           assums = vcat $ map (mkAssume conc) $ refineAssumes conc
-          check  = mkCheck conc rname 
+          check  = mkCheck False conc rname 
 
-mkCheck :: Refine -> String -> Doc
-mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
-                     $$
-                     (modifies $ pp outputVar)
-                     $$
-                     lbrace
-                     $$
-                     (nest' body)
-                     $$
-                     rbrace
+
+refinementToBoogie1' :: Refine -> Refine -> String -> Int -> Doc
+refinementToBoogie1' abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, arole, croles, assums, check]
+    where --ops    = mkBVOps conc
+          bounds = mkBoundsCheckers conc
+          new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
+          crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
+          types  = vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc, mkOutputType]
+          gvars  = vcat $ [ var (pp outputVar) (pp outputTypeName)
+                          , var (pp depthVar) (pp "int")]
+          funcs  = vcat $ map (mkFunction conc) $ refineFuncs conc
+          arole  = let ?rmap = M.empty in
+                       mkRoleAsFunction abst $ getRole abst rname
+          croles = let ?rmap = crmap 
+                       ?maxdepth = maxdepth in 
+                   vcat $ punctuate (pp "") $ map (mkConcRole conc) $ map (getRole conc) new
+          assums = vcat $ map (mkAssume conc) $ refineAssumes conc
+          check  = mkCheck True conc rname 
+
+mkCheck :: Bool -> Refine -> String -> Doc
+mkCheck asfunc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
+                            $$
+                            (modifies $ pp outputVar)
+                            $$
+                            lbrace
+                            $$
+                            (nest' body)
+                            $$
+                            rbrace
     where role = getRole conc rname
           body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleKeys role)
                  $$
@@ -118,7 +134,9 @@ mkCheck conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
                  $$
-                 (call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
+                 if asfunc
+                    then assrt $ apply ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
+                    else call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
 
 mkLocType :: Refine -> Doc
 mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
@@ -128,17 +146,17 @@ mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
 mkLocConstructor :: Role -> Doc
 mkLocConstructor rl = pp "function" <+> pp "{:constructor}" 
                    <+> (apply (name rl) $ map mkField $ roleKeys rl) 
-                   <>  colon <+> pp locTypeName <> semi
+                   .: pp locTypeName <> semi
 
 mkOutputType :: Doc
 mkOutputType = (pp "type" <+> pp "{:datatype}" <+> pp outputTypeName <> semi)
                $$
                (pp "function" <+> pp "{:constructor}" 
-                <+> (apply outputTypeName $ [ pp "pkt" <> colon <+> pp packetTypeName
-                                            , pp "loc" <> colon <+> pp locTypeName])
-                <>  colon <+> pp outputTypeName <> semi)
+                <+> (apply outputTypeName $ [ pp "pkt" .: pp packetTypeName
+                                            , pp "loc" .: pp locTypeName])
+                .: pp outputTypeName <> semi)
                $$
-               (pp "function" <+> pp "{:constructor}" <+> (apply "Dropped" []) <> colon <+> pp outputTypeName <> semi)
+               (pp "function" <+> pp "{:constructor}" <+> (apply "Dropped" []) .: pp outputTypeName <> semi)
 
 mkRoleName :: (?rmap::RMap) => String -> String
 mkRoleName n = case M.lookup n ?rmap of
@@ -151,7 +169,7 @@ mkTypeDef TypeDef{..} =
         TStruct   _ fs -> (pp "type" <+> pp "{:datatype}" <+> pp tdefName <> semi)
                           $$
                           (pp "function" <+> pp "{:constructor}" <+> (apply tdefName $ map mkField fs) 
-                           <> colon <+> pp tdefName <> semi)
+                           .: pp tdefName <> semi)
         _              -> pp "type" <+> pp tdefName <+> char '=' <+> mkType tdefType <> semi
         
 mkType :: Type -> Doc 
@@ -168,12 +186,20 @@ mkFunction r f@Function{..} = maybe ((decl <> semi)
                                     (\e -> decl <+> lbrace $$ nest' (mkExpr r (CtxFunc f) e) $$ rbrace) 
                                     funcDef
     where decl = pp "function" <+> (apply (name f) $ map mkField funcArgs)
-              <> colon <+> (mkType funcType)
+              .: (mkType funcType)
           -- Values returned by uninterpreted functions are within their type bounds
           asm = axiom (map (\a -> mkField $ Field nopos (name a) (fieldType a)) funcArgs) asmbody
           bexpr = apply (name f) $ map (pp . name) funcArgs
           asmbody = checkBVBounds r [(bexpr, funcType)]
 
+mkRoleAsFunction :: (?rmap::RMap) => Refine -> Role -> Doc
+mkRoleAsFunction r rl@Role{..} = (pp "function" <+> (apply ("a_" ++ roleName) args) <> pp ":" <+> pp "bool" <+> lbrace)
+                                 $$
+                                 (nest' $ let ?r = r in mkRoleFuncBody rl)
+                                 $$
+                                 rbrace
+    where args = (map mkField roleKeys) ++ [pp "_pkt" .: pp packetTypeName, pp outputVar .: pp outputTypeName]
+ 
 mkAbstRole :: Refine -> Role -> Doc
 mkAbstRole r rl@Role{..} = (pp "procedure" <+> (apply ("a_" ++ roleName) args))
                            $$
@@ -209,6 +235,8 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
                                     $$
                                     (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleLocals rl)
                                     $$
+                                    (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleForkVars rl)
+                                    $$
                                     pp pktVar .:= pp "_pkt"
                                     $$
                                     mkStatement r (CtxRole rl) roleBody)
@@ -217,108 +245,10 @@ mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args
     where args = map mkField $ roleKeys ++ [Field nopos "_pkt" $ TUser nopos packetTypeName]
 
 mkField :: Field -> Doc
-mkField f = (pp $ name f) <> colon <+> (mkType $ fieldType f)
+mkField f = (pp $ name f) .: (mkType $ fieldType f)
 
 mkAssume :: Refine -> Assume -> Doc
 mkAssume r a@Assume{..} = axiom (map mkField assVars) (mkExpr r (CtxAssume a) assExpr)
-
-mkExpr :: Refine -> ECtx -> Expr -> Doc
-mkExpr r c e = mkExprP pktVar r c e
-
--- Set of modified fields. Includes expressions of the form pkt.f1.f2.....fn
-type MSet = [Expr]
-type Locals = M.Map String Doc
-
-mkAbstExpr :: (?r::Refine) => ECtx -> MSet -> Locals -> Expr -> Doc
-mkAbstExpr c mset locals e = let ?mset = mset 
-                                 ?locals = locals
-                                 ?c = c
-                                 ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
-                                 ?p = "_pkt" in 
-                              mkExpr' e
-
-mkExprP :: String -> Refine -> ECtx -> Expr -> Doc
-mkExprP p r c e = let ?c = c
-                      ?p = p 
-                      ?r = r 
-                      ?loc = apply ("loc#" ++ outputTypeName) [pp outputVar]
-                      ?mset = [] 
-                      ?locals = M.empty in
-                  mkExpr' e
-
--- Generage Boogie expression.
--- Replace packet fields in ?mset with field of outputVar
-mkExpr' :: (?p::String, ?mset::MSet, ?locals::Locals, ?r::Refine, ?c::ECtx, ?loc::Doc) => Expr -> Doc
-mkExpr' (EVar _ v)              = case M.lookup v ?locals of 
-                                       Nothing  -> pp v
-                                       Just val -> val
-mkExpr' (EDotVar _ v)           = let CtxSend _ rl = ?c in 
-                                  apply (v ++ "#" ++ (name rl)) [?loc]
-mkExpr' e@(EPacket _)           = mkPktField e
-mkExpr' (EApply _ f as)         = apply f $ map mkExpr' as
-mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
-                         | otherwise    = 
-                               let TUser _ tn = typ'' ?r ?c s
-                               in pp f <> char '#' <> pp tn <> (parens $ mkExpr' s)
-    where isPktField (EField _ s' _) = isPktField s'
-          isPktField (EPacket _)     = True
-          isPktField _               = False
-mkExpr' (ELocation _ _ _)       = error "Not implemented: Boogie.mkExpr' ELocation"
-mkExpr' (EBool _ True)          = pp "true"
-mkExpr' (EBool _ False)         = pp "false"
-mkExpr' (EInt _ _ v)            = pp v -- <> text "bv" <> pp w
-mkExpr' (EStruct _ n fs)        = apply n $ map mkExpr' fs
-mkExpr' (EBinOp _ Eq e1 e2)     = parens $ mkExpr' e1 .== mkExpr' e2
-mkExpr' (EBinOp _ Neq e1 e2)    = parens $ mkExpr' e1 .!= mkExpr' e2
-mkExpr' (EBinOp _ And e1 e2)    = parens $ mkExpr' e1 .&& mkExpr' e2
-mkExpr' (EBinOp _ Or e1 e2)     = parens $ mkExpr' e1 .|| mkExpr' e2
-mkExpr' (EBinOp _ Impl e1 e2)   = parens $ mkExpr' e1 .=> mkExpr' e2
-mkExpr' (EBinOp _ Lt e1 e2)     = parens $ mkExpr' e1 .<  mkExpr' e2
-mkExpr' (EBinOp _ Gt e1 e2)     = parens $ mkExpr' e1 .>  mkExpr' e2
-mkExpr' (EBinOp _ Lte e1 e2)    = parens $ mkExpr' e1 .<= mkExpr' e2
-mkExpr' (EBinOp _ Gte e1 e2)    = parens $ mkExpr' e1 .>= mkExpr' e2
-mkExpr' (EBinOp _ Plus e1 e2)   = parens $ mkExpr' e1 .+  mkExpr' e2
-mkExpr' (EBinOp _ Minus e1 e2)  = parens $ mkExpr' e1 .-  mkExpr' e2
-mkExpr' (EBinOp _ ShiftR e1 (EInt _ _ i)) = apply "_div" [mkExpr' e1, pp $ (2^i::Integer)]
-mkExpr' e@(EBinOp _ ShiftR _ _) = error $ "Not implemented Boogie.mkExpr' " ++ show e
-mkExpr' (EBinOp _ ShiftL e1 (EInt _ _ i)) = apply "_mod" [mkExpr' e1 .* (pp $ (2^i::Integer)), pp $ (2^w::Integer)]
-                                  where TUInt _ w = typ' ?r ?c e1
-mkExpr' e@(EBinOp _ ShiftL _ _) = error $ "Not implemented Boogie.mkExpr' " ++ show e
-mkExpr' (EBinOp _ Mod e1 e2)    = apply "_mod" [mkExpr' e1, mkExpr' e2]
-mkExpr' (EBinOp _ Concat e1 e2) = apply "_concat" [mkExpr' e1, mkExpr' e2, pp $ (2^(w1+w2)::Integer)]
-                                  where TUInt _ w1 = typ' ?r ?c e1
-                                        TUInt _ w2 = typ' ?r ?c e2
-mkExpr' (EUnOp _ Not e)         = parens $ char '!' <> mkExpr' e
---mkExpr' (ESlice _ e h l)        = mkExpr' e <> (brackets $ pp (h+1) <> colon <> pp l)
-mkExpr' (ESlice _ e h l)        = apply "_slice" [mkExpr' e, pp h, pp l, pp $ (2^(h-l+1)::Integer)]
-mkExpr' (ECond _ cs d)          = mkCond cs d 
-
-mkPktField :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx) => Expr -> Doc
-mkPktField e = 
-    -- Parent or e in mset -- outp.field
-    if isInMSet e
-       then field (apply ("pkt#" ++ outputTypeName) [pp outputVar]) e
-       else if not (overlapsMSet ?c e ?mset)
-               then -- None of the children overlaps with mset -- generate as is
-                    field (pp ?p) e
-               else -- otherwise -- constructor with recursive calls for fields
-                    let TUser _ tn = typ'' ?r ?c e
-                        TStruct _ fs = typ' ?r ?c e in
-                    (apply tn $ map (mkPktField . EField nopos e . name) fs)
-    where isInMSet x = elem x ?mset ||
-                       case x of
-                            EField _ p _ -> isInMSet p
-                            _            -> False
-          field p (EPacket _)    = p
-          field p (EField _ s f) = let TUser _ tn = typ'' ?r ?c s
-                                   in pp f <> char '#' <> pp tn <> (parens $ field p s)
-          field _ e'             = error $ "Boogie.mkPktField.field " ++ show e'
-
-
-mkCond :: (?p::String, ?mset::MSet, ?locals::Locals, ?r::Refine, ?c::ECtx, ?loc::Doc) => [(Expr,Expr)] -> Expr -> Doc
-mkCond [] d             = mkExpr' d
-mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "then" <+> mkExpr' e
-                                                                      <+> pp "else" <+> mkCond cs d
 
 --bvbop :: (?p::String, ?mset::MSet, ?r::Refine, ?c::ECtx, ?loc::Doc) => BOp -> Expr -> Expr -> Doc
 --bvbop op e1 e2 = text ("BV"++(show $ typeWidth $ typ' ?r ?c e1)++"_"++bvbopname op) <> (parens $ mkExpr' e1 <> comma <+> mkExpr' e2)
@@ -395,6 +325,13 @@ mkStatement r ctx (SAssume _ e)   = assume $ mkExpr r ctx e
 mkStatement r ctx (SLet _ _ n v)  = checkBounds r ctx v
                                     $$
                                     mkAssign r ctx (EVar nopos n) [] v
+mkStatement r ctx (SFork _ vs c b) = (vcat $ map (\v -> havoc' r (pp $ name v, fieldType v)) vs)
+                                     $$
+                                     (assume $ mkExpr r ctx' c)
+                                     $$
+                                     mkStatement r ctx' b
+    where ctx' = CtxFork ctx vs
+
 
 checkDepth :: (?maxdepth::Int) => Doc
 checkDepth = (pp depthVar .:= (pp depthVar .+ pp "1"))
@@ -420,14 +357,6 @@ checkBounds r c e = if null es then empty else (assrt $ checkBVBounds r es)
           arithSubExpr (ESlice _ e' _ _)   = arithSubExpr e'
           arithSubExpr (ECond _ cs d)      = arithSubExpr d ++ (concatMap (\(x,v) -> arithSubExpr x ++ arithSubExpr v) cs)
 
-checkBVBounds :: Refine -> [(Doc, Type)] -> Doc
-checkBVBounds r xs = if null cs then pp "true" else (hsep $ intersperse (pp "&&") cs)
-    where cs = concatMap (\(v, x) -> case typ' r undefined x of
-                                          TUInt _ w   -> [apply ("checkBounds" ++ show w) [v]]
-                                          TStruct _ _ -> let TUser _ sname = typ'' r undefined x in
-                                                         [apply ("checkBounds" ++ sname) [v]]
-                                          _           -> []) xs
-
 
 mkAssign :: Refine -> ECtx -> Expr -> [String] -> Expr -> Doc
 mkAssign rf ctx (EField _ e f) fs r = mkAssign rf ctx e (f:fs) r
@@ -447,11 +376,12 @@ mkAbstRoleBody r rl =
     $$
     checkDropped
 
+
 mkAbstStatement :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Statement -> Doc
 mkAbstStatement ctx mset locals nxt (SSeq _ s1 s2) = mkAbstStatement ctx mset locals (s2:nxt) s1
 mkAbstStatement _   _    _      _   (SPar _ _ _)   = error "Not implemented: Boogie.mkAbstStatement SPar" {- run in sequence, copying packet -}
 mkAbstStatement ctx mset locals nxt (SITE _ c t e) = stat
-    where clone = (isNothing $ statMSet t) || (statMSet t /= maybe (Just []) statMSet e)
+    where clone = (isNothing $ statMSet ctx t) || (statMSet ctx t /= maybe (Just []) (statMSet ctx) e)
           tbranch = if clone
                        then mkAbstStatement ctx mset locals nxt t
                        else mkAbstStatement ctx mset locals []  t
@@ -460,7 +390,7 @@ mkAbstStatement ctx mset locals nxt (SITE _ c t e) = stat
                        else mkAbstStatement ctx mset locals []  $ fromJust e
           suffix = if clone 
                       then empty
-                      else mkNext ctx (msetUnion mset $ fromJust $ statMSet t) locals nxt
+                      else mkNext ctx (msetUnion mset $ fromJust $ statMSet ctx t) locals nxt
           stat = (pp "if" <> (parens $ mkAbstExpr ctx mset locals c) <+> lbrace)
                  $$
                  (nest' tbranch)
@@ -480,12 +410,12 @@ mkAbstStatement ctx mset locals nxt (STest _ c)    = pp "if" <> (parens $ mkAbst
 mkAbstStatement ctx mset locals nxt (SSet _ l rhs) = (assrt $ isDropped .|| (parens $ mkAbstExpr ctx mset' locals l .== mkAbstExpr ctx mset locals rhs))
                                                      $$
                                                      mkNext ctx mset' locals nxt
-    where mset' = msetUnion [l] mset
+    where mset' = msetUnion [(l, exprNext ctx l)] mset
 mkAbstStatement ctx mset locals []  (SSend _ dst)  = checkNotDropped
                                                      $$
                                                      (assrt $ (apply ("loc#" ++ outputTypeName) [pp outputVar]) .== (apply rname $ map (mkAbstExpr ctx mset locals) ks))
                                                      $$
-                                                     (vcat $ map (\e -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
+                                                     (vcat $ map (\(e,_) -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
                                                      $$
                                                      ret
     where mset' = msetComplement ctx mset
@@ -496,17 +426,92 @@ mkAbstStatement ctx mset locals []  (SSendND _ rl c) = checkNotDropped
                                                        $$
                                                        (assrt $ mkAbstExpr (CtxSend ctx $ getRole ?r rl) mset locals c)
                                                        $$
-                                                       (vcat $ map (\e -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
+                                                       (vcat $ map (\(e,_) -> assrt $ mkAbstExpr ctx mset' locals e .== mkAbstExpr ctx mset locals e) mset')
                                                        $$
                                                        ret
     where mset' = msetComplement ctx mset
-mkAbstStatement ctx mset locals nxt (SHavoc _ e)   = mkNext ctx (msetUnion mset [e]) locals nxt
+mkAbstStatement ctx mset locals nxt (SHavoc _ e)   = mkNext ctx (msetUnion mset [(e, exprNext ctx e)]) locals nxt
 mkAbstStatement ctx mset locals nxt (SAssume _ c)  = (assrt $ isDropped .|| mkAbstExpr ctx mset locals c)
                                                      $$
                                                      mkNext ctx mset locals nxt
 mkAbstStatement ctx mset locals nxt (SLet _ _ n v) = mkNext ctx mset locals' nxt
     where locals' = M.insert n (mkAbstExpr ctx mset locals v) locals
 mkAbstStatement _   _    _      nxt s              = error $ "Boogie.mkAbstStatement " ++ show nxt ++ " " ++ show s
+
+mkNext :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
+mkNext ctx mset locals nxt = case nxt of
+                                  []     -> empty
+                                  (s:ss) -> mkAbstStatement ctx mset locals ss s
+
+statMSet :: (?r::Refine) => ECtx -> Statement -> Maybe MSet
+statMSet ctx (SSeq _ l r)    = maybe Nothing (\mset -> maybe Nothing (Just . msetUnion mset) $ statMSet ctx r) $ statMSet ctx l
+statMSet _   (SPar _ _ _)    = error "Boogie.statMSet SPar"
+statMSet ctx (SITE _ _ t me) = maybe Nothing 
+                                     (\msett -> maybe Nothing 
+                                                      (\msete -> if' (msetEq msete msett) (Just msete) Nothing) 
+                                                      (maybe (Just []) (statMSet ctx) me)) 
+                                     (statMSet ctx t)
+statMSet _   (STest _ _)     = Just []
+statMSet ctx (SSet _ l _)    = Just [(l, exprNext ctx l)]
+statMSet _   (SSend  _ _)    = Nothing
+statMSet _   (SSendND _ _ _) = Nothing
+statMSet ctx (SHavoc _ l)    = Just [(l, exprNext ctx l)]
+statMSet _   (SAssume _ _)   = Just []
+statMSet _   (SLet _ _ _ _)  = Just []
+statMSet _   (SFork _ _ _ _) = Nothing
+
+exprNext :: (?r::Refine) => ECtx -> Expr -> Doc
+exprNext c e = mkExprP (render $ apply ("pkt#" ++ outputTypeName) [pp outputVar]) ?r c e
+
+mkRoleFuncBody :: (?rmap::RMap, ?r::Refine) => Role -> Doc
+mkRoleFuncBody rl@Role{..} = 
+      ite (mkExpr ?r (CtxRole rl) roleKeyRange)
+          (ite (mkAbstExpr (CtxRole rl) [] M.empty rolePktGuard)
+               (mkFuncStatement (CtxRole rl) [] M.empty [] roleBody)
+               (pp "false"))
+          (pp "false")
+
+mkFuncStatement :: (?r::Refine, ?rmap::RMap) => ECtx -> MSet -> Locals -> [Statement] -> Statement -> Doc
+mkFuncStatement ctx mset locals nxt (SSeq _ s1 s2) = mkFuncStatement ctx mset locals (s2:nxt) s1
+mkFuncStatement _   _    _      _   (SPar _ _ _)   = error "Not implemented: Boogie.mkFuncStatement SPar" {- run in sequence, copying packet -}
+mkFuncStatement ctx mset locals nxt (SITE _ c t e) = ite (mkAbstExpr ctx mset locals c)
+                                                         (mkFuncStatement ctx mset locals nxt t)
+                                                         (maybe isDropped (mkFuncStatement ctx mset locals nxt) e)
+mkFuncStatement ctx mset locals nxt (STest _ c)    = ite (mkAbstExpr ctx mset locals (EUnOp nopos Not c)) 
+                                                         isDropped
+                                                         (mkFuncNext ctx mset locals nxt)
+mkFuncStatement ctx mset locals nxt (SSet _ l rhs) = mkFuncNext ctx mset' locals nxt
+    where mset' = msetUnion [(l, mkAbstExpr ctx mset locals rhs)] mset
+mkFuncStatement ctx mset locals []  (SSend _ dst)  = 
+    case M.lookup rname ?rmap of
+         Nothing -> pp outputVar .== (apply outputTypeName [ mkAbstExpr ctx mset locals (EPacket nopos)
+                                                           , apply rname $ map (mkAbstExpr ctx mset locals) ks])
+         Just _  -> apply (mkRoleName rname) $ (map (mkAbstExpr ctx mset locals) $ ks ++ [EPacket nopos]) ++ [pp outputVar]
+    where ELocation _ rname ks = dst
+mkFuncStatement ctx mset locals []  (SSendND _ rl c) = 
+    case M.lookup rl ?rmap of
+         Nothing -> notDropped 
+                    $&& 
+                    (apply ("is#" ++ rl) [apply ("loc#" ++ outputTypeName) [pp outputVar]])
+                    $&&
+                    (mkAbstExpr (CtxSend ctx $ getRole ?r rl) mset locals c)
+                    $&&
+                    (apply ("pkt#" ++ outputTypeName) [pp outputVar] .== mkAbstExpr ctx mset locals (EPacket nopos))
+         Just _  -> error "Not implemented: Boogie::mkAbstStatement SSendND"
+mkFuncStatement ctx mset locals nxt (SLet _ _ n v) = mkFuncNext ctx mset locals' nxt
+    where locals' = M.insert n (mkAbstExpr ctx mset locals v) locals
+mkFuncStatement ctx mset locals nxt (SHavoc _ e)   = exists [mkField $ Field nopos vname $ typ ?r ctx e] $ mkFuncNext ctx mset' locals nxt
+    where vname = "_" ++ (replace "." "_" $ show e)
+          mset' = msetUnion mset [(e, pp vname)]
+mkFuncStatement ctx mset locals nxt (SAssume _ c)  = (mkAbstExpr ctx mset locals c) $&& (mkFuncNext ctx mset locals nxt)
+mkFuncStatement ctx mset locals _   (SFork _ vs c b) = exists (map mkField vs) ((mkAbstExpr ctx' mset locals c) $&& (mkFuncStatement ctx' mset locals [] b))
+    where ctx' = CtxFork ctx vs
+mkFuncStatement _   _    _      nxt s              = error $ "Boogie.mkFuncStatement " ++ show nxt ++ " " ++ show s
+
+mkFuncNext :: (?rmap::RMap, ?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
+mkFuncNext ctx mset locals nxt = case nxt of
+                                      []     -> empty
+                                      (s:ss) -> mkFuncStatement ctx mset locals ss s
 
 isDropped :: Doc
 isDropped = apply "is#Dropped" [pp outputVar]
@@ -520,50 +525,15 @@ checkDropped = assrt isDropped
 checkNotDropped :: Doc
 checkNotDropped = assrt notDropped
 
-mkNext :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
-mkNext ctx mset locals nxt = case nxt of
-                                  []     -> empty
-                                  (s:ss) -> mkAbstStatement ctx mset locals ss s
-
-statMSet :: Statement -> Maybe MSet
-statMSet (SSeq _ l r)    = maybe Nothing (\mset -> maybe Nothing (Just . msetUnion mset) $ statMSet r) $ statMSet l
-statMSet (SPar _ _ _)    = error "Boogie.statMSet SPar"
-statMSet (SITE _ _ t me) = maybe Nothing 
-                                 (\msett -> maybe Nothing 
-                                                  (\msete -> if' (msetEq msete msett) (Just msete) Nothing) 
-                                                  (maybe (Just []) statMSet me)) 
-                                 (statMSet t)
-statMSet (STest _ _)     = Just []
-statMSet (SSet _ l _)    = Just [l]
-statMSet (SSend  _ _)    = Nothing
-statMSet (SSendND _ _ _) = Nothing
-statMSet (SHavoc _ l)    = Just [l]
-statMSet (SAssume _ _)   = Just []
-statMSet (SLet _ _ _ _)  = Just []
-statMSet (SFork _ _ _ _) = Nothing
-
-msetEq :: MSet -> MSet -> Bool
-msetEq ms1 ms2 = length ms1 == length ms2 && (length $ intersect ms1 ms2) == length ms1
-
--- assumes non-overlapping sets
-msetUnion :: MSet -> MSet -> MSet
-msetUnion s1 s2 = union s1 s2
-
-overlapsMSet :: (?r::Refine) => ECtx -> Expr -> MSet -> Bool
-overlapsMSet ctx x mset = elem x mset ||
-                          case typ' ?r ctx x of
-                               TStruct _ fs -> any (\f -> overlapsMSet ctx (EField nopos x $ name f) mset) fs
-                               _            -> False 
-
 
 msetComplement :: (?r::Refine) => ECtx -> MSet -> MSet
 msetComplement ctx mset = msetComplement' (EPacket nopos)
-    where msetComplement' e = if elem e mset
+    where msetComplement' e = if isJust $ lookup e mset
                                  then []
                                  else if (overlapsMSet ctx e mset)
                                          then let TStruct _ fs = typ' ?r ctx e in
                                               concatMap (msetComplement' . EField nopos e . name) fs
-                                         else [e]
+                                         else [(e, exprNext ctx e)]
 
 mkBoundsCheckers :: Refine -> Doc
 mkBoundsCheckers r = vcat $ map (\t -> case t of 
@@ -573,7 +543,7 @@ mkBoundsCheckers r = vcat $ map (\t -> case t of
                                 $ collectTypes r
 
 mkBVChecker :: Int -> Doc
-mkBVChecker w = (pp "function" <+> (apply ("checkBounds" ++ show w) [pp "x" <> colon <+> pp "int"]) <> colon <+> (pp "bool") <+> lbrace)
+mkBVChecker w = (pp "function" <+> (apply ("checkBounds" ++ show w) [pp "x" .: pp "int"]) .: (pp "bool") <+> lbrace)
                 $$
                 (nest' $ pp $ "(x >= 0) && (x < " ++ show ((2^w)::Integer) ++ ")")
                 $$
@@ -581,7 +551,7 @@ mkBVChecker w = (pp "function" <+> (apply ("checkBounds" ++ show w) [pp "x" <> c
 
 mkStructChecker :: Refine -> String -> Doc
 mkStructChecker r sname = 
-    (pp "function" <+> (apply ("checkBounds" ++ sname) [pp "x" <> colon <+> pp sname]) <> colon <+> (pp "bool") <+> lbrace)
+    (pp "function" <+> (apply ("checkBounds" ++ sname) [pp "x" .: pp sname]) .: (pp "bool") <+> lbrace)
     $$
     (nest' cond)
     $$
@@ -679,78 +649,3 @@ exprCollectTypes' _ _                  = []
 --exprCollectOps c (EUnOp _ _ e)      = exprCollectOps c e
 --exprCollectOps c (ECond _ cs d)     = concatMap (\(e, v) -> exprCollectOps c e ++ exprCollectOps c v) cs ++ exprCollectOps c d
 --exprCollectOps _ _ = []
-
--- Boogie syntax helpers
-
-(.:=) :: Doc -> Doc -> Doc
-(.:=) l r = l <+> text ":=" <+> r <> semi
-
-var :: Doc -> Doc -> Doc
-var n t = pp "var" <+> n <> colon <+> t <> semi
-
-modifies :: Doc -> Doc
-modifies v = pp "modifies" <+> v <> semi
-
-assrt :: Doc -> Doc
-assrt c = if c == pp "true" then empty else pp "assert" <+> c <> semi
-
-assume :: Doc -> Doc
-assume c = if c == pp "true" then empty else pp "assume" <+> c <> semi
-
-(.==) :: Doc -> Doc -> Doc
-(.==) x y = x <+> pp "==" <+> y
-
-(.!=) :: Doc -> Doc -> Doc
-(.!=) x y = x <+> pp "!=" <+> y
-
-(.||) :: Doc -> Doc -> Doc
-(.||) x y = x <+> pp "||" <+> y
-
-(.&&) :: Doc -> Doc -> Doc
-(.&&) x y = x <+> pp "&&" <+> y
-
-(.=>) :: Doc -> Doc -> Doc
-(.=>) x y = x <+> pp "==>" <+> y
-
-(.<) :: Doc -> Doc -> Doc
-(.<) x y = x <+> pp "<" <+> y
-
-(.>) :: Doc -> Doc -> Doc
-(.>) x y = x <+> pp ">" <+> y
-
-(.<=) :: Doc -> Doc -> Doc
-(.<=) x y = x <+> pp "<=" <+> y
-
-(.>=) :: Doc -> Doc -> Doc
-(.>=) x y = x <+> pp ">=" <+> y
-
-(.+) :: Doc -> Doc -> Doc
-(.+) x y = x <+> pp "+" <+> y
-
-(.-) :: Doc -> Doc -> Doc
-(.-) x y = x <+> pp "-" <+> y
-
-(.*) :: Doc -> Doc -> Doc
-(.*) x y = x <+> pp "*" <+> y
-
-apply :: String -> [Doc] -> Doc
-apply f as = pp f <> (parens $ hsep $ punctuate comma as)
-
-axiom :: [Doc] -> Doc -> Doc
-axiom [] e = pp "axiom" <+> (parens e) <> semi
-axiom vs e = pp "axiom" <+> (parens $ pp "forall" <+> args <+> pp "::" <+> e) <> semi
-    where args = hsep $ punctuate comma vs
-
-call :: String -> [Doc] -> Doc
-call f as = pp "call" <+> apply f as <> semi
-
-havoc :: Doc -> Doc
-havoc x = pp "havoc" <+> x <> semi
-
-havoc' :: Refine -> (Doc, Type) -> Doc
-havoc' r (x,t) = havoc x
-                 $$
-                 (assume $ checkBVBounds r [(x,t)])
-
-ret :: Doc
-ret = pp "return" <> semi
