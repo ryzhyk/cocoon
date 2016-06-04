@@ -101,6 +101,7 @@ role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
     if bCastMAC() == pkt.eth.dstAddr then {
         if iL2VNet(vnet) then {
+            pkt.vxlan := novxlan();
             fork (VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vhport != VHPortId{vhost, port}) {
                 send VHostIn[vhport.vhost, vhport.vport]
             }
@@ -112,7 +113,7 @@ role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
         (* Deliver to destination MAC within virtual network *)
         let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
         if iVHostPort(dstvhport) then {
-           havoc pkt.vxlan;
+           pkt.vxlan := novxlan();
            send VHostIn[dstvhport.vhost, dstvhport.vport]
         }
     }
@@ -163,6 +164,7 @@ refine VHostOut {
                 fork(IP4 ip | iHost(ip) and hHostsVNet(ip, vnet)) {
                     if ip == hst then {
                         fork(VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst and vH2SwLink(vhport) != vport) {
+                            pkt.vxlan := novxlan();
                             send VSwitchOut[hst, vH2SwLink(vhport)]
                         }
                     } else {
