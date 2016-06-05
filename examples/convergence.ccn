@@ -138,8 +138,17 @@ refine VHostOut {
     function vSwPortVNet(IP4 addr, uint<16> swport): VNetId =
         vHPortVNet(vSw2HLink(addr, swport))
 
-    assume (VHPortId hport, IP4 ip, uint<16> swport) (* link symmetry *)
-           (iVHostPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwLink(hport) == swport) == (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport)
+    (* link symmetry: break it into 5 assertions; otherwise corral *)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVHostPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwLink(hport) == swport) => (iVSwitchPort(ip, swport))
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVHostPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwLink(hport) == swport) => (vSw2HLink(ip, swport) == hport)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport) => iVHostPort(hport)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport) => (vHostLocation(hport.vhost) == ip)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport) => (vH2SwLink(hport) == swport)
 
     role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
         send VSwitchIn[vHostLocation(vhost), vH2SwLink(VHPortId{vhost, port})]
