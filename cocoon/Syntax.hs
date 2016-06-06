@@ -24,10 +24,8 @@ module Syntax( pktVar
              , conj
              , disj
              , Statement(..)
-             , statLocals
-             , statSendsTo) where
+             , statLocals) where
 
-import Data.List
 import Control.Monad.Except
 import Text.PrettyPrint
 
@@ -304,22 +302,6 @@ data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: St
                | SAssume {statPos :: Pos, statCond :: Expr}
                | SLet    {statPos :: Pos, statVType :: Type, statVName :: String, statVal :: Expr}
                | SFork   {statPos :: Pos, statFrkVars :: [Field], statCond :: Expr, statFrkBody :: Statement}
-
-statSendsTo :: Statement -> [Expr]
-statSendsTo st = nub $ statSendsTo' st
-
-statSendsTo' :: Statement -> [Expr]
-statSendsTo' (SSeq  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (SPar  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
-statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ (maybe [] statSendsTo' s2)
-statSendsTo' (STest _ _)       = []
-statSendsTo' (SSet  _ _ _)     = []
-statSendsTo' (SSend _ loc)     = [loc]
-statSendsTo' (SHavoc _ _)      = []
-statSendsTo' (SAssume _ _)     = []
-statSendsTo' (SLet _ _ _ _)    = []
-statSendsTo' (SSendND _ _ _)   = error "Syntax.statSendsTo' SSendND"
-statSendsTo' (SFork _ _ _ _)   = error "Syntax.statSendsTo' SFork"
 
 statLocals :: Statement -> [Field]
 statLocals (SSeq _ l r)      = statLocals l ++ statLocals r

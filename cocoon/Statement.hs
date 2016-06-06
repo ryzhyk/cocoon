@@ -1,6 +1,9 @@
 module Statement( statFold
                 , statFuncsRec
-                , statIsDeterministic) where
+                , statIsDeterministic
+                , statIsMulticast
+                , statSendsTo
+                , statSendsToRoles) where
 
 import Data.List
 
@@ -48,3 +51,52 @@ statIsDeterministic (SHavoc  _ _)     = False
 statIsDeterministic (SAssume _ _)     = False
 statIsDeterministic (SLet    _ _ _ _) = True
 statIsDeterministic (SFork   _ _ _ _) = True
+
+
+statIsMulticast :: Statement -> Bool
+statIsMulticast (SSeq    _ l r)   = statIsMulticast l || statIsMulticast r
+statIsMulticast (SPar    _ _ _)   = True
+statIsMulticast (SITE    _ _ t e) = statIsMulticast t || maybe False statIsMulticast e
+statIsMulticast (STest   _ _ )    = False
+statIsMulticast (SSet    _ _ _)   = False
+statIsMulticast (SSend   _ _)     = False
+statIsMulticast (SSendND _ _ _)   = False
+statIsMulticast (SHavoc  _ _)     = False
+statIsMulticast (SAssume _ _)     = False
+statIsMulticast (SLet    _ _ _ _) = False
+statIsMulticast (SFork   _ _ _ _) = True
+
+statSendsToRoles :: Statement -> [String]
+statSendsToRoles st = nub $ statSendsToRoles' st
+
+statSendsToRoles' :: Statement -> [String]
+statSendsToRoles' (SSeq  _ s1 s2)               = statSendsToRoles' s1 ++ statSendsToRoles' s2
+statSendsToRoles' (SPar  _ s1 s2)               = statSendsToRoles' s1 ++ statSendsToRoles' s2
+statSendsToRoles' (SITE  _ _ s1 s2)             = statSendsToRoles' s1 ++ (maybe [] statSendsToRoles' s2)
+statSendsToRoles' (STest _ _)                   = []
+statSendsToRoles' (SSet  _ _ _)                 = []
+statSendsToRoles' (SSend _ (ELocation _ rl _))  = [rl]
+statSendsToRoles' (SSend _ e)                   = error $ "statSendsToRoles' SSend " ++ show e
+statSendsToRoles' (SHavoc _ _)                  = []
+statSendsToRoles' (SAssume _ _)                 = []
+statSendsToRoles' (SLet _ _ _ _)                = []
+statSendsToRoles' (SSendND _ rl _)              = [rl]
+statSendsToRoles' (SFork _ _ _ b)               = statSendsToRoles b
+
+
+statSendsTo :: Statement -> [Expr]
+statSendsTo st = nub $ statSendsTo' st
+
+statSendsTo' :: Statement -> [Expr]
+statSendsTo' (SSeq  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SPar  _ s1 s2)   = statSendsTo' s1 ++ statSendsTo' s2
+statSendsTo' (SITE  _ _ s1 s2) = statSendsTo' s1 ++ (maybe [] statSendsTo' s2)
+statSendsTo' (STest _ _)       = []
+statSendsTo' (SSet  _ _ _)     = []
+statSendsTo' (SSend _ loc)     = [loc]
+statSendsTo' (SHavoc _ _)      = []
+statSendsTo' (SAssume _ _)     = []
+statSendsTo' (SLet _ _ _ _)    = []
+statSendsTo' (SSendND _ _ _)   = error "statSendsTo' SSendND"
+statSendsTo' (SFork _ _ _ _)   = error "statSendsTo' SFork"
+

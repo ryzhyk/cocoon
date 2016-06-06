@@ -16,6 +16,7 @@ import NS
 import Pos
 import Util
 import Expr
+import Refine
 import Boogie.BoogieHelpers
 import Boogie.BoogieExpr
 
@@ -29,12 +30,22 @@ boogieHeader = pp $
     "function _concat(x: int, y: int, m: int): int;\n" ++
     "axiom (forall x: int, y: int, m: int :: (_concat(x,y,m) < m) && (_concat(x,y,m)>=0));\n"
 
+data Encoding = EncAsProcedure
+              | EncAsFunction
+              | EncAsFunctionReverse
+              deriving (Eq)
+
 refinementToBoogie :: Maybe Refine -> Refine -> Int -> ([(Assume, Doc)], Maybe [(String, Doc)])
 refinementToBoogie mabst conc maxdepth = (assums, roles)
     where assums = mapMaybe (\assm -> fmap (assm,) $ assumeToBoogie1 mabst conc assm) $ refineAssumes conc
-          roles  = fmap (\abst -> concatMap (\role -> [{-(role, refinementToBoogie1  abst conc role maxdepth),-}
-                                                       ("_" ++ role, refinementToBoogie1' abst conc role maxdepth)]) $ refineTarget conc)
+          roles  = fmap (\abst -> concatMap (\role -> if refineIsMulticast Nothing abst role
+                                                         then [ (role, refinementToBoogie1 EncAsFunction abst conc role maxdepth)
+                                                              , ("_" ++ role, refinementToBoogie1 EncAsFunctionReverse abst conc role maxdepth)]
+                                                         else [{-(role, refinementToBoogie1  abst conc role maxdepth)-}
+                                                               (role, refinementToBoogie1 EncAsFunction abst conc role maxdepth)])
+                                            $ refineTarget conc)
                         mabst
+
 
 -- Generate verification condition to validate  an assumption.
 -- Returns Nothing if not all functions involved in the assumption are defined
@@ -69,8 +80,8 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 
 type RMap = M.Map String String
 
-refinementToBoogie1 :: Refine -> Refine -> String -> Int -> Doc
-refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, arole, croles, assums, check]
+refinementToBoogie1 :: Encoding -> Refine -> Refine -> String -> Int -> Doc
+refinementToBoogie1 enc abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, roles, assums, check]
     where --ops    = mkBVOps conc
           bounds = mkBoundsCheckers conc
           new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
@@ -79,42 +90,36 @@ refinementToBoogie1 abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-
           gvars  = vcat $ [ var (pp outputVar) (pp outputTypeName)
                           , var (pp depthVar) (pp "int")]
           funcs  = vcat $ map (mkFunction conc) $ refineFuncs conc
-          arole  = mkAbstRole abst $ getRole abst rname
-          croles = let ?rmap = crmap 
-                       ?maxdepth = maxdepth in 
-                   vcat $ punctuate (pp "") $ map (mkConcRole conc) $ map (getRole conc) new
+          roles  = let ?maxdepth = maxdepth in
+                   case enc of 
+                        EncAsProcedure -> (mkAbstRole abst $ getRole abst rname)
+                                          $$
+                                          (let ?rmap = crmap in 
+                                           vcat $ punctuate (pp "") $ map (mkRoleAsProc conc) $ map (getRole conc) new)
+                        EncAsFunction  -> (let ?rmap = M.singleton rname ("a_" ++ rname) in
+                                           mkRoleAsFunction abst $ getRole abst rname)
+                                          $$
+                                          (let ?rmap = crmap in
+                                           vcat $ punctuate (pp "") $ map (mkRoleAsProc conc) $ map (getRole conc) new)
+                        EncAsFunctionReverse -> (let ?rmap = crmap in
+                                                 vcat $ map (mkRoleAsFunction conc . getRole conc) new)
+                                                $$
+                                                (let ?rmap = M.singleton rname ("a_" ++ rname) in
+                                                 mkRoleAsProc abst $ getRole abst rname)
           assums = vcat $ map (mkAssume conc) $ refineAssumes conc
-          check  = mkCheck False conc rname 
+          check  = mkCheck enc conc rname 
 
 
-refinementToBoogie1' :: Refine -> Refine -> String -> Int -> Doc
-refinementToBoogie1' abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, arole, croles, assums, check]
-    where --ops    = mkBVOps conc
-          bounds = mkBoundsCheckers conc
-          new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
-          crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
-          types  = vcat $ (map mkTypeDef $ refineTypes conc) ++ [mkLocType conc, mkOutputType]
-          gvars  = vcat $ [ var (pp outputVar) (pp outputTypeName)
-                          , var (pp depthVar) (pp "int")]
-          funcs  = vcat $ map (mkFunction conc) $ refineFuncs conc
-          arole  = let ?rmap = M.empty in
-                       mkRoleAsFunction abst $ getRole abst rname
-          croles = let ?rmap = crmap 
-                       ?maxdepth = maxdepth in 
-                   vcat $ punctuate (pp "") $ map (mkConcRole conc) $ map (getRole conc) new
-          assums = vcat $ map (mkAssume conc) $ refineAssumes conc
-          check  = mkCheck True conc rname 
-
-mkCheck :: Bool -> Refine -> String -> Doc
-mkCheck asfunc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
-                            $$
-                            (modifies $ pp outputVar)
-                            $$
-                            lbrace
-                            $$
-                            (nest' body)
-                            $$
-                            rbrace
+mkCheck :: Encoding -> Refine -> String -> Doc
+mkCheck enc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
+                         $$
+                         (modifies $ pp outputVar)
+                         $$
+                         lbrace
+                         $$
+                         (nest' body)
+                         $$
+                         rbrace
     where role = getRole conc rname
           body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleKeys role)
                  $$
@@ -132,11 +137,14 @@ mkCheck asfunc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                  $$
                  (pp depthVar .:= pp "0")
                  $$
-                 (call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
+                 (if enc == EncAsFunctionReverse 
+                     then call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
+                     else call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
                  $$
-                 if asfunc
-                    then assrt $ apply ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
-                    else call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
+                 case enc of
+                      EncAsProcedure       -> call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
+                      EncAsFunction        -> assrt $ apply ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
+                      EncAsFunctionReverse -> assrt $ apply ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
 
 mkLocType :: Refine -> Doc
 mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
@@ -193,7 +201,7 @@ mkFunction r f@Function{..} = maybe ((decl <> semi)
           asmbody = checkBVBounds r [(bexpr, funcType)]
 
 mkRoleAsFunction :: (?rmap::RMap) => Refine -> Role -> Doc
-mkRoleAsFunction r rl@Role{..} = (pp "function" <+> (apply ("a_" ++ roleName) args) <> pp ":" <+> pp "bool" <+> lbrace)
+mkRoleAsFunction r rl@Role{..} = (pp "function" <+> (apply (mkRoleName roleName) args) <> pp ":" <+> pp "bool" <+> lbrace)
                                  $$
                                  (nest' $ let ?r = r in mkRoleFuncBody rl)
                                  $$
@@ -216,32 +224,32 @@ mkAbstRole r rl@Role{..} = (pp "procedure" <+> (apply ("a_" ++ roleName) args))
 
 
 
-mkConcRole :: (?rmap::RMap, ?maxdepth::Int) => Refine -> Role -> Doc
-mkConcRole r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args))
-                           $$
-                           (pp "requires" <+> mkExpr r (CtxRole rl) roleKeyRange <> semi)
-                           $$
-                           (pp "requires" <+> mkExprP "_pkt" r (CtxRole rl) rolePktGuard <> semi)
-                           $$
-                           (pp "requires" <+> checkBVBounds r (map (\k -> (pp $ name k, fieldType k)) roleKeys) <> semi)
-                           $$
-                           (modifies $ pp outputVar)
-                           $$
-                           lbrace
-                           $+$
-                           (nest' $ var (pp locationVar) (pp locTypeName)
-                                    $$
-                                    var (pp pktVar) (pp packetTypeName) 
-                                    $$
-                                    (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleLocals rl)
-                                    $$
-                                    (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleForkVars rl)
-                                    $$
-                                    pp pktVar .:= pp "_pkt"
-                                    $$
-                                    mkStatement r (CtxRole rl) roleBody)
-                           $$
-                           rbrace
+mkRoleAsProc :: (?rmap::RMap, ?maxdepth::Int) => Refine -> Role -> Doc
+mkRoleAsProc r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) args))
+                             $$
+                             (pp "requires" <+> mkExpr r (CtxRole rl) roleKeyRange <> semi)
+                             $$
+                             (pp "requires" <+> mkExprP "_pkt" r (CtxRole rl) rolePktGuard <> semi)
+                             $$
+                             (pp "requires" <+> checkBVBounds r (map (\k -> (pp $ name k, fieldType k)) roleKeys) <> semi)
+                             $$
+                             (modifies $ pp outputVar)
+                             $$
+                             lbrace
+                             $+$
+                             (nest' $ var (pp locationVar) (pp locTypeName)
+                                      $$
+                                      var (pp pktVar) (pp packetTypeName) 
+                                      $$
+                                      (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleLocals rl)
+                                      $$
+                                      (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleForkVars rl)
+                                      $$
+                                      pp pktVar .:= pp "_pkt"
+                                      $$
+                                      mkStatement r (CtxRole rl) roleBody)
+                             $$
+                             rbrace
     where args = map mkField $ roleKeys ++ [Field nopos "_pkt" $ TUser nopos packetTypeName]
 
 mkField :: Field -> Doc
@@ -497,7 +505,7 @@ mkFuncStatement ctx mset locals []  (SSendND _ rl c) =
                     (mkAbstExpr (CtxSend ctx $ getRole ?r rl) mset locals c)
                     $&&
                     (apply ("pkt#" ++ outputTypeName) [pp outputVar] .== mkAbstExpr ctx mset locals (EPacket nopos))
-         Just _  -> error "Not implemented: Boogie::mkAbstStatement SSendND"
+         Just _  -> error "Not implemented: Boogie::mkFuncStatement SSendND"
 mkFuncStatement ctx mset locals nxt (SLet _ _ n v) = mkFuncNext ctx mset locals' nxt
     where locals' = M.insert n (mkAbstExpr ctx mset locals v) locals
 mkFuncStatement ctx mset locals nxt (SHavoc _ e)   = exists [mkField $ Field nopos vname $ typ ?r ctx e] $ mkFuncNext ctx mset' locals nxt

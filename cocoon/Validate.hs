@@ -184,7 +184,7 @@ nodeValidateFinal r nd@Node{..} = do
                                                                     (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
                                          $ statSendsTo (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
-                          assertR r (not $ any (\(ELocation _ rl _) -> elem rl (map snd nodePorts)) $ statSendsTo (roleBody r2)) (pos nd)
+                          assertR r (not $ any (\rl -> elem rl (map snd nodePorts)) $ statSendsToRoles (roleBody r2)) (pos nd)
                                  $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports"
                           checkLinkSt $ roleBody r2)
           nodePorts
