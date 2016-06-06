@@ -65,12 +65,17 @@ combine prev new = do
                                   assertR r ((rolePktGuard $ getRole prev role) == (rolePktGuard $ getRole new role)) (pos new) 
                                           $ "Role " ++ role ++ " is re-defined with a different guard"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
+    mapM_ (\rlname -> do assertR new ((not $ refineIsMulticast (Just prev) new rlname) || refineIsDeterministic (Just prev) new rlname) (pos new) $
+                                     "Refined role " ++ rlname ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
+          $ refineTarget new
     let types   = refineTypes prev'   ++ refineTypes new
         roles   = refineRoles prev'   ++ refineRoles new
         assumes = refineAssumes prev' ++ refineAssumes new 
         nodes   = refineNodes prev'   ++ refineNodes new 
     funcs <- mergeFuncs $ refineFuncs prev'  ++ refineFuncs new
-    return $ Refine (pos new) (refineTarget new) types funcs roles assumes nodes
+    let combined = Refine (pos new) (refineTarget new) types funcs roles assumes nodes
+
+    return combined 
 
 mergeFuncs :: (MonadError String me) => [Function] -> me [Function]
 mergeFuncs []     = return []
@@ -99,6 +104,9 @@ validate1 r@Refine{..} = do
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
+    mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
+                                "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
+          refineRoles
     mapM_ (typeValidate r . tdefType) refineTypes
     -- each role occurs at most once as a port
     uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . nodePorts) refineNodes
