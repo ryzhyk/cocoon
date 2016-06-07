@@ -50,8 +50,6 @@ typedef struct {
 } VHPortId
 
 (*  TODO: 
-    - basic virtualization
-    - Broad/multicast
     - Secure router + verified security policy
     - Multiple physical networks
  *)
@@ -97,24 +95,54 @@ function arpResponse(Packet p): Packet =
           , p.vxlan
           }
 
+typedef uint<64> tag_t
+
+function allowedToRead(VHostId hst, tag_t tag): bool
+
+(* Proxy ports can re-taint packets flowing through them.  
+   Sensors are a special case of proxies. *)
+function iProxyPort(VHPortId port): bool
+function taintsWith(VHPortId port, tag_t tag): bool
+
+(* P2P connection allowed *)
+function connection(VHPortId from, VHPortId to): bool
+
+function tainted(VHostId hst, tag_t tag): bool
+assume (VHPortId port1, VHPortId port2, tag_t tag) 
+       (iProxyPort(port1) and taintsWith(port1, tag) and connection(port1, port2)) => tainted(port2.vhost, tag)
+
+assume (VHPortId port1, VHPortId port2, tag_t tag)
+       (tainted(port1.vhost, tag) and (not iProxyPort(port1)) and connection(port1, port2)) => tainted(port2.vhost, tag)
+
+(* The main confidentiality property *)
+assume (VHostId hst, tag_t tag) tainted(hst, tag) => allowedToRead(hst, tag)
+
+
+
 role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
-    if bCastMAC() == pkt.eth.dstAddr then {
-        if iL2VNet(vnet) then {
-            pkt.vxlan := novxlan();
-            fork (VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vhport != VHPortId{vhost, port}) {
-                send VHostIn[vhport.vhost, vhport.vport]
+    (* Don't allow hosts to lie about their MAC address *)
+    if pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port}) then {
+        if bCastMAC() == pkt.eth.dstAddr then {
+            if iL2VNet(vnet) then {
+                pkt.vxlan := novxlan();
+                fork (VHPortId vhport | iVHostPort(vhport) and 
+                                        vHPortVNet(vhport) == vnet and 
+                                        vhport != VHPortId{vhost, port} and 
+                                        connection(VHPortId{vhost,port}, vhport)) {
+                    send VHostIn[vhport.vhost, vhport.vport]
+                }
+            } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+                pkt := arpResponse(pkt);
+                send VHostIn[vhost, port]
             }
-        } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
-            pkt := arpResponse(pkt);
-            send VHostIn[vhost, port]
-        }
-    } else {
-        (* Deliver to destination MAC within virtual network *)
-        let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
-        if iVHostPort(dstvhport) then {
-           pkt.vxlan := novxlan();
-           send VHostIn[dstvhport.vhost, dstvhport.vport]
+        } else {
+            (* Deliver to destination MAC within virtual network *)
+            let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+            if iVHostPort(dstvhport) and connection(VHPortId{vhost,port}, dstvhport) then {
+               pkt.vxlan := novxlan();
+               send VHostIn[dstvhport.vhost, dstvhport.vport]
+            }
         }
     }
 
@@ -166,42 +194,48 @@ refine VHostOut {
               , novxlan()}
 
     role VSwitchIn[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
-        (* Destination exists? *)
-        let VNetId vnet = vSwPortVNet(hst, vport);
-        if bCastMAC() == pkt.eth.dstAddr then {
-            if iL2VNet(vnet) then {
-                fork(IP4 ip | iHost(ip) and hHostsVNet(ip, vnet)) {
-                    if ip == hst then {
-                        fork(VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst and vH2SwLink(vhport) != vport) {
-                            pkt.vxlan := novxlan();
-                            send VSwitchOut[hst, vH2SwLink(vhport)]
+        if pkt.eth.srcAddr == vHPort2Mac(vSw2HLink(hst, vport)) then {
+            (* Destination exists? *)
+            let VNetId vnet = vSwPortVNet(hst, vport);
+            if bCastMAC() == pkt.eth.dstAddr then {
+                if iL2VNet(vnet) then {
+                    fork(IP4 ip | iHost(ip) and hHostsVNet(ip, vnet)) {
+                        if ip == hst then {
+                            fork(VHPortId vhport | iVHostPort(vhport) and 
+                                                   vHPortVNet(vhport) == vnet and 
+                                                   vHostLocation(vhport.vhost) == hst and 
+                                                   vH2SwLink(vhport) != vport and
+                                                   connection(vSw2HLink(hst, vport), vhport)) {
+                                pkt.vxlan := novxlan();
+                                send VSwitchOut[hst, vH2SwLink(vhport)]
+                            }
+                        } else {
+                            pkt := vxlanEncapsulate( pkt
+                                                   , vnet
+                                                   , hst
+                                                   , ip);
+                            send HostOut[hst, 8'd0]
                         }
+                    }
+                } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
+                    pkt := arpResponse(pkt);
+                    send VSwitchOut[hst, vport]
+                }
+            } else {
+                let VHPortId to_vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+                if iVHostPort(to_vhport) and connection(vSw2HLink(hst, vport), to_vhport) then {
+                    if (vHostLocation(to_vhport.vhost) == hst) then { 
+                        (* Local destination -- deliver *)
+                        pkt.vxlan := novxlan();
+                        send VSwitchOut[hst, vH2SwLink(to_vhport)]
                     } else {
+                        (* Remote destination -- encapsulate *)
                         pkt := vxlanEncapsulate( pkt
                                                , vnet
                                                , hst
-                                               , ip);
+                                               , vHostLocation(to_vhport.vhost));
                         send HostOut[hst, 8'd0]
                     }
-                }
-            } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
-                pkt := arpResponse(pkt);
-                send VSwitchOut[hst, vport]
-            }
-        } else {
-            let VHPortId to_vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
-            if iVHostPort(to_vhport) then {
-                if (vHostLocation(to_vhport.vhost) == hst) then { 
-                    (* Local destination -- deliver *)
-                    pkt.vxlan := novxlan();
-                    send VSwitchOut[hst, vH2SwLink(to_vhport)]
-                } else {
-                    (* Remote destination -- encapsulate *)
-                    pkt := vxlanEncapsulate( pkt
-                                           , vnet
-                                           , hst
-                                           , vHostLocation(to_vhport.vhost));
-                    send HostOut[hst, 8'd0]
                 }
             }
         }
@@ -223,7 +257,10 @@ refine VHostOut {
             let vxlan_t vxlan = pkt.vxlan;
             pkt := vxlanDecapsulate(pkt);
             if pkt.eth.dstAddr == bCastMAC() then {
-                fork(VHPortId vhport | iVHostPort(vhport) and vHPortVNet(vhport) == vxlan.vni and vHostLocation(vhport.vhost) == hst) {
+                fork(VHPortId vhport | iVHostPort(vhport) and 
+                                       vHPortVNet(vhport) == vxlan.vni and 
+                                       vHostLocation(vhport.vhost) == hst and 
+                                       connection(mac2VHPort(vxlan.vni, pkt.eth.srcAddr), vhport)) {
                     send VSwitchOut[hst, vH2SwLink(vhport)]
                 }
             } else {
