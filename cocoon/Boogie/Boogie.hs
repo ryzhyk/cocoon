@@ -22,13 +22,13 @@ import Boogie.BoogieExpr
 
 boogieHeader = pp $ 
     "function _div(x: int, y: int): int;\n" ++
-    "axiom (forall x: int, y: int :: (y>0) ==> ((_div(x,y) <= x) && (_div(x,y)>=0)));\n" ++
+    "axiom (forall x: int, y: int :: ((y>0) && (x>=0)) ==> ((_div(x,y) <= x) && (_div(x,y)>=0)));\n" ++
     "function _mod(x: int, y: int): int;\n" ++
-    "axiom (forall x: int, y: int :: (y>0) ==> ((_mod(x,y) <= x) && (_mod(x,y) < y) && (_mod(x,y)>=0)));\n" ++
+    "axiom (forall x: int, y: int :: ((y>0) && (x>=0) ) ==> ((_mod(x,y) <= x) && (_mod(x,y) < y) && (_mod(x,y)>=0)));\n" ++
     "function _slice(x: int, h: int, l: int, m: int): int;\n" ++
-    "axiom (forall x: int, h: int, l: int, m: int :: (_slice(x,h,l,m) < m) && (_slice(x,h,l,m)>=0));\n" ++
+    "axiom (forall x: int, h: int, l: int, m: int :: (m>0) ==> ((_slice(x,h,l,m) < m) && (_slice(x,h,l,m)>=0)));\n" ++
     "function _concat(x: int, y: int, m: int): int;\n" ++
-    "axiom (forall x: int, y: int, m: int :: (_concat(x,y,m) < m) && (_concat(x,y,m)>=0));\n"
+    "axiom (forall x: int, y: int, m: int :: (m>0) ==> ((_concat(x,y,m) < m) && (_concat(x,y,m)>=0)));\n"
 
 data Encoding = EncAsProcedure
               | EncAsFunction
