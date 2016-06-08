@@ -577,6 +577,7 @@ collectTypes r@Refine{..} = let ?r = r in
                                                               _            -> []) refineTypes ++
                                   concatMap (\f -> maybe [] (exprCollectTypes (CtxFunc f)) $ funcDef f) refineFuncs ++
                                   concatMap (\a -> exprCollectTypes (CtxAssume a) $ assExpr a) refineAssumes ++
+                                  concatMap (\rl -> map (typ' r (CtxRole rl)) $ roleKeys rl) refineRoles ++
                                   concatMap (\rl -> exprCollectTypes (CtxRole rl) $ roleKeyRange rl) refineRoles ++
                                   concatMap (\rl -> exprCollectTypes (CtxRole rl) $ rolePktGuard rl) refineRoles ++
                                   concatMap (\rl -> statCollectTypes (CtxRole rl) $ roleBody rl) refineRoles
