@@ -9,7 +9,10 @@ for file in $1/*.bpl
 do
     printf "Verifying $file "
     start=`date +%s`
-    corral.exe "$file" /main:main /k:100 /recursionBound:10 &> "$file".log
+    corral.exe "$file" /main:main /k:100 /recursionBound:10 &> "$file".log 
+    #/proverLog:log 
+    #/staticInlining
+    #/z3opt:SMT.MBQI=true 
     ERR=$?
     end=`date +%s`
     runtime=$((end-start))
