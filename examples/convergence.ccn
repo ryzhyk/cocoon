@@ -50,7 +50,8 @@ typedef struct {
 } VHPortId
 
 (*  TODO: 
-    - Secure router + verified security policy
+    - Verified security policy
+    - Service chaining
     - Multiple physical networks
  *)
 
@@ -78,7 +79,6 @@ assume (VHPortId vport) bCastMAC() != vHPort2Mac(vport)
 
 function ip2mac(IP4 ip): uint<48>
 
-role VHostIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = filter false
 
 function arpResponse(Packet p): Packet = 
     Packet{ eth_t { p.arp.tha
@@ -118,8 +118,9 @@ assume (VHPortId port1, VHPortId port2, tag_t tag)
 assume (VHostId hst, tag_t tag) tainted(hst, tag) => allowedToRead(hst, tag)
 
 
+role VHostVIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = filter false
 
-role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
+role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
     (* Don't allow hosts to lie about their MAC address *)
     if pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port}) then {
@@ -130,35 +131,59 @@ role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
                                         vHPortVNet(vhport) == vnet and 
                                         vhport != VHPortId{vhost, port} and 
                                         connection(VHPortId{vhost,port}, vhport)) {
-                    send VHostIn[vhport.vhost, vhport.vport]
+                    send VHostVIn[vhport.vhost, vhport.vport]
                 }
             } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
                 pkt := arpResponse(pkt);
-                send VHostIn[vhost, port]
+                send VHostVIn[vhost, port]
             }
         } else {
             (* Deliver to destination MAC within virtual network *)
             let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
             if iVHostPort(dstvhport) and connection(VHPortId{vhost,port}, dstvhport) then {
                pkt.vxlan := novxlan();
-               send VHostIn[dstvhport.vhost, dstvhport.vport]
+               send VHostVIn[dstvhport.vhost, dstvhport.vport]
             }
         }
     }
 
-refine VHostOut {
+refine {
+    function iHost(IP4 addr): bool
+
+    function iVHostPPort(VHPortId port): bool
+    assume (VHPortId port) iVHostPPort(port) => iVHost(port.vhost)
+
+    function v2pPort(VHPortId port): IP4
+    function p2vPort(IP4 addr): VHPortId
+    assume (VHPortId port, IP4 ip) (iVHostPPort(port) and (ip == v2pPort(port))) => iHost(ip) 
+    assume (VHPortId port, IP4 ip) (iVHostPPort(port) and (ip == v2pPort(port))) => (p2vPort(ip) == port)
+
+    role VHostPIn[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = filter false
+    role VHostPOut[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = 
+        if pkt.vxlan == novxlan() then {
+            send VSwitchPlainOut[v2pPort(VHPortId{vhost, port})]
+        }
+
+    role VSwitchPlainOut[IP4 addr] | iHost(addr) / not pkt.vxlan.valid = filter false
+    role VSwitchPlainIn[IP4 addr] | iHost(addr) / pkt.vxlan == novxlan() = 
+        let VHPortId vport = p2vPort(addr);
+        if iVHostPPort(vport) then {
+            send VHostPIn[vport.vhost, vport.vport]
+        }
+}
+
+refine VHostVOut {
 
     (* Physical topology *)
-
-    function iHost(IP4 addr): bool
+    function vHostLocation(VHostId vhost): IP4
+    assume (VHostId vhost) iVHost(vhost) => iHost(vHostLocation(vhost))
+    
     function iVSwitchPort(IP4 hst, uint<16> swport): bool
     assume (IP4 hst, uint<16> swport) iVSwitchPort(hst, swport) => iHost(hst)
 
     function hHostsVNet(IP4 hst, VNetId vnet): bool
     assume (VHPortId vhport, VNetId vnet, IP4 hst) (vHPortVNet(vhport) == vnet and vHostLocation(vhport.vhost) == hst) => hHostsVNet(hst, vnet) 
 
-    function vHostLocation(VHostId vhost): IP4
-    assume (VHostId vhost) iVHost(vhost) => iHost(vHostLocation(vhost))
 
     function vH2SwLink(VHPortId hport): uint<16>
     function vSw2HLink(IP4 addr, uint<16> swport): VHPortId
@@ -166,7 +191,10 @@ refine VHostOut {
     function vSwPortVNet(IP4 addr, uint<16> swport): VNetId =
         vHPortVNet(vSw2HLink(addr, swport))
 
-    (* link symmetry: break it into 5 assertions; otherwise corral *)
+    (* link symmetry: break it into 5 assertions to help z3 handle quantifiers *)
+    (*assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVHostPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwLink(hport) == swport) == ((iVSwitchPort(ip, swport)) and (vSw2HLink(ip, swport) == hport)) *)
+    
     assume (VHPortId hport, IP4 ip, uint<16> swport) 
            (iVHostPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwLink(hport) == swport) => (iVSwitchPort(ip, swport))
     assume (VHPortId hport, IP4 ip, uint<16> swport) 
@@ -177,9 +205,6 @@ refine VHostOut {
            (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport) => (vHostLocation(hport.vhost) == ip)
     assume (VHPortId hport, IP4 ip, uint<16> swport) 
            (iVSwitchPort(ip, swport) and vSw2HLink(ip, swport) == hport) => (vH2SwLink(hport) == swport)
-
-    role VHostOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
-        send VSwitchIn[vHostLocation(vhost), vH2SwLink(VHPortId{vhost, port})]
 
     function vxlanEncapsulate(Packet p, VNetId vnet, IP4 src, IP4 dst): Packet =
         Packet{ eth_t{48'd0, 48'd0}
@@ -192,7 +217,10 @@ refine VHostOut {
               , p.vxlan.arp
               , p.vxlan.ip4
               , novxlan()}
-
+ 
+    role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
+        send VSwitchIn[vHostLocation(vhost), vH2SwLink(VHPortId{vhost, port})]
+   
     role VSwitchIn[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
         if pkt.eth.srcAddr == vHPort2Mac(vSw2HLink(hst, vport)) then {
             (* Destination exists? *)
@@ -214,7 +242,7 @@ refine VHostOut {
                                                    , vnet
                                                    , hst
                                                    , ip);
-                            send HostOut[hst, 8'd0]
+                            send VSwitchVXLANOut[hst]
                         }
                     }
                 } else if iL3VNet(vnet) and pkt.arp.valid and (pkt.arp.oper == 16'd1 (*ARP Request*)) then {
@@ -234,7 +262,8 @@ refine VHostOut {
                                                , vnet
                                                , hst
                                                , vHostLocation(to_vhport.vhost));
-                        send HostOut[hst, 8'd0]
+                        send VSwitchVXLANOut[hst]
+
                     }
                 }
             }
@@ -242,16 +271,13 @@ refine VHostOut {
         
     role VSwitchOut[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
         let VHPortId vhport = vSw2HLink(hst, vport);
-        send VHostIn[vhport.vhost, vhport.vport]
+        send VHostVIn[vhport.vhost, vhport.vport]
 
-    role HostOut[IP4 hst, uint<8> port] | iHost(hst) and port == 8'd0 = 
-        send Fabric[]
-
-    role Fabric[] = 
+    role VSwitchVXLANOut[IP4 hst] | iHost(hst) = 
         if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
-            send HostIn[pkt.ip4.dst, 8'd0]
+            send VSwitchVXLANIn[pkt.ip4.dst]
 
-    role HostIn[IP4 hst, uint<8> port] | iHost(hst) and port == 8'd0 = 
+    role VSwitchVXLANIn[IP4 hst] | iHost(hst) = 
         if pkt.vxlan.valid then {
             (* Decapsulate *)
             let vxlan_t vxlan = pkt.vxlan;
@@ -265,6 +291,85 @@ refine VHostOut {
                 }
             } else {
                 send VSwitchOut[hst, vH2SwLink(mac2VHPort(vxlan.vni, vxlan.eth.dstAddr))]
+            }
+        }
+}
+
+refine VHostPOut, VSwitchPlainIn {
+
+    function iVSwitchPPort(IP4 hst, uint<16> swport): bool
+    assume (IP4 hst, uint<16> swport) iVSwitchPPort(hst, swport) => iHost(hst)
+
+    function vH2SwPLink(VHPortId hport): uint<16>
+    function vSw2HPLink(IP4 addr, uint<16> swport): VHPortId
+
+    (* link symmetry: break it into 5 assertions *)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVHostPPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwPLink(hport) == swport) => (iVSwitchPPort(ip, swport))
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVHostPPort(hport) and vHostLocation(hport.vhost) == ip and vH2SwPLink(hport) == swport) => (vSw2HPLink(ip, swport) == hport)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPPort(ip, swport) and vSw2HPLink(ip, swport) == hport) => iVHostPPort(hport)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPPort(ip, swport) and vSw2HPLink(ip, swport) == hport) => (vHostLocation(hport.vhost) == ip)
+    assume (VHPortId hport, IP4 ip, uint<16> swport) 
+           (iVSwitchPPort(ip, swport) and vSw2HPLink(ip, swport) == hport) => (vH2SwPLink(hport) == swport)
+
+    function downTunVnet(): VNetId
+    function upTunVnet(): VNetId
+    assume (VNetId vnet) iVNet(vnet) => (downTunVnet() != vnet)
+    assume (VNetId vnet) iVNet(vnet) => (upTunVnet() != vnet)
+    assume () upTunVnet() != downTunVnet()
+
+    role VHostPOut[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = 
+        send VSwitchPIn[vHostLocation(vhost), vH2SwPLink(VHPortId{vhost, port})]
+
+    role VSwitchPIn[IP4 hst, uint<16> vport] | iVSwitchPPort(hst, vport) =
+        let IP4 dsthost = v2pPort(vSw2HPLink(hst, vport));
+        if pkt.vxlan == novxlan() then {
+            if (dsthost == hst)(* port on same host *) then {
+                send VSwitchPlainOut[hst]
+            } else {
+                pkt := vxlanEncapsulate( pkt
+                                       , downTunVnet()
+                                       , hst
+                                       , dsthost);
+                send VSwitchTunOut[hst]
+            }
+        }
+
+    role VSwitchPOut[IP4 hst, uint<16> vport] | iVSwitchPPort(hst, vport) =
+        let VHPortId vhport = vSw2HPLink(hst, vport);
+        send VHostPIn[vhport.vhost, vhport.vport]
+
+    role VSwitchTunOut[IP4 hst] | iHost(hst) = 
+        if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
+            send VSwitchTunIn[pkt.ip4.dst]
+
+    role VSwitchTunIn[IP4 hst] | iHost(hst) / pkt.vxlan.valid = 
+        if pkt.vxlan.vni == downTunVnet() then {
+            pkt := vxlanDecapsulate(pkt);
+            send VSwitchPlainOut[hst]
+        } else {
+            let VHPortId vport = p2vPort(pkt.ip4.src);
+            if  iVHostPPort(vport) then {
+                pkt := vxlanDecapsulate(pkt);
+                send VSwitchPOut[hst, vH2SwPLink(vport)]           
+            }
+        }
+
+    role VSwitchPlainIn[IP4 addr] | iHost(addr) / pkt.vxlan == novxlan() = 
+        let VHPortId vport = p2vPort(addr);
+        if iVHostPPort(vport) then {
+            let IP4 dsthost = vHostLocation(vport.vhost);
+            if dsthost == addr then {
+                send VSwitchPOut[addr, vH2SwPLink(vport)]
+            } else {
+                pkt := vxlanEncapsulate( pkt
+                                       , upTunVnet()
+                                       , addr
+                                       , dsthost);
+                send VSwitchTunOut[addr]
             }
         }
 }
@@ -335,10 +440,13 @@ refine {
             default: VHPortId{32'd0, 8'd0};
         }
 
+    function iVHostPPort(VHPortId port): bool = false
+    function iVSwitchPPort(IP4 hst, uint<16> swport):bool = false 
+
 (*
     role VHost[VHostId vhost] | iVHost(vhost) = filter false
-    host VHost( (VHostIn, VHostOut) )
+    host VHost( (VHostVIn, VHostVOut) )
 
     role VSwitch[IP4 hst] | iHost(hst) = filter false
-    switch VSwitch((VSwitchIn, VSwitchOut), (HostIn, HostOut)) *)
+    switch VSwitch((VSwitchIn, VSwitchOut), (VSwitchVXLANIn, VSwitchVXLANOut)) *)
 }
