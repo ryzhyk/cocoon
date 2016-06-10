@@ -42,7 +42,7 @@ refinementToBoogie mabst conc maxdepth = (assums, roles)
                                                          then [ (role, refinementToBoogie1 EncAsFunction abst conc role maxdepth)
                                                               , ("_" ++ role, refinementToBoogie1 EncAsFunctionReverse abst conc role maxdepth)]
                                                          else [{-(role, refinementToBoogie1  abst conc role maxdepth)-}
-                                                               (role, refinementToBoogie1 EncAsFunction abst conc role maxdepth)])
+                                                               (role, refinementToBoogie1 EncAsProcedure abst conc role maxdepth)])
                                             $ refineTarget conc)
                         mabst
 
