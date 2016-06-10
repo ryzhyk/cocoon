@@ -164,7 +164,10 @@ refine {
             send VSwitchPlainOut[v2pPort(VHPortId{vhost, port})]
         }
 
-    role VSwitchPlainOut[IP4 addr] | iHost(addr) / not pkt.vxlan.valid = filter false
+    role VSwitchPlainOut[IP4 hst] | iHost(hst) / not pkt.vxlan.valid = 
+        if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
+            send VSwitchPlainIn[pkt.ip4.dst]
+
     role VSwitchPlainIn[IP4 addr] | iHost(addr) / pkt.vxlan == novxlan() = 
         let VHPortId vport = p2vPort(addr);
         if iVHostPPort(vport) then {
@@ -190,6 +193,12 @@ refine VHostVOut {
 
     function vSwPortVNet(IP4 addr, uint<16> swport): VNetId =
         vHPortVNet(vSw2HLink(addr, swport))
+
+    function downTunVnet(): VNetId
+    function upTunVnet(): VNetId
+    assume (VNetId vnet) iVNet(vnet) => (downTunVnet() != vnet)
+    assume (VNetId vnet) iVNet(vnet) => (upTunVnet() != vnet)
+    assume () upTunVnet() != downTunVnet()
 
     (* link symmetry: break it into 5 assertions to help z3 handle quantifiers *)
     (*assume (VHPortId hport, IP4 ip, uint<16> swport) 
@@ -273,7 +282,7 @@ refine VHostVOut {
         let VHPortId vhport = vSw2HLink(hst, vport);
         send VHostVIn[vhport.vhost, vhport.vport]
 
-    role VSwitchVXLANOut[IP4 hst] | iHost(hst) = 
+    role VSwitchVXLANOut[IP4 hst] | iHost(hst) / pkt.vxlan.valid and pkt.vxlan.vni != upTunVnet() and pkt.vxlan.vni != downTunVnet() = 
         if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
             send VSwitchVXLANIn[pkt.ip4.dst]
 
@@ -315,12 +324,6 @@ refine VHostPOut, VSwitchPlainIn {
     assume (VHPortId hport, IP4 ip, uint<16> swport) 
            (iVSwitchPPort(ip, swport) and vSw2HPLink(ip, swport) == hport) => (vH2SwPLink(hport) == swport)
 
-    function downTunVnet(): VNetId
-    function upTunVnet(): VNetId
-    assume (VNetId vnet) iVNet(vnet) => (downTunVnet() != vnet)
-    assume (VNetId vnet) iVNet(vnet) => (upTunVnet() != vnet)
-    assume () upTunVnet() != downTunVnet()
-
     role VHostPOut[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = 
         send VSwitchPIn[vHostLocation(vhost), vH2SwPLink(VHPortId{vhost, port})]
 
@@ -342,7 +345,7 @@ refine VHostPOut, VSwitchPlainIn {
         let VHPortId vhport = vSw2HPLink(hst, vport);
         send VHostPIn[vhport.vhost, vhport.vport]
 
-    role VSwitchTunOut[IP4 hst] | iHost(hst) = 
+    role VSwitchTunOut[IP4 hst] | iHost(hst) / pkt.vxlan.valid and (pkt.vxlan.vni == upTunVnet() or pkt.vxlan.vni == downTunVnet()) = 
         if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
             send VSwitchTunIn[pkt.ip4.dst]
 
@@ -371,6 +374,33 @@ refine VHostPOut, VSwitchPlainIn {
                                        , dsthost);
                 send VSwitchTunOut[addr]
             }
+        }
+}
+
+refine VSwitchTunOut, VSwitchVXLANOut, VSwitchPlainOut{
+
+    role VSwitchTunOut[IP4 hst] | iHost(hst) / pkt.vxlan.valid and (pkt.vxlan.vni == upTunVnet() or pkt.vxlan.vni == downTunVnet()) = 
+        send HostOut[hst]
+
+    role VSwitchVXLANOut[IP4 hst] | iHost(hst) / pkt.vxlan.valid and pkt.vxlan.vni != upTunVnet() and pkt.vxlan.vni != downTunVnet() = 
+        send HostOut[hst]
+
+    role VSwitchPlainOut[IP4 hst] | iHost(hst) / not pkt.vxlan.valid = 
+        send HostOut[hst]
+
+    role HostOut[IP4 hst] | iHost(hst) = 
+        if (pkt.ip4.valid and iHost(pkt.ip4.dst)) then
+            send HostIn[pkt.ip4.dst]
+
+    role HostIn[IP4 hst] | iHost(hst) = 
+        if pkt.vxlan.valid then {
+           if pkt.vxlan.vni == upTunVnet() or pkt.vxlan.vni == downTunVnet() then {
+                send VSwitchTunIn[hst]
+           } else {
+                send VSwitchVXLANIn[hst]
+           }
+        } else {
+           send VSwitchPlainIn[hst]
         }
 }
 
