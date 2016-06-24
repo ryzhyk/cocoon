@@ -1,0 +1,192 @@
+(* stags routing *)
+
+typedef struct {
+    uint<48> dstAddr,
+    uint<48> srcAddr
+} eth_t
+
+typedef uint<12> VLANId
+
+typedef struct {
+    bool   valid,
+    VLANId vid
+} vlan_t
+
+typedef struct {
+    bool    valid,
+    uint<8> up1,
+    uint<8> up2,
+    uint<8> down1,
+    uint<8> down2
+} mtag_t
+
+function nomtag(): mtag_t = mtag_t{false, 8'd0, 8'd0, 8'd0, 8'd0}
+
+typedef uint<8> Color
+
+typedef struct {
+    bool  valid,
+    Color srcColor
+} stag_t
+
+function nostag(): stag_t = stag_t{false, 8'd0}
+
+typedef struct {
+    eth_t  eth,
+    vlan_t vlan,
+    mtag_t mtag,
+    stag_t stag
+} Packet
+
+typedef struct {
+    uint<8> pod, 
+    uint<8> tor, 
+    uint<8> port
+} TORPortId
+
+typedef uint<32> HostId
+typedef struct {
+    HostId hst,
+    uint<8> port
+} HostPortId
+
+
+typedef struct {
+    VLANId   vid,
+    uint<48> mac
+} Address
+
+function iHost(HostId hst): bool
+function nHostPorts(HostId hst): uint<8>
+
+function iHostPort(HostPortId port): bool = 
+    iHost(port.hst) and port.port < nHostPorts(port.hst)
+
+function iAddr(Address addr): bool
+
+function addrLocation(Address addr): HostPortId
+assume (Address addr) iAddr(addr) => iHostPort(addrLocation(addr))
+
+function addrColor(Address addr): Color
+
+function canCommunicate(Color col1, Color col2): bool
+assume (Color col1, Color col2) canCommunicate(col1, col2) => canCommunicate(col2, col1)
+
+role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
+role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
+    if pkt.vlan.valid and (pkt.mtag == nomtag()) and (pkt.stag == nostag()) then {
+        let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
+        let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+        if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
+            if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
+                let HostPortId dstport = addrLocation(dstAddr);
+                send HostIn[dstport.hst, dstport.port]
+            }
+        }
+    }
+
+    
+refine HostOut{
+    function nCoreRedundant(): uint<8>
+    function nPods(): uint<8>
+    function nPodSwitches(): uint<8>
+    function nPodTORs(): uint<8>
+    function nTORPorts(): uint<8>
+
+    function iTOR(uint<8> pod, uint<8> tor): bool = pod < nPods() and tor < nPodTORs()
+    function iTORPort(TORPortId port): bool = iTOR(port.pod, port.tor) and port.port < nTORPorts()
+
+    function hostSwitchConnection(HostPortId hport): TORPortId
+    assume (HostPortId hport) iHostPort(hport) => iTORPort(hostSwitchConnection(hport))
+
+    function switchHostConnection(TORPortId tport): HostPortId
+    assume (HostPortId hport) iHostPort(hport) => (switchHostConnection(hostSwitchConnection(hport)) == hport)
+
+    assume (Address addr) iHostPort(addrLocation(addr)) => iAddr(addr)
+
+    function computeMTag(uint<8> pod, uint<8> tor, Address dstAddr): mtag_t
+    assume (mtag_t mtag, uint<8> pod, uint<8> tor, Address dstAddr)
+           (iAddr(dstAddr) and (mtag == computeMTag(pod, tor, dstAddr))) => 
+           (mtag.down1 == hostSwitchConnection(addrLocation(dstAddr)).pod and
+            mtag.down2 == hostSwitchConnection(addrLocation(dstAddr)).tor)
+
+    assume (mtag_t mtag, uint<8> pod, uint<8> tor, Address dstAddr)
+           (mtag == computeMTag(pod, tor, dstAddr)) => 
+           (mtag.valid and mtag.up1 < nPodSwitches() and mtag.up2 < nCoreRedundant())
+
+    role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
+        let TORPortId swport = hostSwitchConnection(HostPortId{hst, port});
+        send TORIn[swport.pod, swport.tor, swport.port]
+
+    role TORIn[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
+        if pkt.vlan.valid and (pkt.mtag == nomtag()) and (pkt.stag == nostag()) then {
+            let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
+            let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+            let HostPortId srchport = switchHostConnection(TORPortId{pod, tor, port});
+
+            if addrLocation(srcAddr) == srchport then {
+                let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
+                if iHostPort(addrLocation(dstAddr)) then {
+                    if dstswport.pod == pod and dstswport.tor == tor then {
+                        if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
+                            send TOROut[pod, tor, dstswport.port]
+                        }
+                    } else {
+                        pkt.mtag := computeMTag(pod, tor, dstAddr);
+                        pkt.stag := stag_t{true, addrColor(srcAddr)};
+                        send TORUpperOut[pod, tor, pkt.mtag.up1]
+                    }
+                }
+            }
+        }
+
+    role TOROut[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
+        let HostPortId hport = switchHostConnection(TORPortId{pod, tor, port});
+        send HostIn[hport.hst, hport.port]
+
+    role TORUpperIn[uint<8> pod, uint<8> tor, uint<8> port]  | iTOR(pod, tor) and port < nPodSwitches() = 
+        let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+        let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
+        if dstswport.tor == tor and dstswport.pod == pod then {
+            if canCommunicate(pkt.stag.srcColor, addrColor(dstAddr)) then {
+                pkt.stag := nostag();
+                pkt.mtag := nomtag();
+                send TOROut[pod, tor, dstswport.port]
+            }
+        }
+
+    role TORUpperOut[uint<8> pod, uint<8> tor, uint<8> port] | iTOR(pod, tor) and port < nPodSwitches() =
+        send PodIn[pod, port, tor]
+
+    function iPodSw(uint<8> pod, uint<8> sw): bool = pod < nPods() and sw < nPodSwitches()
+
+    role PodIn[uint<8> pod, uint<8> sw, uint<8> port]  | iPodSw(pod, sw) and port < nPodTORs() = 
+        send PodUpperOut[pod, sw, pkt.mtag.up2]
+        
+    role PodOut[uint<8> pod, uint<8> sw, uint<8> port] | iPodSw(pod, sw) and port < nPodTORs() = 
+        send TORUpperIn[pod, port, sw]
+
+    role PodUpperIn[uint<8> pod, uint<8> sw, uint<8> port]  | iPodSw(pod, sw) and port < nCoreRedundant() = 
+        if pkt.mtag.down2 < nPodTORs() then
+            send PodOut[pod, sw, pkt.mtag.down2]
+    role PodUpperOut[uint<8> pod, uint<8> sw, uint<8> port] | iPodSw(pod, sw) and port < nCoreRedundant() = 
+        send CoreIn[sw, port, pod]
+
+    function iCoreSw(uint<8> i1, uint<8> i2): bool = i1 < nPodSwitches() and i2 < nCoreRedundant()
+    role CoreIn [uint<8> i1, uint<8> i2, uint<8> port] | iCoreSw(i1, i2) and port < nPods() = 
+        if pkt.mtag.down1 < nPods() then
+            send CoreOut[i1, i2, pkt.mtag.down1]
+    role CoreOut[uint<8> i1, uint<8> i2, uint<8> port] | iCoreSw(i1, i2) and port < nPods() = 
+        send PodUpperIn[port, i1, i2]
+}
+
+refine {
+    function iHost(HostId hst): bool = hst >= 32'd0 and hst < 32'd100
+    function nHostPorts(HostId hst): uint<8> = 8'd2
+    function nPods(): uint<8> = 8'd8
+    function nPodTORs(): uint<8> = 8'd8
+    function nTORPorts(): uint<8> = 8'd124
+    function nPodSwitches(): uint<8> = 8'd2
+    function nCoreRedundant(): uint<8> = 8'd2
+}
+
