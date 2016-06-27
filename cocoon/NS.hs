@@ -3,6 +3,7 @@
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
+          lookupLocalVar, checkLocalVar, getLocalVar,
           lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
@@ -67,6 +68,18 @@ checkVar p c n = case lookupVar c n of
 
 getVar :: ECtx -> String -> Field
 getVar c n = fromJust $ lookupVar c n
+
+lookupLocalVar :: Role -> String -> Maybe Field
+lookupLocalVar role n = find ((==n) . name) $ roleLocals role
+
+checkLocalVar :: (MonadError String me) => Pos -> Role -> String -> me Field
+checkLocalVar p rl n = case lookupLocalVar rl n of
+                            Nothing -> err p $ "Unknown local variable: " ++ n
+                            Just v  -> return v
+
+getLocalVar :: Role -> String -> Field
+getLocalVar rl n = fromJust $ lookupLocalVar rl n
+
 
 lookupKey :: Role -> String -> Maybe Field
 lookupKey rl n = find ((==n) . name) $ roleKeys rl
