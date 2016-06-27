@@ -13,6 +13,8 @@ import Data.List
 import Data.Bits
 import qualified Data.Map as M
 import Numeric
+import qualified Data.Set as S
+import Debug.Trace
 
 import Util
 import PP
@@ -50,19 +52,24 @@ maxExprTable = 1000
 tmpVarName :: String -> String
 tmpVarName sname = "_tmp_" ++ sname
 
+localVarName :: Role -> String -> String
+localVarName rl vname = "_" ++ name rl ++ "_" ++ vname
+
 -- Dynamic action, i.e., action that depends on expression that can change at run time
 -- and must be encoded in a P4 table maintained by the controller at runtime
 data P4DynAction = P4DynAction { p4dynTable  :: String       -- name of the table
                                , p4dynRole   :: Role         -- role that the action belongs to
                                , p4dynKMap   :: KMap
                                , p4dynExpr   :: Expr         -- expression that the table computes
-                               , p4dynAction :: Maybe String -- name of action to invoke. If false, it's a yes-no action
+                               , p4dynAction :: Maybe String -- name of action to invoke. If Nothing, it's a yes-no action
                                }
 
 -- State maintained during compilation
-data P4State = P4State { p4TableCnt   :: Int   -- table counter
-                       , p4Tables     :: [Doc] -- table specifications
-                       , p4Commands   :: [Doc] -- commands to go to the command file
+data P4State = P4State { p4Structs    :: S.Set String -- struct types that occur in local variable declarations
+                       , p4Vars       :: [Doc]        -- local variables
+                       , p4TableCnt   :: Int          -- table counter
+                       , p4Tables     :: [Doc]        -- table specifications
+                       , p4Commands   :: [Doc]        -- commands to go to the command file
                        , p4DynActions :: [P4DynAction]
                        }
 
@@ -111,13 +118,15 @@ p4seq (s1:ss) = P4SSeq s1 $ p4seq ss
 printExpr :: (?r::Refine, ?role::Role, ?pmap::PMap) => Expr -> Doc
 printExpr (EVar _ k)                            = if k == name pkey 
                                                      then printExpr $ EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)
-                                                     else pp k
+                                                     else case lookupLocalVar ?role k of
+                                                               Nothing -> pp k
+                                                               Just _  -> pp $ localVarName ?role k
     where pkey = last $ roleKeys ?role
-          (first, _) = ?pmap M.! (name ?role) 
+          (first, _) = ?pmap M.! (name ?role)
 printExpr (EPacket _)                           = pp "pkt"
 printExpr (EField _ e f) | f == "valid"         = pp "valid" <> (parens $ printExpr e)
 printExpr (EField _ (EPacket _) f)              = pp f
-printExpr (EField _ (EVar _ v) f)               = pp v <> char '.' <> pp f
+printExpr (EField _ e@(EVar _ _) f)             = printExpr e <> char '.' <> pp f
 printExpr (EField _ (EField _ (EPacket _) h) f) = pp h <> char '.' <> pp f
 printExpr (EField _ e f)                        = printExpr e <> char '_' <> pp f
 printExpr (EBool _ True)                        = pp "true"
@@ -128,6 +137,13 @@ printExpr (EBinOp _ Concat l r)                 = parens $ (parens $ (cast w (pr
     where TUInt _ w1 = typ' ?r (CtxRole ?role) l
           TUInt _ w2 = typ' ?r (CtxRole ?role) r
           w = w1 + w2
+printExpr (EBinOp _ Eq l r)                     = 
+    let ?c = CtxRole ?role in
+    let lscalars = map (evalExpr M.empty) $ exprScalars ?r (CtxRole ?role) l
+        rscalars = map (evalExpr M.empty) $ exprScalars ?r (CtxRole ?role) r in 
+    parens $ hsep $ punctuate (pp "and") 
+                  $ map (\(l', r') -> parens $ (printExpr l') <+> pp "==" <+> (printExpr r')) 
+                  $ zip lscalars rscalars
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = cast (h-l+1) $ parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
@@ -204,13 +220,32 @@ genP4Switch :: Refine -> Node -> KMap -> PMap -> (Doc, Doc, [P4DynAction])
 genP4Switch r switch kmap pmap = 
     let ?r = r in
     let ?pmap = pmap in
-    let (controlstat, P4State _ tables commands dynacts) = runState (mkSwitch kmap switch) (P4State 0 [] [pp p4DefaultDecls] []) 
+    let (controlstat, P4State structs lvars _ tables commands dynacts) = runState (mkSwitch kmap switch) (P4State S.empty [] 0 [] [pp p4DefaultDecls] []) 
         control = (pp "control" <+> pp "ingress" <+> lbrace)
                   $$
                   (nest' $ pp controlstat)
                   $$
                   rbrace
-    in (pp p4HeaderDecls $$ pp "" $$ vcat tables $$ pp "" $$ control, vcat commands, dynacts)
+    in ( pp p4HeaderDecls $$ pp "" $$ vcat (map mkStructType $ S.toList structs) $$ vcat lvars $$ vcat tables $$ pp "" $$ control
+       , vcat commands
+       , dynacts)
+
+mkStructType :: (?r::Refine) => String -> Doc
+mkStructType n = (pp "header_type" <+> pp n <+> lbrace)
+                 $$
+                 (nest' $ pp "fields" <> lbrace
+                          $$
+                          (nest' $ vcat $ map (\f -> case typ' ?r undefined f of
+                                                          TBool _   -> pp "bool"
+                                                          TUInt _ w -> pp "bit<" <> pp w <> pp ">"
+                                                          _         -> error "P4.mkStructType: only bool and uint fields are supported"
+                                                     <+> (pp $ name f) <> semi) fs) 
+                          $$
+                          rbrace)
+                 $$
+                 rbrace
+    where TStruct _ fs = tdefType $ getType ?r n
+
 
 mkSwitch :: (?r::Refine, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
 mkSwitch kmap switch = do
@@ -265,6 +300,9 @@ mkStatement (SSet  _ lhs rhs) | exprIsValidFlag lhs = do
 mkStatement (SSet  _ lhs rhs) = do
     let lhs' = evalExpr' lhs
         rhs' = liftConds True $ evalExpr' rhs
+    let local = case lhs of 
+                     EVar _ _ -> True
+                     _        -> False
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
         assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
@@ -280,19 +318,22 @@ mkStatement (SSet  _ lhs rhs) = do
                                        rscalars = map evalExpr' $ exprScalars ?r ?c rhs
                                        tscalars = map (exprSubst lhs (EVar nopos $ tmpVarName sname)) lscalars
                                        atoms = filter (\(l,_,_) -> not $ exprIsValidFlag l) $ zip3 lscalars rscalars tscalars
-                                   -- For all fields that are not valid flags
-                                   --     copy field to tmp
-                                   copy1 <- mapM (\(_,r,t) -> table t r) atoms
-                                   -- Does it have a valid flag? 
-                                   --     Yes: apply add_/rm_ first
-                                   copyv <- case find (exprIsValidFlag . fst) $ zip lscalars rscalars of
-                                                 Nothing     -> return []
-                                                 Just (l, r) -> do s <- setValid l r
-                                                                   return [s]
-                                   -- For all fields that are not valid flags
-                                   --     copy tmp to lhs
-                                   copy2 <- mapM (\(l,_,t) -> table l t) atoms
-                                   return $ p4seq $ copy1 ++ copyv ++ copy2
+                                   if local 
+                                      then do copy <- mapM (\(l,r,_) -> table l r) atoms
+                                              return $ p4seq copy
+                                      else do -- For all fields that are not valid flags
+                                              --     copy field to tmp
+                                              copy1 <- mapM (\(_,r,t) -> table t r) atoms
+                                              -- Does it have a valid flag? 
+                                              --     Yes: apply add_/rm_ first
+                                              copyv <- case find (exprIsValidFlag . fst) $ zip lscalars rscalars of
+                                                            Nothing     -> return []
+                                                            Just (l, r) -> do s <- setValid l r
+                                                                              return [s]
+                                              -- For all fields that are not valid flags
+                                              --     copy tmp to lhs
+                                              copy2 <- mapM (\(l,_,t) -> table l t) atoms
+                                              return $ p4seq $ copy1 ++ copyv ++ copy2
                            else table lhs' rhs'
 
 
@@ -314,8 +355,21 @@ mkStatement (SSend _ dst) = do
 mkStatement (SSendND _ _ _) = error "P4.mkStatement SSendND"
 mkStatement (SHavoc _ _)    = error "P4.mkStatement SHavoc"
 mkStatement (SAssume _ _)   = error "P4.mkStatement SAssume"
-mkStatement (SLet _ _ _ _)  = error "Not implemented: P4.mkStatement SLet"
+mkStatement (SLet _ t v e)  = do 
+    modify (\s -> s{p4Vars = (p4Vars s) ++ [mkLocalVar t v]})
+    case typ'' ?r ?c t of
+         TUser _ n -> modify (\s -> s{p4Structs = S.insert n (p4Structs s)})
+         _         -> return ()
+    mkStatement $ SSet nopos (EVar nopos v) e
 mkStatement (SFork _ _ _ _) = error "Not implemented: P4.mkStatement SFork"
+
+mkLocalVar :: (?r::Refine, ?c::ECtx, ?role::Role) => Type -> String -> Doc
+mkLocalVar t n = pp "metadata" <+> tname <+> (pp $ localVarName ?role n) <> semi
+    where tname = case typ'' ?r ?c t of
+                       TUInt _ w -> pp "bit<" <> pp w <> pp ">"
+                       TBool _   -> pp "bool"
+                       TUser _ s -> pp s
+                       _         -> error "P4.mkLocalVar: unexpected type"
 
 mkAddHeader :: String -> State P4State P4Statement
 mkAddHeader h = do
@@ -344,18 +398,18 @@ mkRmHeader h = do
     tableid <- incTableCnt
     let tablename = "rm" ++ show tableid
         actname = "a_" ++ tablename
-        action = pp "action" <+> pp actname <> pp "()" <+> lparen
-                 $$
-                 (nest' $ pp "remove_header" <> (parens $ pp h) <> semi)
+        action = pp "action" <+> pp actname <> pp "()" <+> lbrace
                  $$
                  (nest' $ pp $ p4CleanupHeader h)
                  $$
-                 rparen
-        table = pp "table" <+> pp tablename <+> lparen
+                 (nest' $ pp "remove_header" <> (parens $ pp h) <> semi)
+                 $$
+                 rbrace
+        table = pp "table" <+> pp tablename <+> lbrace
                 $$
                 (nest' $ pp "actions" <+> (braces $ pp actname <> semi))
                 $$
-                rparen
+                rbrace
         command = pp "table_set_default" <+> pp tablename <+> pp actname
     modify (\p4 -> p4{ p4Tables = p4Tables p4 ++ [action $$ table]
                      , p4Commands = p4Commands p4 ++ [command]})
@@ -546,7 +600,7 @@ mkTableEntry table action args mask priority =
 -- in the order of decreasing priority.
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
-exprToMasks :: (?r::Refine, ?c::ECtx) => Expr -> [Doc]
+exprToMasks :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> [Doc]
 exprToMasks e = map disjunctToMask $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?c::ECtx) => Expr -> [[Expr]]
@@ -571,8 +625,8 @@ exprToTable e | null (exprDeps e) = [([], e)]
                                              concatMap (\(es, eval) -> map ((, eval) . (++es)) vdnf) 
                                                        $ exprToTable $ evalExpr M.empty $ exprSubst a v e) vals
 
-disjunctToMask :: (?r::Refine, ?c::ECtx) => [Expr] -> Doc
-disjunctToMask atoms = mkMatch $ map atomToMatch atoms
+disjunctToMask :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => [Expr] -> Doc
+disjunctToMask atoms = mkMatch $ map (atomToMatch . evalExpr') atoms
 
 -- maps atom of the form (x = const) to a (field_name, value)  
 atomToMatch :: Expr -> (Expr, String)
