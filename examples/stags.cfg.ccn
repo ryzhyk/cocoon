@@ -1,0 +1,28 @@
+function up1(uint<8> pod, uint<8> tor, Address dstAddr): uint<8> = 8'd0
+function up2(uint<8> pod, uint<8> tor, Address dstAddr): uint<8> = 8'd0
+
+function iAddr(Address addr): bool = 
+    addr == Address{12'd0, 48'h1867b0d93cd1} or
+    addr == Address{12'd0, 48'h005056c00008} or
+    addr == Address{12'd0, 48'h7c7a916436b5} or
+    addr == Address{12'd0, 48'h005056c00001}
+
+function addrLocation(Address addr): HostPortId = 
+    case {
+        addr == Address{12'd0, 48'h1867b0d93cd1}: HostPortId{32'd0, 8'd0};
+        addr == Address{12'd0, 48'h005056c00008}: HostPortId{32'd0, 8'd1};
+        addr == Address{12'd0, 48'h7c7a916436b5}: HostPortId{32'd1, 8'd0};
+        addr == Address{12'd0, 48'h005056c00001}: HostPortId{32'd1, 8'd1};
+        default: HostPortId{32'hffffffff, 8'd0};
+    }
+
+function addrColor(Address addr): Color = 
+    case {
+        addr == Address{12'd0, 48'h1867b0d93cd1}: 8'd0;
+        addr == Address{12'd0, 48'h005056c00008}: 8'd1;
+        addr == Address{12'd0, 48'h7c7a916436b5}: 8'd0;
+        addr == Address{12'd0, 48'h005056c00001}: 8'd1;
+        default: 8'd0;
+    }
+
+function canCommunicate(Color col1, Color col2): bool = true

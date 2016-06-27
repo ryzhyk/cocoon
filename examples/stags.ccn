@@ -74,12 +74,16 @@ assume (Color col1, Color col2) canCommunicate(col1, col2) => canCommunicate(col
 
 role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
 role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
-    if pkt.vlan.valid and (pkt.mtag == nomtag()) and (pkt.stag == nostag()) then {
+    if pkt.vlan.valid and (not pkt.mtag.valid) and (not pkt.stag.valid) then {
         let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
         let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
         if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
             if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
                 let HostPortId dstport = addrLocation(dstAddr);
+                havoc pkt.mtag;
+                havoc pkt.stag;
+                assume pkt.mtag.valid == false;
+                assume pkt.stag.valid == false;
                 send HostIn[dstport.hst, dstport.port]
             }
         }
@@ -119,7 +123,7 @@ refine HostOut{
         send TORIn[swport.pod, swport.tor, swport.port]
 
     role TORIn[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
-        if pkt.vlan.valid and (pkt.mtag == nomtag()) and (pkt.stag == nostag()) then {
+        if pkt.vlan.valid and (not pkt.mtag.valid) and (not pkt.stag.valid) then {
             let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
             let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
             let HostPortId srchport = switchHostConnection(TORPortId{pod, tor, port});
@@ -142,17 +146,16 @@ refine HostOut{
 
     role TOROut[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
         let HostPortId hport = switchHostConnection(TORPortId{pod, tor, port});
-        send HostIn[hport.hst, hport.port]
+        if iHostPort(hport) then
+            send HostIn[hport.hst, hport.port]
 
     role TORUpperIn[uint<8> pod, uint<8> tor, uint<8> port]  | iTOR(pod, tor) and port < nPodSwitches() = 
         let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
         let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
-        if dstswport.tor == tor and dstswport.pod == pod then {
-            if canCommunicate(pkt.stag.srcColor, addrColor(dstAddr)) then {
-                pkt.stag := nostag();
-                pkt.mtag := nomtag();
-                send TOROut[pod, tor, dstswport.port]
-            }
+        if canCommunicate(pkt.stag.srcColor, addrColor(dstAddr)) then {
+            pkt.stag := nostag();
+            pkt.mtag := nomtag();
+            send TOROut[pod, tor, dstswport.port]
         }
 
     role TORUpperOut[uint<8> pod, uint<8> tor, uint<8> port] | iTOR(pod, tor) and port < nPodSwitches() =
@@ -180,13 +183,81 @@ refine HostOut{
         send PodUpperIn[port, i1, i2]
 }
 
+
 refine {
-    function iHost(HostId hst): bool = hst >= 32'd0 and hst < 32'd100
+    role CoreSwitch[uint<8> i1, uint<8> i2] | iCoreSw(i1, i2) = filter false
+    switch CoreSwitch((CoreIn, CoreOut))
+
+    role PodSwitch[uint<8> pod, uint<8> sw] | iPodSw(pod, sw) = filter false
+    switch PodSwitch((PodIn, PodOut), (PodUpperIn, PodUpperOut))
+
+    role TORSwitch[uint<8> pod, uint<8> tor] | iTOR(pod, tor) = filter false
+    switch TORSwitch((TORIn, TOROut), (TORUpperIn, TORUpperOut))
+
+    role Host[HostId hst] | iHost(hst) = filter false
+    host Host( (HostIn, HostOut) ) 
+}
+
+refine {
     function nHostPorts(HostId hst): uint<8> = 8'd2
-    function nPods(): uint<8> = 8'd8
-    function nPodTORs(): uint<8> = 8'd8
-    function nTORPorts(): uint<8> = 8'd124
+    function nPods(): uint<8> = 8'd4
+    function nPodTORs(): uint<8> = 8'd4
+    function nTORPorts(): uint<8> = 8'd4
     function nPodSwitches(): uint<8> = 8'd2
     function nCoreRedundant(): uint<8> = 8'd2
+
+    function iHost(HostId hst): bool = hst >= 32'd0 and hst < 32'd2
+    function hostSwitchConnection(HostPortId hport): TORPortId = 
+        case {
+            hport == HostPortId{32'd0, 8'd0}: TORPortId{8'd0, 8'd0, 8'd0};
+            hport == HostPortId{32'd0, 8'd1}: TORPortId{8'd0, 8'd0, 8'd1};
+            hport == HostPortId{32'd1, 8'd0}: TORPortId{8'd3, 8'd3, 8'd0};
+            hport == HostPortId{32'd1, 8'd1}: TORPortId{8'd3, 8'd3, 8'd1};
+            default: TORPortId{8'd127, 8'd127, 8'd127};
+        }
+
+    function switchHostConnection(TORPortId tport): HostPortId = 
+        case {
+            tport == TORPortId{8'd0, 8'd0, 8'd0}: HostPortId{32'd0, 8'd0};
+            tport == TORPortId{8'd0, 8'd0, 8'd1}: HostPortId{32'd0, 8'd1};
+            tport == TORPortId{8'd3, 8'd3, 8'd0}: HostPortId{32'd1, 8'd0};
+            tport == TORPortId{8'd3, 8'd3, 8'd1}: HostPortId{32'd1, 8'd1};
+            default: HostPortId{32'hffffffff, 8'd0};
+        }
+
+    function up1(uint<8> pod, uint<8> tor, Address dstAddr): uint<8>
+    function up2(uint<8> pod, uint<8> tor, Address dstAddr): uint<8>
+
+    function computeMTag(uint<8> pod, uint<8> tor, Address dstAddr): mtag_t = 
+        mtag_t{true, up1(pod, tor, dstAddr), up2(pod, tor, dstAddr), hostSwitchConnection(addrLocation(dstAddr)).pod, hostSwitchConnection(addrLocation(dstAddr)).tor}
+(*
+    function up1(uint<8> pod, uint<8> tor, Address dstAddr): uint<8> = 8'd0
+    function up2(uint<8> pod, uint<8> tor, Address dstAddr): uint<8> = 8'd0
+
+    function iAddr(Address addr): bool = 
+        addr == Address{12'd0, 48'h1867b0d93cd1} or
+        addr == Address{12'd0, 48'h005056c00008} or
+        addr == Address{12'd0, 48'h7c7a916436b5} or
+        addr == Address{12'd0, 48'h005056c00001}
+
+    function addrLocation(Address addr): HostPortId = 
+        case {
+            addr == Address{12'd0, 48'h1867b0d93cd1}: HostPortId{32'd0, 8'd0};
+            addr == Address{12'd0, 48'h005056c00008}: HostPortId{32'd0, 8'd1};
+            addr == Address{12'd0, 48'h7c7a916436b5}: HostPortId{32'd1, 8'd0};
+            addr == Address{12'd0, 48'h005056c00001}: HostPortId{32'd1, 8'd1};
+            default: HostPortId{32'hffffffff, 8'd0};
+        }
+
+    function addrColor(Address addr): Color = 
+        case {
+            addr == Address{12'd0, 48'h1867b0d93cd1}: 8'd0;
+            addr == Address{12'd0, 48'h005056c00008}: 8'd1;
+            addr == Address{12'd0, 48'h7c7a916436b5}: 8'd0;
+            addr == Address{12'd0, 48'h005056c00001}: 8'd1;
+            default: 8'd0;
+        }
+
+    function canCommunicate(Color col1, Color col2): bool = true *)
 }
 
