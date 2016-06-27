@@ -25,7 +25,24 @@ p4HeaderDecls = [str|
 |
 |header_type vlan_tag_t {
 |    fields {
-|        bit<16> tag;
+|        bit<16> vid;
+|        bit<16> etherType;
+|    }
+|}
+|
+|header_type mtag_t {
+|    fields {
+|        bit<8>  up1;
+|        bit<8>  up2;
+|        bit<8>  down1;
+|        bit<8>  down2;
+|        bit<16> etherType;
+|    }
+|}
+|
+|header_type stag_t {
+|    fields {
+|        bit<8>  srcColor;
 |        bit<16> etherType;
 |    }
 |}
@@ -76,18 +93,42 @@ p4HeaderDecls = [str|
 |metadata ipv4_t _tmp_ipv4_t;
 |header arp_t arp;
 |metadata arp_t _tmp_arp_t;
+|header mtag_t mtag;
+|metadata mtag_t _tmp_mtag_t;
+|header stag_t stag;
+|metadata stag_t _tmp_stag_t;
 |
 |parser start {
 |    return parse_ethernet;
 |}
 |
 |#define ETHERTYPE_VLAN 0x8100, 0x9100, 0x9200, 0x9300
+|#define ETHERTYPE_MTAG 0xaaaa
+|#define ETHERTYPE_STAG 0xaaab
 |#define ETHERTYPE_IPV4 0x0800
 |#define ETHERTYPE_ARP  0x0806
 |
 |
 |parser parse_vlan {
 |    extract(vlan);
+|    return select(latest.etherType) {
+|        ETHERTYPE_IPV4 : parse_ipv4;
+|        ETHERTYPE_ARP  : parse_arp;
+|        ETHERTYPE_MTAG : parse_mtag;
+|    }
+|}
+|
+|parser parse_mtag {
+|    extract(mtag);
+|    return select(latest.etherType) {
+|        ETHERTYPE_IPV4 : parse_ipv4;
+|        ETHERTYPE_ARP  : parse_arp;
+|        ETHERTYPE_STAG : parse_stag;
+|    }
+|}
+|
+|parser parse_stag {
+|    extract(stag);
 |    return select(latest.etherType) {
 |        ETHERTYPE_IPV4 : parse_ipv4;
 |        ETHERTYPE_ARP  : parse_arp;
@@ -139,10 +180,16 @@ p4InitHeader h = case h of
                                 "modify_field(arp.ptype, 0x0800);\n" ++
                                 "modify_field(arp.hlen, 0x6);\n" ++
                                 "modify_field(arp.plen, 0x4);"
+                      "mtag" -> "modify_field(mtag.etherType, vlan.etherType);\n" ++
+                                "modify_field(vlan.etherType, ETHERTYPE_MTAG);\n"
+                      "stag" -> "modify_field(stag.etherType, mtag.etherType);\n" ++
+                                "modify_field(mtag.etherType, ETHERTYPE_STAG);\n"
                       _      -> error $ "P4.Header.p4InitHeader: unknown header " ++ h
 
 p4CleanupHeader :: String -> String
 p4CleanupHeader h = case h of
                          "vlan" -> "modify_field(eth.etherType, ETHERTYPE_IPV4);"
                          "arp"  -> ""
+                         "mtag" -> "modify_field(vlan.etherType, mtag.etherType);"
+                         "stag" -> "modify_field(mtag.etherType, stag.etherType);"
                          _      -> error $ "P4.Header.p4InitHeader: unknown header " ++ h
