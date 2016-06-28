@@ -157,7 +157,9 @@ printExpr (EBinOp _ Eq l r)                     =
     let lscalars = map (evalExpr M.empty) $ exprScalars ?r (CtxRole ?role) l
         rscalars = map (evalExpr M.empty) $ exprScalars ?r (CtxRole ?role) r in 
     parens $ hsep $ punctuate (pp "and") 
-                  $ map (\(l', r') -> parens $ (printExpr l') <+> pp "==" <+> (printExpr r')) 
+                  $ map (\(l', r') -> case let ?kmap = M.empty in liftConds True (EBinOp nopos Eq l' r') of
+                                           EBinOp _ Eq l'' r'' -> parens $ (printExpr l'') <+> pp "==" <+> (printExpr r'')
+                                           e                   -> printExpr e) 
                   $ zip lscalars rscalars
 printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> printBOp op <+> (printExpr r)
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
@@ -318,6 +320,9 @@ mkStatement (SSet  _ lhs rhs) = do
     let local = case lhs of 
                      EVar _ _ -> True
                      _        -> False
+    let setValidCascade l (ECond _ [] d)         = setValidCascade l d
+        setValidCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (setValidCascade l v) (Just $ setValidCascade l (ECond nopos cs d))
+        setValidCascade l v                      = SSet nopos l v
     let assignToCascade l (ECond _ [] d)         = assignToCascade l d
         assignToCascade l (ECond _ ((c,v):cs) d) = SITE nopos c (assignToCascade l v) (Just $ assignToCascade l (ECond nopos cs d))
         assignToCascade l v                      = SSet nopos l v
@@ -327,23 +332,23 @@ mkStatement (SSet  _ lhs rhs) = do
                        return $ P4SApply tablename Nothing
     case rhs' of 
          ECond _ _ _ -> mkStatement $ assignToCascade lhs' rhs'
-         _           -> if isStruct ?r ?c lhs'
+         _           -> if isStruct ?r ?c rhs'
                            then do let TUser _ sname = typ'' ?r ?c lhs'
                                        lscalars = map evalExpr' $ exprScalars ?r ?c lhs
-                                       rscalars = map evalExpr' $ exprScalars ?r ?c rhs
+                                       rscalars = map (liftConds True . evalExpr') $ exprScalars ?r ?c rhs
                                        tscalars = map (exprSubst lhs (EVar nopos $ tmpVarName sname)) lscalars
                                        atoms = filter (\(l,_,_) -> not $ exprIsValidFlag l) $ zip3 lscalars rscalars tscalars
                                    if local 
-                                      then do copy <- mapM (\(l,r,_) -> table l r) atoms
+                                      then do copy <- mapM (\(l,r,_) -> mkStatement (SSet nopos l r)) atoms
                                               return $ p4seq copy
                                       else do -- For all fields that are not valid flags
                                               --     copy field to tmp
-                                              copy1 <- mapM (\(_,r,t) -> table t r) atoms
+                                              copy1 <- mapM (\(_,r,t) -> mkStatement (SSet nopos t r)) atoms
                                               -- Does it have a valid flag? 
                                               --     Yes: apply add_/rm_ first
                                               copyv <- case find (exprIsValidFlag . fst) $ zip lscalars rscalars of
                                                             Nothing     -> return []
-                                                            Just (l, r) -> do s <- setValid l r
+                                                            Just (l, r) -> do s <- mkStatement $ setValidCascade l r
                                                                               return [s]
                                               -- For all fields that are not valid flags
                                               --     copy tmp to lhs
@@ -493,7 +498,7 @@ liftConds'' e =
          ELocation _ r as  -> combineCascades (ELocation nopos r) $ map liftConds' as
          EBool _ _         -> e
          EInt _ _ _        -> e
-         EStruct _ s fs    -> combineCascades (EStruct nopos s) $ map liftConds' fs
+         EStruct _ s fs    -> EStruct nopos s $ map liftConds' fs
          EBinOp _ op e1 e2 -> combineCascades (\[e1', e2'] -> EBinOp nopos op e1' e2') [liftConds' e1, liftConds' e2]
          EUnOp _ op v      -> combineCascades (EUnOp nopos op . head) [liftConds' v]
          ESlice _ v h l    -> combineCascades (\[v'] -> ESlice nopos v' h l) [liftConds' v]
@@ -565,7 +570,7 @@ mkCondTable n e = do
                      , p4DynActions = p4DynActions p4 ++ [dyn]})
 
 matchFields :: (?r::Refine, ?role::Role) => [Expr]
-matchFields = fields (EPacket nopos) ++ [ingressPort]
+matchFields = fields (EPacket nopos) ++ [ingressPort] ++ (concatMap (fields . EVar nopos . name)$ roleLocals ?role)
     where fields e = case typ' ?r (CtxRole ?role) e of
                           TStruct _ fs -> concatMap (\f -> fields (EField nopos e $ name f)) 
                                           $ filter ((/= "valid") . name) fs
@@ -577,6 +582,7 @@ matchFields = fields (EPacket nopos) ++ [ingressPort]
 
 populateTable :: Refine -> P4DynAction -> [Doc]
 populateTable r P4DynAction{..} = 
+    trace ("table " ++ p4dynTable) $
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -587,7 +593,9 @@ populateTable r P4DynAction{..} =
                    ?c = CtxRole p4dynRole
                    ?kmap = p4dynKMap in
                concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
+               $ (\es -> trace ("flattened condition: " ++ show es) es)
                $ flattenConds 
+               $ (\e -> trace ("lifted condition: " ++ show e) e)
                $ liftConds False
                $ evalExpr' p4dynExpr
 
@@ -616,7 +624,8 @@ mkTableEntry table action args mask priority =
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
 exprToMasks :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> [Doc]
-exprToMasks e = map disjunctToMask $ exprToDNF e
+exprToMasks e = trace ("exprToMasks " ++ show e ++ " = " ++ show (map render res)) res
+    where res = map disjunctToMask $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?c::ECtx) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
