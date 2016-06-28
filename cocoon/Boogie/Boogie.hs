@@ -364,21 +364,22 @@ checkDepth = (pp depthVar .:= (pp depthVar .+ pp "1"))
 checkBounds :: Refine -> ECtx -> Expr -> Doc
 checkBounds r c e = if null es then empty else (assrt $ checkBVBounds r es)
     where es = map (\e' -> (mkExpr r c e', typ r c e')) $ filter (isUInt r c) $ arithSubExpr e
-          arithSubExpr (EVar _ _)          = []
-          arithSubExpr (EDotVar _ _)       = []
-          arithSubExpr (EPacket _)         = []
-          arithSubExpr e'@(EApply _ f as)  = let func = getFunc r f in
-                                             (maybe [] (\_ -> if' (isStruct r c e' || isUInt r c e') [e'] []) $ funcDef func) ++ concatMap arithSubExpr as
-          arithSubExpr (EField _ s _)      = arithSubExpr s
-          arithSubExpr (ELocation _ _ as)  = concatMap arithSubExpr as
-          arithSubExpr (EBool _ _)         = []
-          arithSubExpr (EInt _ _ _)        = []
-          arithSubExpr (EStruct _ _ fs)    = concatMap arithSubExpr fs
+          arithSubExpr (EVar _ _)           = []
+          arithSubExpr (EDotVar _ _)        = []
+          arithSubExpr (EPacket _)          = []
+          arithSubExpr e'@(EApply _ f as)   = let func = getFunc r f in
+                                              (maybe [] (\_ -> if' (isStruct r c e' || isUInt r c e') [e'] []) $ funcDef func) ++ concatMap arithSubExpr as
+          arithSubExpr (EBuiltin _ _ as)    = concatMap arithSubExpr as
+          arithSubExpr (EField _ s _)       = arithSubExpr s
+          arithSubExpr (ELocation _ _ as)   = concatMap arithSubExpr as
+          arithSubExpr (EBool _ _)          = []
+          arithSubExpr (EInt _ _ _)         = []
+          arithSubExpr (EStruct _ _ fs)     = concatMap arithSubExpr fs
           arithSubExpr e'@(EBinOp _ op l x) = arithSubExpr l ++ arithSubExpr x ++ 
-                                             (if elem op [Plus, Minus] then [e'] else [])
-          arithSubExpr (EUnOp _ _ e')      = arithSubExpr e'
-          arithSubExpr (ESlice _ e' _ _)   = arithSubExpr e'
-          arithSubExpr (ECond _ cs d)      = arithSubExpr d ++ (concatMap (\(x,v) -> arithSubExpr x ++ arithSubExpr v) cs)
+                                              (if elem op [Plus, Minus] then [e'] else [])
+          arithSubExpr (EUnOp _ _ e')       = arithSubExpr e'
+          arithSubExpr (ESlice _ e' _ _)    = arithSubExpr e'
+          arithSubExpr (ECond _ cs d)       = arithSubExpr d ++ (concatMap (\(x,v) -> arithSubExpr x ++ arithSubExpr v) cs)
 
 
 mkAssign :: Refine -> ECtx -> Expr -> [String] -> Expr -> Doc
@@ -616,6 +617,7 @@ exprCollectTypes c e = (typ' ?r c e) : exprCollectTypes' c e
 
 exprCollectTypes' :: (?r::Refine) => ECtx -> Expr -> [Type]
 exprCollectTypes' c (EApply _ _ as)    = concatMap (exprCollectTypes c) as
+exprCollectTypes' c (EBuiltin _ _ as)  = concatMap (exprCollectTypes c) as
 exprCollectTypes' c (EField _ s _)     = exprCollectTypes c s
 exprCollectTypes' c (ELocation _ _ as) = concatMap (exprCollectTypes c) as
 exprCollectTypes' c (EStruct _ _ fs)   = concatMap (exprCollectTypes c) fs

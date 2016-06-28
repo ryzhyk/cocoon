@@ -28,11 +28,13 @@ import Name
 data Type = TBool
           | TUInt Int
           | TStruct String
+          | TArray Type Int
 
 instance Show Type where
-    show TBool       = "bool"
-    show (TUInt w)   = "uint<" ++ show w ++ ">"
-    show (TStruct n) = n
+    show TBool        = "bool"
+    show (TUInt w)    = "uint<" ++ show w ++ ">"
+    show (TStruct n)  = n
+    show (TArray t l) = "[" ++ show t ++ "; " ++ show l ++ "]"
 
 data Struct = Struct { structName   :: String 
                      , structFields ::[(String,Type)]

@@ -168,21 +168,23 @@ node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost
 arg = withPos $ flip (Field nopos) <$> typeSpecSimple <*> identifier
 
 typeSpec = withPos $ 
-            uintType 
+            arrType
+        <|> uintType 
         <|> boolType 
         <|> userType 
         <|> structType 
         
 typeSpecSimple = withPos $ 
-                  uintType 
+                  arrType
+              <|> uintType 
               <|> boolType 
               <|> userType 
 
 uintType   = TUInt   nopos <$ reserved "uint" <*> (fromIntegral <$> angles decimal)
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
+arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
 structType = TStruct nopos <$  reserved "struct" <*> (braces $ commaSep1 arg)
-
 
 expr =  buildExpressionParser etable term
     <?> "expression"
@@ -190,6 +192,7 @@ expr =  buildExpressionParser etable term
 term  = parens expr <|> term'
 term' = withPos $
          estruct
+     <|> ebuiltin
      <|> eapply
      <|> eloc
      <|> eint
@@ -201,6 +204,8 @@ term' = withPos $
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
+ebuiltin = EBuiltin nopos <$ isbuiltin <*> (identifier <* char '!') <*> (parens $ commaSep expr)
+    where isbuiltin = try $ lookAhead $ (identifier *> char '!') *> symbol "("
 eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
     where isloc = try $ lookAhead $ identifier *> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))

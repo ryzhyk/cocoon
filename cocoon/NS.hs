@@ -22,6 +22,7 @@ module NS(lookupType, checkType, getType,
           lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
+          lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
 import Data.List
@@ -32,6 +33,7 @@ import Syntax
 import Name
 import Util
 import Pos
+import Builtins
 
 packetTypeName = "Packet"
 
@@ -117,3 +119,14 @@ checkNode p r n = case lookupNode r n of
 
 getNode :: Refine -> String -> Node
 getNode r n = fromJust $ lookupNode r n
+
+lookupBuiltin :: String -> Maybe Builtin
+lookupBuiltin n = find ((==n) . name) builtins
+
+checkBuiltin :: (MonadError String me) => Pos -> String -> me Builtin
+checkBuiltin p n = case lookupBuiltin n of
+                        Nothing -> err p $ "Unknown builtin: " ++ n
+                        Just b  -> return b
+
+getBuiltin :: String -> Builtin
+getBuiltin n = fromJust $ lookupBuiltin n

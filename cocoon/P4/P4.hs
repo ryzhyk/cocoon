@@ -42,7 +42,7 @@ import Topology
 import Type
 import P4.Header
 import Expr
-
+import Builtins
 
 {-
 
@@ -165,6 +165,7 @@ printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> pri
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = cast (h-l+1) $ parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
                                                                           (pp $ "0x" ++ showHex (2^(h-l+1) - 1::Integer) "")
+printExpr (EApply _ f as)                       = (bfuncPrintP4 $ getBuiltin f) $ as
 printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 cast :: Int -> Doc -> Doc
@@ -199,6 +200,7 @@ exprNeedsTable' (EVar _ _)         = False
 exprNeedsTable' (EDotVar _ _)      = False
 exprNeedsTable' (EPacket _)        = False
 exprNeedsTable' (EApply _ _ _)     = True
+exprNeedsTable' (EBuiltin _ _ as)  = or $ map exprNeedsTable' as
 exprNeedsTable' (EField _ s _)     = exprNeedsTable' s
 exprNeedsTable' (ELocation _ _ as) = or $ map exprNeedsTable' as
 exprNeedsTable' (EBool _ _)        = False
@@ -494,6 +496,7 @@ liftConds'' e =
          EDotVar _ _       -> e
          EPacket _         -> e
          EApply _ f as     -> combineCascades (EApply nopos f) $ map liftConds' as
+         EBuiltin _ f as   -> combineCascades (EBuiltin nopos f) $ map liftConds' as
          EField _ s f      -> combineCascades (\[s'] -> EField nopos s' f) [liftConds' s]
          ELocation _ r as  -> combineCascades (ELocation nopos r) $ map liftConds' as
          EBool _ _         -> e
@@ -593,9 +596,7 @@ populateTable r P4DynAction{..} =
                    ?c = CtxRole p4dynRole
                    ?kmap = p4dynKMap in
                concatMap (\(c,v) -> map (,v) $ exprToMasks c) 
-               $ (\es -> trace ("flattened condition: " ++ show es) es)
                $ flattenConds 
-               $ (\e -> trace ("lifted condition: " ++ show e) e)
                $ liftConds False
                $ evalExpr' p4dynExpr
 

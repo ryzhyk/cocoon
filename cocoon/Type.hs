@@ -24,6 +24,7 @@ module Type( WithType(..)
 import Data.Maybe
 import Data.List
 import Control.Monad.Except
+import Builtins
 
 import Syntax
 import NS
@@ -45,6 +46,7 @@ instance WithType Expr where
     typ _ ctx           e@(EDotVar _ _)    = error $ "typ " ++ show ctx ++ " " ++ show e
     typ _ _             (EPacket _)        = TUser nopos packetTypeName
     typ r _             (EApply _ f _)     = funcType $ getFunc r f
+    typ r ctx           (EBuiltin _ f as)  = (bfuncType $ getBuiltin f) r ctx as
     typ r ctx           (EField _ e f)     = let TStruct _ fs = typ' r ctx e  in
                                              fieldType $ fromJust $ find ((== f) . name) fs
     typ _ _             (ELocation _ _ _)  = TLocation nopos
@@ -115,23 +117,25 @@ matchType r ctx x y = assertR r (matchType' r ctx x y) (pos x) "Incompatible typ
 matchType' :: (WithType a, WithType b) => Refine -> ECtx -> a -> b -> Bool
 matchType' r ctx x y = 
     case (t1, t2) of
-         (TLocation _, TLocation _)     -> True
-         (TBool _, TBool _)             -> True
-         (TUInt _ w1, TUInt _ w2)       -> w1==w2
-         (TStruct _ fs1, TStruct _ fs2) -> (length fs1 == length fs2) &&
-                                           (all (uncurry $ matchType' r ctx) $ zip fs1 fs2)
-         _                              -> False
+         (TLocation _, TLocation _)       -> True
+         (TBool _, TBool _)               -> True
+         (TUInt _ w1, TUInt _ w2)         -> w1==w2
+         (TArray _ a1 l1, TArray _ a2 l2) -> matchType' r ctx a1 a2 && l1 == l2
+         (TStruct _ fs1, TStruct _ fs2)   -> (length fs1 == length fs2) &&
+                                             (all (uncurry $ matchType' r ctx) $ zip fs1 fs2)
+         _                                -> False
     where t1 = typ' r ctx x
           t2 = typ' r ctx y
 
 typeDomainSize :: Refine -> Type -> Integer
 typeDomainSize r t = 
     case typ' r undefined t of
-         TBool _      -> 2
-         TUInt _ w    -> 2^w
-         TStruct _ fs -> product $ map (typeDomainSize r . fieldType) fs
-         TUser _ _    -> error "Type.typeDomainSize TUser"
-         TLocation _  -> error "Not implemented: Type.typeDomainSize TLocation"
+         TBool _       -> 2
+         TUInt _ w     -> 2^w
+         TStruct _ fs  -> product $ map (typeDomainSize r . fieldType) fs
+         TArray _ t' l -> fromIntegral l * typeDomainSize r t'
+         TUser _ _     -> error "Type.typeDomainSize TUser"
+         TLocation _   -> error "Not implemented: Type.typeDomainSize TLocation"
 
 typeEnumerate :: Refine -> Type -> [Expr]
 typeEnumerate r t = 
@@ -139,6 +143,7 @@ typeEnumerate r t =
          TBool _      -> [EBool nopos False, EBool nopos True]
          TUInt _ w    -> map (EInt nopos w) [0..2^w-1]
          TStruct _ fs -> map (EStruct nopos sname) $ fieldsEnum fs
+         TArray _ _ _ -> error "Not implemented: Type.typeEnumerate TArray"
          TUser _ _    -> error "Type.typeEnumerate TUser"
          TLocation _  -> error "Not implemented: Type.typeEnumerate TLocation"
     where TUser _ sname = typ'' r undefined t

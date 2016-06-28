@@ -30,6 +30,7 @@ import Pos
 import Name
 import NS
 import Util
+import Builtins
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
@@ -52,7 +53,8 @@ evalExpr' (EApply p f as)               =
                     in evalExpr' e
     where as' = map evalExpr' as                                     
           func = getFunc ?r f
-evalExpr' (EField _ s f)        = 
+evalExpr' (EBuiltin _ f as)             = (bfuncEval $ getBuiltin f) $ map evalExpr' as
+evalExpr' (EField _ s f)                = 
     case evalExpr' s of
          s'@(EStruct _ _ fs) -> let (TStruct _ sfs) = typ' ?r ?c s'
                                     fidx = fromJust $ findIndex ((== f) . name) sfs

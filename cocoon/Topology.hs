@@ -47,7 +47,7 @@ import Expr
 import Util
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.SMTLib2   as SMT
-
+import Builtins
 
 -- Multidimensional array of switch instances.  Each dimension corresponds to a 
 -- key.  Innermost elements enumerate ports of an instance.
@@ -231,11 +231,12 @@ func2SMT f@Function{..} = SMT.Function funcName
 
 typ2SMT :: (?r::Refine, WithType a) => ECtx -> a -> SMT.Type
 typ2SMT ctx x = case typ'' ?r ctx x of
-                     TBool _     -> SMT.TBool
-                     TUInt _ w   -> SMT.TUInt w
-                     TUser _ n   -> SMT.TStruct n
-                     TLocation _ -> SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
-                     t           -> error $ "Topology.typ2SMT " ++ show t
+                     TBool _      -> SMT.TBool
+                     TUInt _ w    -> SMT.TUInt w
+                     TUser _ n    -> SMT.TStruct n
+                     TArray _ t l -> SMT.TArray (typ2SMT ctx t) l
+                     TLocation _  -> SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+                     t            -> error $ "Topology.typ2SMT " ++ show t
 
 expr2SMT :: (?r::Refine) => Expr -> SMT.Expr
 expr2SMT (EVar _ k)          = SMT.EVar k
@@ -249,6 +250,7 @@ expr2SMT (EBinOp _ op e1 e2) = SMT.EBinOp op (expr2SMT e1) (expr2SMT e2)
 expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)
 expr2SMT (ECond _ cs d)      = SMT.ECond (map (\(c,v) -> (expr2SMT c, expr2SMT v)) cs) (expr2SMT d)
 expr2SMT (ESlice _ e h l)    = SMT.ESlice (expr2SMT e) h l
+expr2SMT (EBuiltin _ f as)   = (bfuncToSMT $ getBuiltin f) ?r as
 expr2SMT e                   = error $ "Topology.expr2SMT " ++ show e
 
 -- Convert constant SMT expression to Expr

@@ -32,6 +32,7 @@ import Name
 import Expr
 import Refine
 import Statement
+import Builtins
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -235,6 +236,7 @@ checkLinkExpr (EVar    _ _)       = return ()
 checkLinkExpr (EDotVar    _ _)    = return ()
 checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
 checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
+checkLinkExpr (EBuiltin  _ _ as)  = mapM_ checkLinkExpr as
 checkLinkExpr (EField _ s _)      = checkLinkExpr s
 checkLinkExpr (ELocation _ _ es)  = mapM_ checkLinkExpr es
 checkLinkExpr (EBool _ _)         = return ()
@@ -277,6 +279,12 @@ exprValidate r ctx vset (EApply p f as) = do
     mapM_ (\(formal,actual) -> do exprValidate r ctx vset actual
                                   matchType r ctx actual formal) 
           $ zip (funcArgs func) as
+exprValidate r ctx vset (EBuiltin p f as) = do
+    func <- checkBuiltin p f
+    assertR r (bfuncNArgs func == length as) p "Number of arguments does not match function declaration"
+    mapM_ (exprValidate r ctx vset) as
+    (bfuncValidate func) r ctx as
+
 exprValidate r ctx vset (EField p s f) = do
     exprValidate r ctx vset s
     case typ' r ctx s of
@@ -347,6 +355,7 @@ isLExpr (EVar _ _)        = False
 isLExpr (EDotVar _ _)     = False
 isLExpr (EPacket _)       = True
 isLExpr (EApply _ _ _)    = False
+isLExpr (EBuiltin _ _ _)  = False
 isLExpr (EField _ s _)    = isLExpr s
 isLExpr (ELocation _ _ _) = False
 isLExpr (EBool _ _)       = False

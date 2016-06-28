@@ -174,16 +174,18 @@ instance WithName Function where
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
           | TUInt     {typePos :: Pos, typeWidth :: Int}
+          | TArray    {typePos :: Pos, typeElemType :: Type, typeLength :: Int}
           | TStruct   {typePos :: Pos, typeFields :: [Field]}
           | TUser     {typePos :: Pos, typeName :: String}
 
 instance Eq Type where
-    (==) (TLocation _)   (TLocation _)   = True
-    (==) (TBool _)       (TBool _)       = True
-    (==) (TUInt _ w1)    (TUInt _ w2)    = w1 == w2
-    (==) (TStruct _ fs1) (TStruct _ fs2) = fs1 == fs2
-    (==) (TUser _ n1)    (TUser _ n2)    = n1 == n2
-    (==) _               _               = False
+    (==) (TLocation _)    (TLocation _)    = True
+    (==) (TBool _)        (TBool _)        = True
+    (==) (TUInt _ w1)     (TUInt _ w2)     = w1 == w2
+    (==) (TArray _ t1 l1) (TArray _ t2 l2) = t1 == t2 && l1 == l2
+    (==) (TStruct _ fs1)  (TStruct _ fs2)  = fs1 == fs2
+    (==) (TUser _ n1)     (TUser _ n2)     = n1 == n2
+    (==) _               _                 = False
 
 instance WithPos Type where
     pos = typePos
@@ -193,6 +195,7 @@ instance PP Type where
     pp (TLocation _)  = pp "Location"
     pp (TBool _)      = pp "bool"
     pp (TUInt _ w)    = pp "uint<" <> pp w <> pp ">" 
+    pp (TArray _ t l) = brackets $ pp t <> semi <+> pp l
     pp (TStruct _ fs) = pp "struct" <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (TUser _ n)    = pp n
 
@@ -215,6 +218,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EDotVar   {exprPos :: Pos, exprVar :: String}
           | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
+          | EBuiltin  {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
           | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}
           | EBool     {exprPos :: Pos, exprBVal :: Bool}
@@ -230,6 +234,7 @@ instance Eq Expr where
     (==) (EDotVar   _ k1)        (EDotVar   _ k2)        = k1 == k2
     (==) (EPacket   _)           (EPacket   _)           = True
     (==) (EApply    _ f1 as1)    (EApply    _ f2 as2)    = (f1 == f2) && (as1 == as2)
+    (==) (EBuiltin  _ f1 as1)    (EBuiltin  _ f2 as2)    = (f1 == f2) && (as1 == as2)
     (==) (EField    _ s1 f1)     (EField    _ s2 f2)     = (s1 == s2) && (f1 == f2)
     (==) (ELocation _ r1 as1)    (ELocation _ r2 as2)    = (r1 == r2) && (as1 == as2)
     (==) (EBool     _ v1)        (EBool     _ v2)        = v1 == v2
@@ -250,6 +255,7 @@ instance PP Expr where
     pp (EDotVar _ v)       = char '.' <> pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EBuiltin _ f as)   = pp f <> char '!' <>(parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
     pp (ELocation _ r as)  = pp r <> (brackets $ hsep $ punctuate comma $ map pp as)
     pp (EBool _ True)      = pp "true"

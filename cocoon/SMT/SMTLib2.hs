@@ -81,9 +81,10 @@ instance SMTPP Var where
                             <+> smtpp t
 
 instance SMTPP Type where
-    smtpp TBool       = pp "Bool"
-    smtpp (TUInt w)   = pp $ "(_ BitVec " ++ show w ++ ")"
-    smtpp (TStruct n) = pp n
+    smtpp TBool        = pp "Bool"
+    smtpp (TUInt w)    = pp $ "(_ BitVec " ++ show w ++ ")"
+    smtpp (TStruct n)  = pp n
+    smtpp (TArray t l) = parens $ pp "Array" <+> smtpp t <+> pp l
 
 instance SMTPP Struct where
     smtpp (Struct n fs) = parens $ pp "declare-datatypes ()" 
