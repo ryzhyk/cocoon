@@ -1,7 +1,18 @@
+changequote(`[[[', `]]]')
+
+divert([[[-1]]])
+define([[[forloop]]], [[[pushdef([[[$1]]], [[[$2]]])_forloop($@)popdef([[[$1]]])]]])
+define([[[_forloop]]],
+       [[[$4[[[]]]ifelse($1, [[[$3]]], [[[]]], [[[define([[[$1]]], incr($1))$0($@)]]])]]])
+divert[[[]]]dnl
+
+define([[[MAXAS]]], 1000)
+define([[[MASKBITS]]], 48)
+
 typedef uint<32> IP4
 
 typedef struct {
-    uint<48> dstAddr,
+    [bool; MASKBITS] dstAddr,
     uint<48> srcAddr
 } eth_t 
 
@@ -29,61 +40,79 @@ typedef struct {
 } IP4Prefix
 
 typedef uint<16> ASPort
+typedef struct {
+    ASId as,
+    ASPort port
+} ASPortDescr
 typedef uint<16> SDXPort
-typedef uint<32> PrefixId
 
 (* 
 BGP route database encoding
 *)
 
+function nAS(): ASId = 10'd[[[]]]MAXAS
+
 (* Number of ASs connected to exchange *)
-function nAS(): ASId
-assume () nAS() <= 10'd48
-
-function iAS(ASId as): bool = as < nAS()
-
+function iAS(ASId as): bool = as < nAS() 
 
 (* Number of SDX-facing ports for each AS *)
 function asNPorts(ASId as): ASPort
 
-function iASPort(ASId as, ASPort port): bool = as < nAS() and port < asNPorts(as)
+function iASPort(ASId as, ASPort port): bool = iAS(as) and port < asNPorts(as)
 
 (* Database of routes advertised via BGP *)
-function asNPrefixes(ASId as): PrefixId
-function asPrefix(ASId as, PrefixId pref): IP4Prefix
+function prefixMatch(ASId as, IP4 addr): bool
 
-(*
-User-defined policy functions 
-*)
-function outbound_policy(ASId as, ip4_t p): ASId
-
-function inbound_policy(ASId as, ip4_t p): ASPort
-(* inbound policy must route packets to valid port numbers *)
-assume (ASId as, ip4_t p, ASPort port) iAS(as) and (inbound_policy(as, p) == port) => (port < asNPorts(as))
-
-function next_hop(ASId as, IP4 addr): ASId
-
-(* next_hop must be consistent with BGP database *)
-assume (ASId as, ASId dst, IP4 ip) 
-    (iAS(dst) and (next_hop(as, ip) == dst)) => prefix_match(ip, as)
-
-(* true iff addr matches one of the prefixes *)
-function prefix_match(IP4 addr, ASId as): bool
-
-(* TODO: an even more abstract spec *)
+function forwardable(IP4 ip): bool = 
+    false[[[]]]forloop([[[i]]], [[[0]]], decr(MAXAS), [[[ or prefixMatch(10'd[[[]]]i, ip)]]])
 
 role ASRouterIn[ASId as] | iAS(as) = 
-    let ASId dst = outbound_policy(as, pkt.ip4);
-    let ASId defdst = next_hop(as, pkt.ip4.dst);
     havoc pkt.eth;
-    if iAS(dst) and prefix_match(pkt.ip4.dst, dst) then {
-        send ASSDXIn[dst, inbound_policy(dst, pkt.ip4)]
-    } else if iAS(defdst) then {
-        send ASSDXIn[defdst, inbound_policy(defdst, pkt.ip4)]
-    }
+    if (forwardable(pkt.ip4.dst)) then
+        ?send ASSDXIn[prefixMatch(.as, pkt.ip4.dst)]
 
 role ASSDXIn[ASId as, ASPort port] | iASPort(as, port) = filter false
 
+refine ASRouterIn {
+    (*
+    User-defined policy functions 
+    *)
+    function outboundPolicies(ASId as, uint<10> i): ASId
+    function outboundPolicy(ASId from, ASId to, ip4_t p): bool
+    assume (ASId as, uint<10> i) (as >= 10'd[[[]]]MASKBITS) => not iAS(outboundPolicies(as, i))
+
+    function applyOutboundPolicy(ASId as, ip4_t addr): ASId = 
+        case {
+forloop([[[i]]], [[[0]]], decr(MASKBITS), [[[            outboundPolicy(as, outboundPolicies(as, 10'd[[[]]]i), addr): 10'd[[[]]]i;
+]]])dnl
+            default: 10'd[[[]]]MASKBITS;
+        }
+
+    function inboundPolicy(ASId as, ip4_t p): ASPort
+    (* inbound policy must route packets to valid port numbers *)
+    assume (ASId as, ip4_t p, ASPort port) iAS(as) and (inboundPolicy(as, p) == port) => (port < asNPorts(as))
+
+    function nextHop(ASId as, IP4 addr): ASId
+
+    (* nextHop is defined for all forwardable addresses *)
+    assume (ASId as, IP4 ip) 
+        forwardable(ip) => iAS(nextHop(as, ip))
+
+    (* nextHop must be consistent with BGP database *)
+    assume (ASId as, ASId dst, IP4 ip) 
+        (iAS(dst) and (nextHop(as, ip) == dst)) => prefixMatch(dst, ip)
+
+    role ASRouterIn[ASId as] | iAS(as) = 
+        let ASId defdst = nextHop(as, pkt.ip4.dst);
+        let uint<10> policy = applyOutboundPolicy(as, pkt.ip4);
+        let ASId dst = outboundPolicies(as, policy);
+        havoc pkt.eth;
+        if iAS(dst) and prefixMatch(dst, pkt.ip4.dst) then {
+            send ASSDXIn[dst, inboundPolicy(dst, pkt.ip4)]
+        } else if iAS(defdst) then {
+            send ASSDXIn[defdst, inboundPolicy(defdst, pkt.ip4)]
+        }
+}
 
 refine ASRouterIn {
 
@@ -95,38 +124,41 @@ refine ASRouterIn {
 
     function sdxASLink(SDXPort port): ASPortDescr
     (*assume iSDXPort(sdxport) => iASPort(sdxASLink(sdxport)) *)
-    assume iASPort(as, asport) => (ASPortDescr{as, asport} == sdxASLink(asSDXLink(as, asport)))
+    assume (ASId as, ASPort asport) iASPort(as, asport) => (ASPortDescr{as, asport} == sdxASLink(asSDXLink(as, asport)))
 
-    function encode(ASId as, List<ASId>): uint<38>
-    function decode(ASId as, uint<38>): List<ASId>
-    assume(ASId as, List<ASId> rset) iAS(as) => decode(as, encode(as, rset)) == rset
+    function encode(ASId as, IP4 addr): [bool; MASKBITS] = 
+        array!(prefixMatch(outboundPolicies(as, 10'd0), addr)[[[]]]forloop([[[i]]], [[[0]]], MASKBITS, [[[, prefixMatch(outboundPolicies(as, i), addr)]]]))
+    
+    (*function decode(, uint<38>): List<ASId>
+    assume(ASId as, List<ASId> rset) iAS(as) => decode(as, encode(as, rset)) == rset*)
 
     role ASRouterIn[ASId as] | iAS(as) = 
-         let rset = map(fst, filter(bgp_db(),prefix_match(pkt.ip4.dst))) in
-         pkt.eth.dstAddr := encode(rset) ++ next_hop(as, pkt.ip4.dst);
-         send ASRouterOut[as, 16'd0] 
+         pkt.eth.dstAddr := encode(as, pkt.ip4.dst)(* ++ next_hop(as, pkt.ip4.dst)*);
+         send ASSDXOut[as, 16'd0]
 
-    role ASRouterOut[ASId as, ASPort port] | iASPort(as, port) = 
-         send SDXIn[as_sdx_connection(as, port)]
+    role ASSDXOut[ASId as, ASPort port] | iASPort(as, port) = 
+        send SDXIn[asSDXLink(as, port)]
 
     role SDXIn[SDXPort port] | iSDXPort(port) = 
-        let srcas  = sdx_as_connection(port).as in
-        let rset   = decode(pkt.eth.dstAddr[0:37]) in
-        let dst    = outbound_policy(srcas, pkt.ip4) in
-        let defdst = pkt.eth.dstAddr[38:47] in
-        if ((not dst == asnone()) and elem(dst,rset)) then {
-            send SDXOut[as_sdx_connection(dst, inbound_policy(dst, pkt.ip4))]
-        } else if not defdst == asnone() then {
-            send SDXOut[as_sdx_connection(defdst, inbound_policy(defdst, pkt.ip4)]
+        let ASId srcas = sdxASLink(port).as;
+        let uint<10> policy = applyOutboundPolicy(srcas, pkt.ip4);
+        let ASId dst = outboundPolicies(srcas, policy);
+        if iAS(dst) and select!(pkt.eth.dstAddr, policy) then {
+            send SDXOut[asSDXLink(inboundPolicy(dst, pkt.ip4))]
+        } else {
+            let ASId defdst = nextHop(srcas, pkt.ip4.dst);
+            if iAS(defdst) then {
+                send SDXOut[asSDXLink(inboundPolicy(defdst, pkt.ip4))]
+            }
         }
 
     role SDXOut[SDXPort port] | iSDXPort(port) = 
-        ASSDXIn[sdx_as_connection(port).as, sdx_as_connection(port).port]
+        let ASPortDescr asport = sdxASLink(port);
+        send ASSDXIn[asport.as, asport.port]
 }
 
 
 refine {
 
-    function nAS(): ASId = 10'd48
     function asNPorts(ASId as): ASPort = 16'd1
 }
