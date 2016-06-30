@@ -1,5 +1,7 @@
 (* stags routing *)
 
+(* Packet headers
+ *)
 typedef struct {
     uint<48> dstAddr,
     uint<48> srcAddr
@@ -38,101 +40,172 @@ typedef struct {
     stag_t stag
 } Packet
 
+(* Data types
+ *)
+
+(* ToR switch port ide: pod/switch/port number *)
 typedef struct {
     uint<8> pod, 
     uint<8> tor, 
     uint<8> port
 } TORPortId
 
+(* End host id *)
 typedef uint<32> HostId
+
+(* End host port id: hst id/port number *)
 typedef struct {
     HostId hst,
     uint<8> port
 } HostPortId
 
-
+(* Eth address assigned to a host port. 
+   Address assignment is configurable:  *)
 typedef struct {
     VLANId   vid,
     uint<48> mac
 } Address
 
+
+(* START: User-defined configuration functions
+ *)
+
+(* iXXX() are indicator functions that define sets of instance of a particular type. *)
+(* The set of hosts *)
 function iHost(HostId hst): bool
+
+(* Number of physical ports per host *)
 function nHostPorts(HostId hst): uint<8>
 
-function iHostPort(HostPortId port): bool = 
-    iHost(port.hst) and port.port < nHostPorts(port.hst)
+(* The set of host ports *)
+function iHostPort(HostPortId hport): bool = 
+    iHost(hport.hst) and hport.port < nHostPorts(hport.hst)
 
+(* The set of currently assigned Eth addresses *)
 function iAddr(Address addr): bool
 
+(* Assigns addresses to host ports *)
 function addrLocation(Address addr): HostPortId
 assume (Address addr) iAddr(addr) => iHostPort(addrLocation(addr))
 
+(* Groups addresses by colors *)
 function addrColor(Address addr): Color
 
+(* Access control list: pairs of colors that can communicate *)
 function canCommunicate(Color col1, Color col2): bool
+(* ACL must be symmetric *)
 assume (Color col1, Color col2) canCommunicate(col1, col2) => canCommunicate(col2, col1)
 
-role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
-role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
-    if pkt.vlan.valid and (not pkt.mtag.valid) and (not pkt.stag.valid) then {
-        let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
-        let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
-        if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
-            if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
-                let HostPortId dstport = addrLocation(dstAddr);
-                havoc pkt.mtag;
-                havoc pkt.stag;
-                assume pkt.mtag.valid == false;
-                assume pkt.stag.valid == false;
-                send HostIn[dstport.hst, dstport.port]
+(* END: User-defined configuration functions
+ *)
+
+(* Top-level abstract specification *)
+refine {
+    role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
+        (* Only forward packets with vlan tag *)
+        if pkt.vlan.valid then {
+            (* Extract source and destination address from packet *)
+            let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
+            let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+            (* Vaidity check: 
+               - source and destination addresses exist and 
+               - source address matches address assigned to the given port *)
+            if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
+                (* Security check: souce and destination colors can communicate *)
+                if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
+                    (* Compute destination port *)
+                    let HostPortId dstport = addrLocation(dstAddr);
+                    (* mtag and stag must be remove before delivering the packet *)
+                    pkt.mtag := nomtag();
+                    pkt.stag := nostag();
+                    (* Deliver to destinatin port *)
+                    send HostIn[dstport.hst, dstport.port]
+                }
             }
         }
-    }
 
-    
+    role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
+}
+
+(* Implementation over 3-tier topology *)
 refine HostOut{
+
+    (* START: User-defined configuration functions
+     *)
+ 
+    (* Degree of redundancy in the core: the number of core switches each POD switch is connected to *)
     function nCoreRedundant(): uint<8>
+    (* Number of PODs in the topology *)
     function nPods(): uint<8>
+    (* Number of POD switches per POD *)
     function nPodSwitches(): uint<8>
+    (* Number of ToR switches per POD *)
     function nPodTORs(): uint<8>
+    (* Number of end-host-facing ports per ToR switch *)
     function nTORPorts(): uint<8>
 
+    (* Set of ToR switches *)
     function iTOR(uint<8> pod, uint<8> tor): bool = pod < nPods() and tor < nPodTORs()
+    (* Set of ToR switch ports *)
     function iTORPort(TORPortId port): bool = iTOR(port.pod, port.tor) and port.port < nTORPorts()
 
+    (* Link host port to ToR switch port *)
     function hostSwitchConnection(HostPortId hport): TORPortId
-    assume (HostPortId hport) iHostPort(hport) => iTORPort(hostSwitchConnection(hport))
-
     function switchHostConnection(TORPortId tport): HostPortId
+ 
+    (* Links must be well-defined ... *)
+    assume (HostPortId hport) iHostPort(hport) => iTORPort(hostSwitchConnection(hport))
+    (* ... and symmetric *)
     assume (HostPortId hport) iHostPort(hport) => (switchHostConnection(hostSwitchConnection(hport)) == hport)
 
+    (* addrLocation must return invalid locations for invalid addresses.
+       This is used to filter out packets sent to non-existing destinations. *)
     assume (Address addr) iHostPort(addrLocation(addr)) => iAddr(addr)
 
+    (* END: User-defined configuration functions
+     *)
+
+    (* User-defined load balancing policy. Computes mtag based on packet location
+       and destination address *)
     function computeMTag(uint<8> pod, uint<8> tor, Address dstAddr): mtag_t
+    (* computeMTag invariant: choose correct down ports: there exists precisely
+       one shortest path from core to ToR switch in this topology. *)
     assume (mtag_t mtag, uint<8> pod, uint<8> tor, Address dstAddr)
            (iAddr(dstAddr) and (mtag == computeMTag(pod, tor, dstAddr))) => 
            (mtag.down1 == hostSwitchConnection(addrLocation(dstAddr)).pod and
             mtag.down2 == hostSwitchConnection(addrLocation(dstAddr)).tor)
 
+    (* computeMTag invariant: up ports must be within valid port range *)
     assume (mtag_t mtag, uint<8> pod, uint<8> tor, Address dstAddr)
            (mtag == computeMTag(pod, tor, dstAddr)) => 
            (mtag.valid and mtag.up1 < nPodSwitches() and mtag.up2 < nCoreRedundant())
 
+    (* Output port of end host simply sends the packet to the connected ToR port *)
     role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
         let TORPortId swport = hostSwitchConnection(HostPortId{hst, port});
         send TORIn[swport.pod, swport.tor, swport.port]
 
+    (* Downward facing ToR port *)
     role TORIn[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
-        if pkt.vlan.valid and (not pkt.mtag.valid) and (not pkt.stag.valid) then {
+        (* Filter out packets without vlan tag *)
+        if pkt.vlan.valid then {
             let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
             let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+            (* Compute host port the packet was sent from *)
             let HostPortId srchport = switchHostConnection(TORPortId{pod, tor, port});
 
+            (* Drop packets with bogus source address *)
             if addrLocation(srcAddr) == srchport then {
-                let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
+                (* Filter out packets with bogus destination address *)
                 if iHostPort(addrLocation(dstAddr)) then {
+                    (* compute destination ToR port *)
+                    let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
+                    (* Local destination?  Forward via downward link.  Otherwise, attach 
+                       mtag and stag, and forward to the POD layer. *)
                     if dstswport.pod == pod and dstswport.tor == tor then {
                         if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
+                            pkt.mtag := nomtag();
+                            pkt.stag := nostag();
                             send TOROut[pod, tor, dstswport.port]
                         }
                     } else {
@@ -144,41 +217,58 @@ refine HostOut{
             }
         }
 
+    
+    (* Downward facing ToR port -- send packet to host *)
     role TOROut[uint<8> pod, uint<8> tor, uint<8> port] | iTORPort(TORPortId{pod, tor, port}) = 
         let HostPortId hport = switchHostConnection(TORPortId{pod, tor, port});
         if iHostPort(hport) then
             send HostIn[hport.hst, hport.port]
 
+    (* Upward-facing ToR port *)
     role TORUpperIn[uint<8> pod, uint<8> tor, uint<8> port]  | iTOR(pod, tor) and port < nPodSwitches() = 
         let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+        (* Compute destination port; this is always a local port *)
         let TORPortId dstswport = hostSwitchConnection(addrLocation(dstAddr));
+        (* Security check *)
         if canCommunicate(pkt.stag.srcColor, addrColor(dstAddr)) then {
+            (* Remove tags and forward packet to down-facing port *)
             pkt.stag := nostag();
             pkt.mtag := nomtag();
             send TOROut[pod, tor, dstswport.port]
         }
 
+    (* Upward-facing ToR port: forward to POD switch *)
     role TORUpperOut[uint<8> pod, uint<8> tor, uint<8> port] | iTOR(pod, tor) and port < nPodSwitches() =
         send PodIn[pod, port, tor]
 
+    (* Set of POD switches *)
     function iPodSw(uint<8> pod, uint<8> sw): bool = pod < nPods() and sw < nPodSwitches()
 
+    (* Downward facing POD port input -- forward to upward facing port selected by mtag *)
     role PodIn[uint<8> pod, uint<8> sw, uint<8> port]  | iPodSw(pod, sw) and port < nPodTORs() = 
         send PodUpperOut[pod, sw, pkt.mtag.up2]
         
+    (* Downward facing POD port output -- forward to ToR switch *)
     role PodOut[uint<8> pod, uint<8> sw, uint<8> port] | iPodSw(pod, sw) and port < nPodTORs() = 
         send TORUpperIn[pod, port, sw]
 
+    (* Upward facing POD port input -- forward to downward facing port selected by mtag *)
     role PodUpperIn[uint<8> pod, uint<8> sw, uint<8> port]  | iPodSw(pod, sw) and port < nCoreRedundant() = 
         if pkt.mtag.down2 < nPodTORs() then
             send PodOut[pod, sw, pkt.mtag.down2]
+    (* Upward facing POD output -- forward to core *)
     role PodUpperOut[uint<8> pod, uint<8> sw, uint<8> port] | iPodSw(pod, sw) and port < nCoreRedundant() = 
         send CoreIn[sw, port, pod]
 
+    (* Set of core switches *)
     function iCoreSw(uint<8> i1, uint<8> i2): bool = i1 < nPodSwitches() and i2 < nCoreRedundant()
+
+    (* Core input port: forward via output port selected by mtag *)
     role CoreIn [uint<8> i1, uint<8> i2, uint<8> port] | iCoreSw(i1, i2) and port < nPods() = 
         if pkt.mtag.down1 < nPods() then
             send CoreOut[i1, i2, pkt.mtag.down1]
+
+    (* Core output port: forward to core *)
     role CoreOut[uint<8> i1, uint<8> i2, uint<8> port] | iCoreSw(i1, i2) and port < nPods() = 
         send PodUpperIn[port, i1, i2]
 }
