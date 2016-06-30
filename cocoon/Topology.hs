@@ -250,7 +250,7 @@ expr2SMT (EBinOp _ op e1 e2) = SMT.EBinOp op (expr2SMT e1) (expr2SMT e2)
 expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)
 expr2SMT (ECond _ cs d)      = SMT.ECond (map (\(c,v) -> (expr2SMT c, expr2SMT v)) cs) (expr2SMT d)
 expr2SMT (ESlice _ e h l)    = SMT.ESlice (expr2SMT e) h l
-expr2SMT (EBuiltin _ f as)   = (bfuncToSMT $ getBuiltin f) ?r as
+expr2SMT (EBuiltin _ f as)   = (bfuncToSMT $ getBuiltin f) $ map expr2SMT as
 expr2SMT e                   = error $ "Topology.expr2SMT " ++ show e
 
 -- Convert constant SMT expression to Expr

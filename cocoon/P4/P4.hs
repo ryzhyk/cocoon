@@ -165,7 +165,7 @@ printExpr (EBinOp _ op l r)                     = parens $ (printExpr l) <+> pri
 printExpr (EUnOp _ op e)                        = parens $ printUOp op <+> printExpr e
 printExpr (ESlice _ e h l)                      = cast (h-l+1) $ parens $ (parens $ printExpr e <+> pp ">>" <+> pp l) <+> pp "&" <+> 
                                                                           (pp $ "0x" ++ showHex (2^(h-l+1) - 1::Integer) "")
-printExpr (EApply _ f as)                       = (bfuncPrintP4 $ getBuiltin f) $ as
+printExpr (EApply _ f as)                       = (bfuncPrintP4 $ getBuiltin f) ?r (CtxRole ?role) as $ map printExpr as
 printExpr e                                     = error $ "P4.printExpr " ++ show e
 
 cast :: Int -> Doc -> Doc

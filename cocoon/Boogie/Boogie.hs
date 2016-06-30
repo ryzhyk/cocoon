@@ -196,11 +196,12 @@ mkTypeDef TypeDef{..} =
         _              -> pp "type" <+> pp tdefName <+> char '=' <+> mkType tdefType <> semi
         
 mkType :: Type -> Doc 
-mkType (TLocation _) = error "Not implemented: Boogie.mkType TLocation"
-mkType (TBool _)     = pp "bool"
-mkType (TUInt _ _)   = pp "int" -- pp "bv" <> pp w
-mkType (TUser _ n)   = pp n
-mkType t             = error $ "Boogie.mkType " ++ show t
+mkType (TLocation _)  = error "Not implemented: Boogie.mkType TLocation"
+mkType (TBool _)      = pp "bool"
+mkType (TUInt _ _)    = pp "int" -- pp "bv" <> pp w
+mkType (TUser _ n)    = pp n
+mkType (TArray _ t _) = parens $ (brackets $ mkType t) <+> mkType t
+mkType t              = error $ "Boogie.mkType " ++ show t
 
 mkFunction :: Refine -> Function -> Doc
 mkFunction r f@Function{..} = maybe ((decl <> semi)

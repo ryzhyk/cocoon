@@ -33,7 +33,7 @@ import Syntax
 import Name
 import Util
 import Pos
-import Builtins
+import {-# SOURCE #-}Builtins
 
 packetTypeName = "Packet"
 

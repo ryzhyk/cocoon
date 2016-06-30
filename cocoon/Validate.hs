@@ -281,9 +281,8 @@ exprValidate r ctx vset (EApply p f as) = do
           $ zip (funcArgs func) as
 exprValidate r ctx vset (EBuiltin p f as) = do
     func <- checkBuiltin p f
-    assertR r (bfuncNArgs func == length as) p "Number of arguments does not match function declaration"
     mapM_ (exprValidate r ctx vset) as
-    (bfuncValidate func) r ctx as
+    (bfuncValidate func) r ctx p as
 
 exprValidate r ctx vset (EField p s f) = do
     exprValidate r ctx vset s

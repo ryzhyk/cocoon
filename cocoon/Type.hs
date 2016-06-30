@@ -17,14 +17,14 @@ limitations under the License.
 
 module Type( WithType(..) 
            , typ', typ''
-           , isBool, isUInt, isLocation, isStruct
+           , isBool, isUInt, isLocation, isStruct, isArray
            , matchType
            , typeDomainSize, typeEnumerate) where
 
 import Data.Maybe
 import Data.List
 import Control.Monad.Except
-import Builtins
+import {-# SOURCE #-} Builtins
 
 import Syntax
 import NS
@@ -109,6 +109,11 @@ isStruct :: (WithType a) => Refine -> ECtx -> a -> Bool
 isStruct r ctx a = case typ' r ctx a of
                         TStruct _ _ -> True
                         _           -> False
+
+isArray :: (WithType a) => Refine -> ECtx -> a -> Bool
+isArray r ctx a = case typ' r ctx a of
+                       TArray _ _ _ -> True
+                       _            -> False
 
 
 matchType :: (MonadError String me, WithType a, WithPos a, WithType b) => Refine -> ECtx -> a -> b -> me ()

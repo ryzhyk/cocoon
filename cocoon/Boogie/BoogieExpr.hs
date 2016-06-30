@@ -64,7 +64,7 @@ mkExpr' (EDotVar _ v)           = let CtxSend _ rl = ?c in
                                   apply (v ++ "#" ++ (name rl)) [?loc]
 mkExpr' e@(EPacket _)           = mkPktField e
 mkExpr' (EApply _ f as)         = apply f $ map mkExpr' as
-mkExpr' (EBuiltin _ f as)       = (bfuncPrintBoogie $ getBuiltin f) as
+mkExpr' (EBuiltin _ f as)       = (bfuncPrintBoogie $ getBuiltin f) $ map mkExpr' as
 mkExpr' e@(EField _ s f) | isPktField s = mkPktField e
                          | otherwise    = 
                                let TUser _ tn = typ'' ?r ?c s
