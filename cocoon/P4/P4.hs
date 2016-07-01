@@ -523,7 +523,14 @@ cascadeToDisj x              = x
 mkAssignTable :: (?r::Refine, ?role::Role, ?kmap::KMap, ?pmap::PMap) => String -> Expr -> Expr -> State P4State ()
 mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
-        TUInt _ w = typ' ?r (CtxRole ?role) rhs 
+        w = case typ' ?r (CtxRole ?role) rhs of
+                 TUInt _ w'         -> w'
+                 ta@(TArray _ t' l) -> if isBool ?r (CtxRole ?role) t' 
+                                          then l
+                                          else error $ "P4.mkAssignTable: type not supported: " ++ show ta
+                 t'                 -> error $ "P4.mkAssignTable: type not supported: " ++ show t'
+                 --trace ("mkAssignTable " ++ show lhs ++ " " ++ show rhs) $ 
+                 --typ' ?r (CtxRole ?role) rhs 
         isdyn = exprNeedsTable rhs
         action = if isdyn
                     then (pp "action" <+> pp actname <> parens (pp "in" <+> pp ("bit<" ++ show w ++ ">") <+> pp "_val") <+> lbrace)
