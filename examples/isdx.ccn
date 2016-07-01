@@ -6,7 +6,7 @@ define([[[_forloop]]],
        [[[$4[[[]]]ifelse($1, [[[$3]]], [[[]]], [[[define([[[$1]]], incr($1))$0($@)]]])]]])
 divert[[[]]]dnl
 
-define([[[MAXAS]]], 100)
+define([[[MAXAS]]], 10)
 define([[[MASKBITS]]], 48)
 
 
@@ -45,7 +45,7 @@ typedef struct {
     ASId as,
     ASPort port
 } ASPortDescr
-typedef uint<16> SDXPort
+typedef uint<48> SDXPort
 
 (* 
 BGP route database encoding
@@ -67,10 +67,12 @@ function prefixMatch(ASId as, IP4 addr): bool
 function forwardable(IP4 ip): bool = 
     false[[[]]]forloop([[[i]]], [[[0]]], decr(MAXAS), [[[ or prefixMatch(48'd[[[]]]i, ip)]]])
 
-role ASRouterIn[ASId as] | iAS(as) = 
+role ASRouterIn[ASId as, uint<8> port] | iAS(as) and port == 8'd0 = 
     havoc pkt.eth;
     if (forwardable(pkt.ip4.dst)) then
         ?send ASSDXIn[prefixMatch(.as, pkt.ip4.dst)]
+
+role ASRouterOut[ASId as, uint<8> port] | iAS(as) and port == 8'd0 = filter false
 
 role ASSDXIn[ASId as, ASPort port] | iASPort(as, port) = filter false
 
@@ -103,7 +105,7 @@ forloop([[[i]]], [[[0]]], decr(MASKBITS), [[[            outboundPolicy(as, outb
     assume (ASId as, ASId dst, IP4 ip) 
         (iAS(dst) and (nextHop(as, ip) == dst)) => prefixMatch(dst, ip)
 
-    role ASRouterIn[ASId as] | iAS(as) = 
+    role ASRouterIn[ASId as, uint<8> port] | iAS(as) and port == 8'd0 = 
         let ASId defdst = nextHop(as, pkt.ip4.dst);
         let uint<10> policy = applyOutboundPolicy(as, pkt.ip4);
         let ASId dst = outboundPolicies(as, policy);
@@ -131,7 +133,7 @@ refine ASRouterIn {
     function encode(ASId as, IP4 addr): [bool; MASKBITS] = 
         array!(prefixMatch(outboundPolicies(as, 10'd0), addr)[[[]]]forloop([[[i]]], [[[1]]], decr(MASKBITS), [[[, prefixMatch(outboundPolicies(as, 10'd[[[]]]i), addr)]]]))
     
-    role ASRouterIn[ASId as] | iAS(as) = 
+    role ASRouterIn[ASId as, uint<8> port] | iAS(as) and port == 8'd0 = 
          pkt.eth.dstAddr := encode(as, pkt.ip4.dst)(* ++ next_hop(as, pkt.ip4.dst)*);
          pkt.eth.srcAddr := nextHop(as, pkt.ip4.dst);
          send ASSDXOut[as, 16'd0]
@@ -156,9 +158,18 @@ refine ASRouterIn {
         send ASSDXIn[asport.as, asport.port]
 }
 
-
 refine {
 
+    role AS[ASId as] | iAS(as) = filter false
+    switch AS ( (ASRouterIn, ASRouterOut), (ASSDXIn, ASSDXOut))
+
+    role SDX[] = filter false
+    switch SDX ( (SDXIn, SDXOut) )
+}
+
+refine {
     function asNPorts(ASId as): ASPort = 16'd1
-    function iSDXPort(SDXPort port): bool = port < 16'd100
+    function iSDXPort(SDXPort port): bool = port < 48'd[[[]]]MAXAS
+    function asSDXLink(ASId as, ASPort asport): SDXPort = as
+    function sdxASLink(SDXPort port): ASPortDescr = ASPortDescr{port, 16'd0}
 }
