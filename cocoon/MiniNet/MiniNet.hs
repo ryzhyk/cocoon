@@ -69,7 +69,7 @@ renderNode voffset node ((descr, _), hoffset) = do
                , ("hostname"   , JSString $ toJSString ndname) 
                , ("nodeNum"    , JSRational False $ fromIntegral number)
                , ("switchType" , JSString $ toJSString "bmv2")] ++
-               if nodeType node == NodeHost 
+               if (nodeType node == NodeHost) && (not $ null $ idescKeys descr)
                   then case head $ idescKeys descr of
                             e@(EStruct _ _ _) -> [("ip4", JSString $ toJSString $ formatIP e)] 
                             (EInt _ 48 m)     -> [("mac", JSString $ toJSString $ formatMAC m)] ++
