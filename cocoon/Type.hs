@@ -18,7 +18,7 @@ limitations under the License.
 module Type( WithType(..) 
            , typ', typ''
            , isBool, isUInt, isLocation, isStruct, isArray
-           , matchType
+           , matchType, matchType'
            , typeDomainSize, typeEnumerate) where
 
 import Data.Maybe
@@ -117,7 +117,7 @@ isArray r ctx a = case typ' r ctx a of
 
 
 matchType :: (MonadError String me, WithType a, WithPos a, WithType b) => Refine -> ECtx -> a -> b -> me ()
-matchType r ctx x y = assertR r (matchType' r ctx x y) (pos x) "Incompatible type"
+matchType r ctx x y = assertR r (matchType' r ctx x y) (pos x) $ "Incompatible types " ++ show (typ r ctx x) ++ " and " ++ show (typ r ctx y)
 
 matchType' :: (WithType a, WithType b) => Refine -> ECtx -> a -> b -> Bool
 matchType' r ctx x y = 

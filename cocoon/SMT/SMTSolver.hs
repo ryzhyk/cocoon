@@ -119,6 +119,7 @@ allValues q (TStruct n) = map (EStruct n) $ allvals fs
     where Struct _ fs = fromJust $ find ((==n) . name) $ smtStructs q
           allvals []          = [[]]
           allvals ((_,t):fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q t
+allValues _ (TArray _ _) = error "Not implemented: SMTSolver.allValues TArray"
 
 allSolutions :: SMTSolver -> SMTQuery -> String -> [Expr]
 allSolutions solver q var = sortWith solToArray $ allSolutions' solver q var
@@ -133,8 +134,6 @@ allSolutions' solver q var =
                                    Nothing  -> allValues q $ typ q Nothing $ EVar var
                                    Just val -> let q' = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)}
                                                in val:(allSolutions' solver q' var)
-                              
-
 
 solToArray :: Expr -> [Integer]
 solToArray (EBool True)   = [1]

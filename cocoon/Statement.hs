@@ -28,9 +28,9 @@ import Syntax
 statFold :: (a -> Statement -> a) -> a -> Statement -> a
 statFold f acc s = 
    case s of 
-        SSeq    _ l r   -> f (f acc' l) r
-        SPar    _ l r   -> f (f acc' l) r
-        SITE    _ _ t e -> maybe (f acc' t) (f (f acc' t)) e
+        SSeq    _ l r   -> statFold f (statFold f acc' l) r
+        SPar    _ l r   -> statFold f (statFold f acc' l) r
+        SITE    _ _ t e -> maybe (statFold f acc' t) (statFold f (statFold f acc' t)) e
         STest   _ _     -> acc'
         SSet    _ _ _   -> acc'
         SSend   _ _     -> acc'
@@ -38,7 +38,7 @@ statFold f acc s =
         SHavoc  _ _     -> acc'
         SAssume _ _     -> acc'
         SLet    _ _ _ _ -> acc'
-        SFork   _ _ _ b -> f acc' b
+        SFork   _ _ _ b -> statFold f acc' b
    where acc' = f acc s
 
 statFuncsRec :: Refine -> Statement -> [String]

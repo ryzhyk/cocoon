@@ -13,12 +13,15 @@ import Name
 import Pos
 import Type
 import PP
+import Boogie.Boogie
+import Boogie.BoogieHelpers
+import Util
 import qualified SMT.SMTSolver as SMT
 
 data Builtin = Builtin { bfuncName        :: String
                        , bfuncValidate    :: forall me . (MonadError String me) => Refine -> ECtx -> Pos -> [Expr] -> me ()
                        , bfuncType        :: Refine -> ECtx -> [Expr] -> Type
-                       , bfuncPrintBoogie :: [Doc] -> Doc
+                       , bfuncPrintBoogie :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
                        , bfuncPrintP4     :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
                        , bfuncToSMT       :: [SMT.Expr] -> SMT.Expr
                        , bfuncEval        :: [Expr] -> Expr
@@ -28,7 +31,7 @@ instance WithName Builtin where
     name = bfuncName
 
 builtins :: [Builtin]
-builtins = [arraySelect]
+builtins = [arraySelect, arrayArray]
 
 {- select!(array, index) -}
 
@@ -44,8 +47,8 @@ arraySelectType r ctx args = t
     where (a:_) = args
           TArray _ t _ = typ' r ctx a
 
-arraySelectPrintBoogie :: [Doc] -> Doc
-arraySelectPrintBoogie args = arr <> (brackets idx)
+arraySelectPrintBoogie :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
+arraySelectPrintBoogie _ _ _ args = arr <> (brackets idx)
     where [arr, idx] = args
 
 arraySelectPrintP4 :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
@@ -76,3 +79,42 @@ arraySelect = Builtin "select"
                       arraySelectPrintP4
                       arraySelectToSMT
                       arraySelectEval
+
+
+{- array!(x1, x2, ...) -}
+
+arrayArrayValidate :: forall me . (MonadError String me) => Refine -> ECtx -> Pos -> [Expr] -> me ()
+arrayArrayValidate r ctx p args = do
+    assertR r (length args > 0) p "select! requires at least one argument"
+    mapM_ (\a -> matchType r ctx a (head args)) $ tail args
+        
+arrayArrayType :: Refine -> ECtx -> [Expr] -> Type
+arrayArrayType r ctx args = TArray nopos (typ' r ctx $ head args) (length args) 
+
+arrayArrayPrintBoogie :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
+arrayArrayPrintBoogie r ctx args bgargs = 
+    foldIdx (\e a i -> parens $ e <> (brackets $ pp i <+> pp ":=" <+> a)) (apply (emptyTypeFuncName r $ arrayArrayType r ctx args) []) bgargs
+
+arrayArrayPrintP4 :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
+arrayArrayPrintP4 r ctx args p4args = 
+    case typ' r ctx $ head args of
+         TBool _ -> parens $ hsep $ punctuate (pp " |") $ mapIdx mkBit p4args
+         _       -> error "Builtins.arrayArrayPrintP4 not implemented"
+    where mkBit a i = parens $ (parens $ pp "(bit<" <> pp len <> pp ">)" <> (parens $ pp "(bit<1>)" <> a)) <+> pp "<<" <+> pp i
+          len = length p4args
+
+arrayArrayToSMT :: [SMT.Expr] -> SMT.Expr
+arrayArrayToSMT _ = error "Not implemented: arrayArrayToSMT"
+--parens $ (parens $ pp "as const" <+> (parens $ pp "Array Int" <+> t)) <+> defval
+
+
+arrayArrayEval :: [Expr] -> Expr
+arrayArrayEval args = EBuiltin nopos "array" args
+
+arrayArray = Builtin "array" 
+                      arrayArrayValidate
+                      arrayArrayType
+                      arrayArrayPrintBoogie
+                      arrayArrayPrintP4
+                      arrayArrayToSMT
+                      arrayArrayEval

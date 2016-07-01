@@ -15,7 +15,7 @@ limitations under the License.
 -}
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
 
-module Boogie.Boogie (refinementToBoogie) where
+module Boogie.Boogie (refinementToBoogie, emptyTypeFuncName) where
 
 import Text.PrettyPrint
 import qualified Data.Map as M
@@ -32,6 +32,7 @@ import Pos
 import Util
 import Expr
 import Refine
+import Statement
 import Boogie.BoogieHelpers
 import Boogie.BoogieExpr
 
@@ -96,8 +97,9 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 type RMap = M.Map String String
 
 refinementToBoogie1 :: Encoding -> Refine -> Refine -> String -> Int -> Doc
-refinementToBoogie1 enc abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, bounds, types, gvars, funcs, roles, assums, check]
+refinementToBoogie1 enc abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, emptya, bounds, types, gvars, funcs, roles, assums, check]
     where --ops    = mkBVOps conc
+          emptya = mkEmptyArrays conc
           bounds = mkBoundsCheckers conc
           new    = rname : (map name (refineRoles conc) \\ map name (refineRoles abst))
           crmap  = M.fromList $ map (\n -> (n, "c_" ++ n)) new
@@ -200,7 +202,7 @@ mkType (TLocation _)  = error "Not implemented: Boogie.mkType TLocation"
 mkType (TBool _)      = pp "bool"
 mkType (TUInt _ _)    = pp "int" -- pp "bv" <> pp w
 mkType (TUser _ n)    = pp n
-mkType (TArray _ t _) = parens $ (brackets $ mkType t) <+> mkType t
+mkType (TArray _ t _) = parens $ (brackets $ pp "int") <+> mkType t
 mkType t              = error $ "Boogie.mkType " ++ show t
 
 mkFunction :: Refine -> Function -> Doc
@@ -261,12 +263,25 @@ mkRoleAsProc r rl@Role{..} = (pp "procedure" <+> (apply (mkRoleName roleName) ar
                                       $$
                                       (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleForkVars rl)
                                       $$
+                                      (vcat $ map ((pp "var" <+>) . (<> semi)) 
+                                            $ map (\e -> mkField $ Field nopos (havocVarName e) (typ r (CtxRole rl) e))
+                                            $ statHavocs roleBody)
+                                      $$
                                       pp pktVar .:= pp "_pkt"
                                       $$
                                       mkStatement r (CtxRole rl) roleBody)
                              $$
                              rbrace
     where args = map mkField $ roleKeys ++ [Field nopos "_pkt" $ TUser nopos packetTypeName]
+
+havocVarName :: Expr -> String
+havocVarName e = "havoc_" ++ (sanitize $ show e)
+
+statHavocs :: Statement -> [Expr]
+statHavocs st = nub 
+                $ statFold (\es st' -> case st' of 
+                                            SHavoc _ e -> es ++ [e]
+                                            _          -> es) [] st
 
 mkField :: Field -> Doc
 mkField f = (pp $ name f) .: (mkType $ fieldType f)
@@ -344,7 +359,9 @@ mkStatement r ctx (SSendND _ n c) = let rl' = getRole r n in
                                                     $$
                                                     (call (mkRoleName n) 
                                                           $ (map (\k -> apply (name k ++ "#" ++ n) [pp locationVar]) $ roleKeys rl') ++ [pp pktVar])
-mkStatement r ctx (SHavoc _ e)    = havoc' r (mkExpr r ctx e, typ r ctx e)
+mkStatement r ctx (SHavoc _ e)    = havoc' r (pp $ havocVarName e, typ r ctx e)
+                                    $$
+                                    mkAssign r ctx e [] (EVar nopos $ havocVarName e)
 mkStatement r ctx (SAssume _ e)   = assume $ mkExpr r ctx e
 mkStatement r ctx (SLet _ _ n v)  = checkBounds r ctx v
                                     $$
@@ -559,6 +576,19 @@ msetComplement ctx mset = msetComplement' (EPacket nopos)
                                          then let TStruct _ fs = typ' ?r ctx e in
                                               concatMap (msetComplement' . EField nopos e . name) fs
                                          else [(e, exprNext ctx e)]
+
+mkEmptyArrays :: Refine -> Doc
+mkEmptyArrays r = 
+    vcat
+    $ map (\t -> pp "function" <+> (pp $ emptyTypeFuncName r t) <> (parens empty) <> colon <+> mkType t <> semi)
+    $ nubBy (\t1 t2 -> let TArray _ t1' _ = typ' r undefined t1
+                           TArray _ t2' _ = typ' r undefined t2 in
+                       t1' == t2')
+    $ filter (isArray r undefined)
+    $ collectTypes r
+
+emptyTypeFuncName :: Refine -> Type -> String
+emptyTypeFuncName r t = "empty" ++ (sanitize $ render $ mkType $ typ' r undefined t)
 
 mkBoundsCheckers :: Refine -> Doc
 mkBoundsCheckers r = vcat $ map (\t -> case t of 

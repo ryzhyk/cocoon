@@ -21,6 +21,7 @@ import Text.PrettyPrint
 import Data.List
 import Data.Maybe
 import qualified Data.Map as M
+import Data.String.Utils
 
 import Type
 import PP
@@ -158,4 +159,29 @@ checkBVBounds r xs = if null cs then pp "true" else (hsep $ intersperse (pp "&&"
                                                          [apply ("checkBounds" ++ sname) [v]]
                                           _           -> []) xs
 
+-- Sanitize string to be a valid Boogie identifier
+sanitize :: String -> String
+sanitize str   = replace "("  "" 
+               $ replace ")"  "" 
+               $ replace "'"  "" 
+               $ replace "\"" "_" 
+               $ replace "/"  "_" 
+               $ replace "$"  "" 
+               $ replace ":"  "_" 
+               $ replace "="  "_"
+               $ replace "<"  "_"
+               $ replace ">"  "_"
+               $ replace "+"  "_"
+               $ replace "-"  "_"
+               $ replace "*"  "_"
+               $ replace " "  "_"
+               $ replace "."  "_"
+               $ replace "["  "_"
+               $ replace "]"  "_"
+               $ replace "&"  "_"
+               $ replace "#"  "_"
+               $ replace "?"  "_"
+               $ replace ","  "_"
+               $ replace "%"  "_"
+               str
 
