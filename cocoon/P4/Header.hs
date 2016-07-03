@@ -16,6 +16,7 @@ limitations under the License.
 {-# LANGUAGE QuasiQuotes #-}
 
 module P4.Header ( p4HeaderDecls
+                 , p4DefaultCommands
                  , p4DefaultDecls
                  , p4InitHeader
                  , p4CleanupHeader) where
@@ -179,12 +180,26 @@ p4HeaderDecls = [str|
 |action broadcast() {
 |    modify_field(intrinsic_metadata.mgid, 1);
 |}
+|
+|action adrop() {
+|    drop();
+|}
+|
+|table drop {
+|    actions {adrop;}
+|}
+|
 |]
 
 p4DefaultDecls::String
 p4DefaultDecls = [str|
 |]
 
+
+p4DefaultCommands::String
+p4DefaultCommands = [str|
+|table_set_default drop adrop
+|]
 
 p4InitHeader :: String -> String
 p4InitHeader h = case h of

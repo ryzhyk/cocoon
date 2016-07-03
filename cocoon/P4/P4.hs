@@ -120,7 +120,7 @@ instance PP P4Statement where
                                 (nest' $ vcat $ map (\(a, s) -> (pp a <+> lbrace) $$ (nest' $ pp s) $$ rbrace) as)
                                 $$ 
                                 rbrace
-    pp (P4SDrop)              = pp "drop" <> semi
+    pp (P4SDrop)              = pp "apply(drop)" <> semi
     pp (P4SNop)               = pp "{}"
 
 p4seq :: [P4Statement] -> P4Statement
@@ -135,7 +135,9 @@ printExpr (EVar _ k)                            = if k == name pkey
                                                      then printExpr $ EBinOp nopos Minus ingressPort (EInt nopos 32 $ fromIntegral first)
                                                      else case lookupLocalVar ?role k of
                                                                Nothing -> pp k
-                                                               Just _  -> pp $ localVarName ?role k
+                                                               Just v  -> if isStruct ?r (CtxRole ?role) v 
+                                                                             then pp $ localVarName ?role k
+                                                                             else (pp $ localVarName ?role k) <> char '.' <> pp "x"
     where pkey = last $ roleKeys ?role
           (first, _) = ?pmap M.! (name ?role)
 printExpr (EPacket _)                           = pp "pkt"
@@ -246,24 +248,32 @@ genP4Switch r switch kmap pmap =
                   $$
                   rbrace
     in ( pp p4HeaderDecls $$ pp "" $$ vcat (map mkStructType $ S.toList structs) $$ vcat lvars $$ vcat tables $$ pp "" $$ control
-       , vcat commands
+       , pp p4DefaultDecls $$ vcat commands
        , dynacts)
 
+
+
 mkStructType :: (?r::Refine) => String -> Doc
-mkStructType n = (pp "header_type" <+> pp n <+> lbrace)
-                 $$
-                 (nest' $ pp "fields" <> lbrace
-                          $$
-                          (nest' $ vcat $ map (\f -> case typ' ?r undefined f of
-                                                          TBool _   -> pp "bool"
-                                                          TUInt _ w -> pp "bit<" <> pp w <> pp ">"
-                                                          _         -> error "P4.mkStructType: only bool and uint fields are supported"
-                                                     <+> (pp $ name f) <> semi) fs) 
-                          $$
-                          rbrace)
-                 $$
-                 rbrace
+mkStructType n = mkHeaderType n fs
     where TStruct _ fs = tdefType $ getType ?r n
+    
+mkHeaderType :: (?r::Refine) => String -> [Field] -> Doc
+mkHeaderType n fs = (pp "header_type" <+> pp n <+> lbrace)
+                    $$
+                    (nest' $ pp "fields" <> lbrace
+                             $$
+                             (nest' $ vcat $ map (\f -> case typ' ?r undefined f of
+                                                             TBool _       -> pp "bit<1>"
+                                                             TUInt _ w     -> pp "bit<" <> pp w <> pp ">"
+                                                             TArray _ t' l -> case typ' ?r undefined t' of
+                                                                                   TBool _ -> pp "bit<" <> pp l <> pp ">"
+                                                                                   _       -> error "P4.mkHeaderType: unexpected type"
+                                                             _         -> error "P4.mkHeaderType: only bool and uint fields are supported"
+                                                        <+> (pp $ name f) <> semi) fs) 
+                             $$
+                             rbrace)
+                    $$
+                    rbrace
 
 
 mkSwitch :: (?r::Refine, ?pmap::PMap) => KMap -> Node -> State P4State P4Statement
@@ -386,12 +396,20 @@ mkStatement (SLet _ t v e)  = do
 mkStatement (SFork _ _ _ _) = error "Not implemented: P4.mkStatement SFork"
 
 mkLocalVar :: (?r::Refine, ?c::ECtx, ?role::Role) => Type -> String -> Doc
-mkLocalVar t n = pp "metadata" <+> tname <+> (pp $ localVarName ?role n) <> semi
-    where tname = case typ'' ?r ?c t of
-                       TUInt _ w -> pp "bit<" <> pp w <> pp ">"
-                       TBool _   -> pp "bool"
-                       TUser _ s -> pp s
-                       _         -> error "P4.mkLocalVar: unexpected type"
+mkLocalVar t n = decl
+                 $$
+                 pp "metadata" <+> pp tname <+> (pp $ localVarName ?role n) <> semi
+    where (decl, tname) = case typ'' ?r ?c t of
+                               TUInt _ w     -> (mkHeaderType (localVarTypeName n) [Field nopos "x" $ TUInt nopos w], localVarTypeName n)
+                               TBool _       -> (mkHeaderType (localVarTypeName n) [Field nopos "x" $ TUInt nopos 1], localVarTypeName n)
+                               TUser _ s     -> (empty, s)
+                               TArray _ t' l -> case typ' ?r ?c t' of
+                                                     TBool _ -> (mkHeaderType (localVarTypeName n) [Field nopos "x" $ TUInt nopos l], localVarTypeName n)
+                                                     _       -> error "P4.mkLocalVar: unexpected type"
+                               _             -> error "P4.mkLocalVar: unexpected type"
+
+localVarTypeName :: String -> String
+localVarTypeName n = "_" ++ n ++ "_type"
 
 mkAddHeader :: String -> State P4State P4Statement
 mkAddHeader h = do
@@ -525,6 +543,7 @@ mkAssignTable n lhs rhs = do
     let actname = "a_" ++ n
         w = case typ' ?r (CtxRole ?role) rhs of
                  TUInt _ w'         -> w'
+                 TBool _            -> 1
                  ta@(TArray _ t' l) -> if isBool ?r (CtxRole ?role) t' 
                                           then l
                                           else error $ "P4.mkAssignTable: type not supported: " ++ show ta
@@ -592,7 +611,6 @@ matchFields = fields (EPacket nopos) ++ [ingressPort] ++ (concatMap (fields . EV
 
 populateTable :: Refine -> P4DynAction -> [Doc]
 populateTable r P4DynAction{..} = 
-    trace ("table " ++ p4dynTable) $
     case p4dynAction of
          Nothing -> mapIdx (\(msk,val) i -> case val of
                                                  EBool _ True  -> mkTableEntry p4dynTable "yes" [] msk i
@@ -632,8 +650,7 @@ mkTableEntry table action args mask priority =
 -- e may not contain variables (other than pkt), function calls,
 -- case{} expressions.
 exprToMasks :: (?r::Refine, ?c::ECtx, ?kmap::KMap) => Expr -> [Doc]
-exprToMasks e = trace ("exprToMasks " ++ show e ++ " = " ++ show (map render res)) res
-    where res = map disjunctToMask $ exprToDNF e
+exprToMasks e = map disjunctToMask $ exprToDNF e
 
 exprToDNF :: (?r::Refine, ?c::ECtx) => Expr -> [[Expr]]
 exprToDNF (EBinOp _ And e1 e2) = concatMap (\d -> map (d++) $ exprToDNF e2) (exprToDNF e1)
@@ -681,5 +698,7 @@ mkMatch atoms = let CtxRole role = ?c in
     where mask w = foldl' (\a i -> setBit a i) (0::Integer) [0..w-1]
 
 exprToVal :: Expr -> Doc
-exprToVal (EInt _ _ i) = pp $ "0x" ++ showHex i ""
-exprToVal e            = error $ "P4.exprToVal " ++ show e
+exprToVal (EInt _ _ i)    = pp $ "0x" ++ showHex i ""
+exprToVal (EBool _ True)  = pp "0x1"
+exprToVal (EBool _ False) = pp "0x0"
+exprToVal e               = error $ "P4.exprToVal " ++ show e
