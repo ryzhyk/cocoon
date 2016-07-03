@@ -115,13 +115,28 @@ def applyConfig(loadedTopology, netdir, netname, oldts):
                     print e.output
     sleep(1)
 
+def preprocess(f):
+    n, ext = os.path.splitext(f)
+    n2, ext2 = os.path.splitext(n)
+    if ext2 == ".m4":
+        of = open(n2+ext, "w")
+        subprocess.check_call(["m4", f], stdout = of)
+        return n2 + ext
+    else:
+        return f
+        
+
+
 def main():
 
     oldts = time.time()
 
+    spec = preprocess(args.spec)
+    cfg  = preprocess(args.cfg)
+
     # Start the Cocoon process.  Wait for it to generate network topology,
     # and leave it running for future network updates
-    cmd = [args.cocoon, args.spec, args.bound, args.cfg]
+    cmd = [args.cocoon, spec, args.bound, cfg]
     print " ".join(cmd)
     cocoon = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     while cocoon.poll() == None:
@@ -134,7 +149,7 @@ def main():
         raise Exception(args.cocoon + " terminated with error code " + str(cocoon.returncode))
 
 
-    specdir, specfname = os.path.split(args.spec)
+    specdir, specfname = os.path.split(spec)
     netname, specext = os.path.splitext(specfname)
     netdir = os.path.join(specdir, netname)
     mnfname = os.path.join(netdir, netname+".mn")
