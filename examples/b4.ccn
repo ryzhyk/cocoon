@@ -18,7 +18,7 @@ typedef struct {
 
 typedef struct {
     bool valid,
-    uint<16> tag
+    uint<16> vid
 } VLANTag
 
 typedef struct {
@@ -45,7 +45,7 @@ function mmod(uint<8> v, uint<8> m): uint<8> =
 function ihost(IP4 addr): bool
 function dst(Packet p): IP4 = p.ip4.dst
 
-role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.vid == 16'd0 and pkt.vlan.valid == false = 
     if ihost(dst(pkt)) then
         send HostIn[dst(pkt), 8'd0]
 
@@ -90,7 +90,7 @@ refine HostOut {
 
     assume(IP4 addr) ihost(addr) => isite(hostSite(addr))
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.vid == 16'd0 and pkt.vlan.valid == false = 
         if hostSite(dst(pkt)) == hostSite(addr) then {
             if ihost(dst(pkt)) then
                 send HostIn[dst(pkt), 8'd0]
@@ -99,7 +99,7 @@ refine HostOut {
     
     role WANSwitchLIn[SiteId site, uint<8> port] | isite(site) and port == 8'd0 = 
         pkt.vlan.valid := true;
-        pkt.vlan.tag := tunnel(site, hostSite(dst(pkt)), flowid(pkt));
+        pkt.vlan.vid := tunnel(site, hostSite(dst(pkt)), flowid(pkt));
         send WANSwitchGOut[site, nexthop(tunnel(site, hostSite(dst(pkt)), flowid(pkt)), site)]
 
     role WANSwitchLOut[SiteId site, uint<8> port] | isite(site) and port == 8'd0 / hostSite(dst(pkt)) == site = 
@@ -114,12 +114,12 @@ refine HostOut {
         if (hostSite(dst(pkt)) == site) then {
             if ihost(dst(pkt)) then {
                 pkt.vlan.valid := false;
-                pkt.vlan.tag := 16'd0;
+                pkt.vlan.vid := 16'd0;
                 send WANSwitchLOut[site,8'd0]
             }
         } else {
             if (pkt.vlan.valid) then
-                send WANSwitchGOut[site, nexthop(pkt.vlan.tag,site)]
+                send WANSwitchGOut[site, nexthop(pkt.vlan.vid,site)]
         }
 }
 
@@ -161,7 +161,7 @@ refine HostOut, WANSwitchLOut {
             send HostIn[IP4{site, subnet, subsubnet, port}, 8'd0]
         }
 
-    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.tag == 16'd0 and pkt.vlan.valid == false = 
+    role HostOut[IP4 addr, uint<8> port] | ihost(addr) and port == 8'd0 / pkt.vlan.vid == 16'd0 and pkt.vlan.valid == false = 
         send PodLowerIn[hostSite(addr), addr.ip2, addr.ip1, addr.ip0]
 
 
