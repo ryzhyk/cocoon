@@ -231,7 +231,8 @@ refine VHostVOut {
         send VSwitchIn[vHostLocation(vhost), vH2SwLink(VHPortId{vhost, port})]
    
     role VSwitchIn[IP4 hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
-        if pkt.eth.srcAddr == vHPort2Mac(vSw2HLink(hst, vport)) then {
+        let VHPortId from_vhport = vSw2HLink(hst, vport);
+        if pkt.eth.srcAddr == vHPort2Mac(from_vhport) then {
             (* Destination exists? *)
             let VNetId vnet = vSwPortVNet(hst, vport);
             if bCastMAC() == pkt.eth.dstAddr then {
@@ -242,7 +243,7 @@ refine VHostVOut {
                                                    vHPortVNet(vhport) == vnet and 
                                                    vHostLocation(vhport.vhost) == hst and 
                                                    vH2SwLink(vhport) != vport and
-                                                   connection(vSw2HLink(hst, vport), vhport)) {
+                                                   connection(from_vhport, vhport)) {
                                 pkt.vxlan := novxlan();
                                 send VSwitchOut[hst, vH2SwLink(vhport)]
                             }
@@ -260,7 +261,7 @@ refine VHostVOut {
                 }
             } else {
                 let VHPortId to_vhport = mac2VHPort(vnet, pkt.eth.dstAddr);
-                if iVHostPort(to_vhport) and connection(vSw2HLink(hst, vport), to_vhport) then {
+                if iVHostPort(to_vhport) and connection(from_vhport, to_vhport) then {
                     if (vHostLocation(to_vhport.vhost) == hst) then { 
                         (* Local destination -- deliver *)
                         pkt.vxlan := novxlan();
