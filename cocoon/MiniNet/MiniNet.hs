@@ -52,7 +52,7 @@ generateMininetTopology r topology = (encode $ toJSObject attrs, nmap)
                   ]
           
 
-renderNodes :: Int -> (Node, InstanceMap) -> Int -> State (Switches, Hosts, NodeMap) ()
+renderNodes :: Int -> (Node, InstanceMap PortLinks) -> Int -> State (Switches, Hosts, NodeMap) ()
 renderNodes w (n, imap) voffset = do 
     let nodes = instMapFlatten n imap
         offset = (w `div` length nodes) `div` 2

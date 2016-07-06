@@ -18,6 +18,7 @@ limitations under the License.
 -- Managing physical network topology induced by a Cocoon spec
 
 module Topology ( Topology
+                , PhyTopology
                 , topologyLinks
                 , isPort
                 , InstanceDescr(..)
@@ -25,6 +26,7 @@ module Topology ( Topology
                 , InstanceMap(..)
                 , instMapFlatten
                 , PortLinks
+                , PhyPortLinks
                 , nodeFromPort
                 , portFromNode
                 , phyPortNum
@@ -51,14 +53,16 @@ import Builtins
 
 -- Multidimensional array of switch instances.  Each dimension corresponds to a 
 -- key.  Innermost elements enumerate ports of an instance.
-newtype InstanceMap = InstanceMap (Either [(Expr, InstanceMap)] PortLinks)
+newtype InstanceMap a = InstanceMap (Either [(Expr, InstanceMap a)] a)
 
-instMapFlatten :: Node -> InstanceMap -> [(InstanceDescr, PortLinks)]
+instMapFlatten :: Node -> InstanceMap a -> [(InstanceDescr, a)]
 instMapFlatten node (InstanceMap (Left insts))  = concatMap (\(k, imap) -> map (\(InstanceDescr n keys, links) -> (InstanceDescr n (k:keys), links)) $ instMapFlatten node imap) insts
 instMapFlatten node (InstanceMap (Right links)) = [(InstanceDescr (name node) [], links)]
 
 -- ((input_port_name, output_port_name), (first_physical_portnum, last_physical_portnum), (logical_out_port_index -> remote_port))
 type PortLinks = [((String, String), (Int, Int), [(Int, Maybe PortInstDescr)])]
+
+type PhyPortLinks = [((String, String), [(Int, Int, Maybe PortInstDescr)])]
 
 -- Role instance descriptor
 data InstanceDescr = InstanceDescr {idescNode::String, idescKeys::[Expr]} deriving (Eq, Show)
@@ -69,7 +73,8 @@ instLinks (node, plinks) =
     concatMap (\((_,o), _, links) -> mapMaybe (\(pnum, mpdescr) -> fmap (portFromNode ?r node o pnum,) mpdescr) links) 
               plinks
 
-type Topology = [(Node, InstanceMap)]
+type Topology = [(Node, InstanceMap PortLinks)]
+type PhyTopology = [(Node, InstanceMap PhyPortLinks)]
 
 topologyLinks :: (?r::Refine) => Topology -> [(PortInstDescr, PortInstDescr)]
 topologyLinks = concatMap (\(n, imap) -> concatMap instLinks $ instMapFlatten n imap)
@@ -77,7 +82,7 @@ topologyLinks = concatMap (\(n, imap) -> concatMap instLinks $ instMapFlatten n 
 getInstPortMap :: Topology -> InstanceDescr -> PortLinks
 getInstPortMap t (InstanceDescr ndname keys) = getInstPortMap' (snd $ fromJust $ find ((==ndname) . name . fst) t) keys
 
-getInstPortMap' :: InstanceMap -> [Expr] -> PortLinks
+getInstPortMap' :: InstanceMap a -> [Expr] -> a
 getInstPortMap' (InstanceMap (Left mp))     (k:ks) = getInstPortMap' (fromJust $ lookup k mp) ks
 getInstPortMap' (InstanceMap (Right links)) []     = links
 getInstPortMap' _ _                                = error "Topology.getInstPortMap': unexpected input"
@@ -126,10 +131,10 @@ validateTopology t = do
                           [_] -> return ()
                           ls  -> err nopos $ "Found multiple outgoing links from port " ++ show s ++ ": " ++ show ls) links
 
-mkNodeInstMap :: (?r::Refine, MonadError String me) => Node -> me InstanceMap
+mkNodeInstMap :: (?r::Refine, MonadError String me) => Node -> me (InstanceMap PortLinks)
 mkNodeInstMap nd = mkNodeInstMap' nd M.empty (roleKeys $ getRole ?r (name nd))
 
-mkNodeInstMap' :: (?r::Refine, MonadError String me) => Node -> KMap -> [Field] -> me InstanceMap
+mkNodeInstMap' :: (?r::Refine, MonadError String me) => Node -> KMap -> [Field] -> me (InstanceMap PortLinks)
 mkNodeInstMap' nd kmap []     = liftM (InstanceMap . Right) $ mkNodePortLinks kmap (nodePorts nd) 0
 mkNodeInstMap' nd kmap (f:fs) = liftM (InstanceMap . Left) 
                                 $ mapM (\e -> liftM (e,) $ mkNodeInstMap' nd (M.insert (name f) e kmap) fs) 
