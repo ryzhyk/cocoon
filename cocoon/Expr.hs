@@ -29,6 +29,7 @@ import NS
 import Type
 import Pos
 import Name
+import Util
 
 exprIsValidFlag e = case e of 
                          EField _ _ f -> f == "valid"
@@ -102,24 +103,29 @@ exprScalars r c e =
 -- expression must be evaluated with evalExpr before calling this function
 -- to eliminate subexpressions of the form structname{v1,v2}.f1
 exprDeps :: Expr -> [Expr]
-exprDeps = nub . exprDeps'
+exprDeps = nub . exprDeps' True
 
-exprDeps' :: Expr -> [Expr]
-exprDeps' e@(EVar _ _)         = [e]
-exprDeps' e@(EDotVar _ _)      = [e]
-exprDeps' e@(EPacket _)        = [e]
-exprDeps'   (EApply _ _ as)    = concatMap exprDeps' as
-exprDeps'   (EBuiltin _ _ as)  = concatMap exprDeps' as
-exprDeps' e@(EField _ _ _)     = [e]
-exprDeps'   (ELocation _ _ _)  = error "Not implemented: exprDeps' ELocation"
-exprDeps'   (EBool _ _)        = []
-exprDeps'   (EInt _ _ _)       = []
-exprDeps'   (EStruct _ _ fs)   = concatMap exprDeps' fs
-exprDeps'   (EBinOp _ _ e1 e2) = exprDeps' e1 ++ exprDeps' e2
-exprDeps'   (EUnOp _ _ e)      = exprDeps' e
-exprDeps'   (ESlice _ e _ _)   = exprDeps' e
-exprDeps'   (ECond _ cs d)     = (concatMap (\(c,v) -> exprDeps' c ++ exprDeps' v) cs) ++ exprDeps' d
-
+exprDeps' :: Bool -> Expr -> [Expr]
+exprDeps' flag e@(EVar _ _)         = if' flag [e] []
+exprDeps' flag e@(EDotVar _ _)      = if' flag [e] []
+exprDeps' flag e@(EPacket _)        = if' flag [e] []
+exprDeps' _      (EApply _ _ as)    = concatMap (exprDeps' True) as
+exprDeps' _      (EBuiltin _ _ as)  = concatMap (exprDeps' True) as
+exprDeps' flag e@(EField _ e' _)    = (if' (flag && isdep e) [e] []) ++ (exprDeps' False e')
+    where isdep x = case x of
+                         EVar _ _      -> True
+                         EDotVar _ _   -> True
+                         EPacket _     -> True
+                         EField _ x' _ -> isdep x'
+                         _             -> False
+exprDeps' _      (ELocation _ _ _)  = error "Not implemented: exprDeps' ELocation"
+exprDeps' _      (EBool _ _)        = []
+exprDeps' _      (EInt _ _ _)       = []
+exprDeps' _      (EStruct _ _ fs)   = concatMap (exprDeps' True) fs
+exprDeps' _      (EBinOp _ _ e1 e2) = exprDeps' True e1 ++ exprDeps' True e2
+exprDeps' _      (EUnOp _ _ e)      = exprDeps' True e
+exprDeps' _      (ESlice _ e _ _)   = exprDeps' True e
+exprDeps' _      (ECond _ cs d)     = (concatMap (\(c,v) -> exprDeps' True c ++ exprDeps' True v) cs) ++ exprDeps' True d
 
 exprSubst :: Expr -> Expr -> Expr -> Expr
 exprSubst arg val e               | e == arg = val
