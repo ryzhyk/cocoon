@@ -33,6 +33,7 @@ import Eval
 import Util
 import Pos
 import Expr
+import Type
 
 -- Number of OpenFlow registers (6 in OVS)
 ofNumRegisters :: Int
@@ -44,10 +45,14 @@ data Value = ValIP4   Integer
            | ValMAC48 Integer
            | ValInt   Int Integer
 
+data Register = Reg32 Int
+              | Reg64 Int
+              deriving (Eq, Ord)
+
 data OFField = OFInPort
              | OFEthSrc
              | OFEthDst
-             | OFRegister Int
+             | OFRegister Register
 
 data Match = Match { matchField :: OFField
                    , matchMask  :: Maybe Mask
@@ -83,18 +88,37 @@ type OFPMap = [((String, String), IM.IntMap Int)]
 -- Generator state
 data OFState = OFState { ofsTables       :: [OFTable]
                        , ofsNextRegister :: Int
-                       , ofsRegisterMap  :: [(Expr, Int)]
+                       , ofsRegisterMap  :: [(Expr, Register)]
                        }
 
 -- Allocate register for a local variable
-allocRegister :: State OFState Int
-allocRegister = do
-    nxt <- gets ofsNextRegister
-    modify (\s -> s{ofsNextRegister = nxt + 1})
-    return nxt
+allocRegister32 :: State OFState Register
+allocRegister32 = undefined
 
-setRegister :: Expr -> Int -> State OFState ()
+allocRegister64 :: State OFState Register
+allocRegister64 = undefined
+
+-- e must be a scalar expression
+allocRegisterFor :: (?r::Refine, ?c::ECtx) => Expr -> State OFState Register
+allocRegisterFor e = do
+    if w <= 32
+       then allocRegister32
+       else if w <= 64
+               then allocRegister64
+               else error $ "Cannot allocate OpenFlow register for expression " ++ show e
+    where w = scalarExprWidth e
+
+freeRegister :: Register -> State OFState ()
+freeRegister = undefined
+
+setRegister :: Expr -> Register -> State OFState ()
 setRegister e r = modify (\s -> s{ofsRegisterMap = (e, r) : (ofsRegisterMap s)})
+
+scalarExprWidth :: (?r::Refine, ?c::ECtx) => Expr -> Int
+scalarExprWidth e = case typ' ?r ?c e of
+                         TBool _   -> 1
+                         TUInt _ b -> b
+                         _         -> error $ "OpenFlow.scalarExprWidth " ++ show e
 
 addTable :: OFTable -> State OFState HTable
 addTable t = do
@@ -108,13 +132,13 @@ genOFSwitches r topology =
     concatMap (\(switch, imap) -> map (\(descr, links) -> let kmap = M.fromList $ zip (map name $ roleKeys $ getRole r $ name switch) $ idescKeys descr
                                                               pmap = concatMap (\((i,o),plinks) -> let m = IM.fromList $ map (\(l,p,_) -> (l,p)) plinks
                                                                                                    in [((i,o), m)]) links
-                                                          in mkOFSwitch r switch kmap pmap) $ instMapFlatten switch imap) 
+                                                          in mkOFSwitch r kmap pmap) $ instMapFlatten switch imap) 
               $ filter ((== NodeSwitch) . nodeType . fst) topology
 
 
 -- Generate OF switch 
-mkOFSwitch :: Refine -> Node -> KMap -> OFPMap -> OFSwitch
-mkOFSwitch r switch kmap pmap = 
+mkOFSwitch :: Refine -> KMap -> OFPMap -> OFSwitch
+mkOFSwitch r kmap pmap = 
     let ?r = r in
     let ?pmap = pmap in
     let ?kmap = kmap in
@@ -122,7 +146,7 @@ mkOFSwitch r switch kmap pmap =
 
 mkOFSwitch' :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap) => State OFState ()
 mkOFSwitch' = do
-    regInport <- allocRegister
+    regInport <- allocRegister32
     mapM_ ((\pname -> let role = getRole ?r pname 
                           pvar = name $ last $ roleKeys role in
                       setRegister (EVar nopos pvar) regInport) . fst . fst) ?pmap
@@ -132,7 +156,7 @@ mkOFSwitch' = do
     return ()
 
 -- Input table: map input port number into logical Cocoon port number 
-mkInputPortMap :: (?pmap :: OFPMap) => Int -> [HTable] -> State OFState HTable
+mkInputPortMap :: (?pmap :: OFPMap) => Register -> [HTable] -> State OFState HTable
 mkInputPortMap reg next = do
     let flows = concatMap (mapIdx (\(lport, pport) i -> Flow Nothing
                                                              [Match OFInPort Nothing $ ValInt 32 $ fromIntegral pport] 
@@ -141,7 +165,7 @@ mkInputPortMap reg next = do
                           . IM.toList . snd) ?pmap
     addTable $ OFTable flows [ActionDrop]
 
-mkOutputPortMap :: Int -> IM.IntMap Int -> State OFState HTable
+mkOutputPortMap :: Register -> IM.IntMap Int -> State OFState HTable
 mkOutputPortMap reg m = do
     let flows = map (\(lport, pport) -> Flow Nothing
                                              [Match (OFRegister reg) Nothing $ ValInt 32 $ fromIntegral lport] 
@@ -149,7 +173,7 @@ mkOutputPortMap reg m = do
                     $ IM.toList m
     addTable $ OFTable flows [ActionDrop]
 
-mkPortHandler :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap) => Int -> [HTable] -> String -> State OFState HTable
+mkPortHandler :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap) => Register -> [HTable] -> String -> State OFState HTable
 mkPortHandler regOutPort hSend pname = do
     hDrop <- addTable $ OFTable [] [ActionDrop]
     let ?hSend = hSend
@@ -158,28 +182,40 @@ mkPortHandler regOutPort hSend pname = do
     let ?c = CtxRole ?role
     mkStatement hDrop $ roleBody ?role
 
-mkStatement :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap, ?role::Role, ?c::ECtx, ?hSend::[HTable], ?regOutPort::Int) => HTable -> Statement -> State OFState HTable
+mkStatement :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap, ?role::Role, ?c::ECtx, ?hSend::[HTable], ?regOutPort::Register) => HTable -> Statement -> State OFState HTable
 mkStatement next (SSeq    _ l r)    = do next' <- mkStatement next r
                                          mkStatement next' l
-mkStatement next (SPar    _ _ _)    = error "Not implemented: OpenFlow.mkStatement: SPar"
+mkStatement _    (SPar    _ _ _)    = error "Not implemented: OpenFlow.mkStatement: SPar"
 mkStatement next (SITE    _ c t me) = do hthen <- mkStatement next t
                                          helse <- maybe (return next) (mkStatement next) me
                                          mkCond c hthen (Just helse)
 mkStatement next (STest   _ c)      = mkCond c next Nothing
 mkStatement next (SSet    _ l r)    = do let r' = evalExpr ?kmap r
-                                         mkStore next r' $ map lexprToLHS $ exprScalars ?r ?c l
-mkStatement next (SSend   _ dst)    = do let ELocation _ n ks = evalExpr ?kmap dst
+                                             lscalars = exprScalars ?r ?c l
+                                             rscalars = concatMap (exprScalars ?r ?c) $ exprDeps r'
+                                             twophase = not $ null $ intersect lscalars rscalars
+                                         if twophase
+                                            then do regs <- mapM allocRegisterFor lscalars
+                                                    phase2 <- mkCopyTable 
+                                                              $ map (\(reg,e) -> (RHSVar (OFRegister reg) $ Just (0, scalarExprWidth e - 1), lexprToLHS e))
+                                                              $ zip regs lscalars
+                                                    phase1 <- mkStore phase2 r' $ map (\(reg,e) -> LHS (OFRegister reg) $ Just (0, scalarExprWidth e - 1))
+                                                                                $ zip regs lscalars
+                                                    mapM_ freeRegister regs
+                                                    return phase1
+                                            else mkStore next r' $ map lexprToLHS lscalars
+mkStatement _    (SSend   _ dst)    = do let ELocation _ n ks = evalExpr ?kmap dst
                                              portIdx = fromJust $ findIndex ((== n) . snd . fst) ?pmap
-                                         mkStore (?hSend !! portIdx) (last ks) [LHS (OFRegister ?regOutPort) Nothing]
-mkStatement next (SSendND _ _ _)    = error "OpenFlow.mkStatement SSendND"
-mkStatement next (SHavoc  _ _)      = error "OpenFlow.mkStatement SHavoc" 
-mkStatement next (SAssume _ _)      = error "OpenFlow.mkStatement SAssume"
-mkStatement next (SLet    _ t n v)  = do let v' = evalExpr ?kmap v
-                                         regs <- mapM (\e -> do reg <- allocRegister
+                                         mkStore (?hSend !! portIdx) (last ks) [LHS (OFRegister ?regOutPort) $ Just (0, scalarExprWidth (last ks) - 1)]
+mkStatement _    (SSendND _ _ _)    = error "OpenFlow.mkStatement SSendND"
+mkStatement _    (SHavoc  _ _)      = error "OpenFlow.mkStatement SHavoc" 
+mkStatement _    (SAssume _ _)      = error "OpenFlow.mkStatement SAssume"
+mkStatement next (SLet    _ _ n v)  = do let v' = evalExpr ?kmap v
+                                             scalars = exprScalars ?r ?c $ EVar nopos n
+                                         regs <- mapM (\e -> do reg <- allocRegisterFor e
                                                                 setRegister e reg
-                                                                return reg) 
-                                                      $ exprScalars ?r ?c $ EVar nopos n
-                                         mkStore next v' $ map (\r -> LHS (OFRegister r) Nothing) regs
+                                                                return reg) scalars
+                                         mkStore next v' $ map (\(r,e) -> LHS (OFRegister r) $ Just (0, scalarExprWidth e - 1)) $ zip regs scalars
 mkStatement next (SFork   _ vs c b) = undefined
 
 mkStore :: HTable -> Expr -> [LHS] -> State OFState HTable
@@ -191,13 +227,7 @@ mkCond = undefined
 lexprToLHS :: Expr -> LHS
 lexprToLHS = undefined
 
--- Generate pipeline for each port
--- SSeq: use lazy evaluation to comput the input table of the second statement after generating the first statement
--- SITE: Compile condition into a sequence of tables.  Reserve placeholder tables for undefined functions
--- STest: is a special case of SITE
--- SSet: similar to P4: use intermediate temporary variables when needed
--- SSend: send action
--- SLet: use registers.  Allocate register in advance.  Optimization: don't use registers for constant values
--- SFork: use the first conjunct to generate multicast group.  Use the rest as filters.
+mkCopyTable :: [(RHS, LHS)] -> State OFState HTable
+mkCopyTable = undefined
 
--- Final table: map output port name
+-- SFork: use the first conjunct to generate multicast group.  Use the rest as filters.
