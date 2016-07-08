@@ -63,6 +63,9 @@ data LHS = LHS OFField (Maybe (Int, Int))
 data RHS = RHSVar   OFField (Maybe (Int, Int))
          | RHSConst Value
 
+lhs2rhs :: LHS -> RHS
+lhs2rhs (LHS f slice) = RHSVar f slice
+
 type HTable = Int
 
 data Action = ActionOutput {actPort :: RHS}
@@ -88,7 +91,7 @@ type OFPMap = [((String, String), IM.IntMap Int)]
 -- Generator state
 data OFState = OFState { ofsTables       :: [OFTable]
                        , ofsNextRegister :: Int
-                       , ofsRegisterMap  :: [(Expr, Register)]
+                       , ofsRegisterMap  :: [(Expr, (Register, Maybe (Int, Int)))]
                        }
 
 -- Allocate register for a local variable
@@ -99,20 +102,23 @@ allocRegister64 :: State OFState Register
 allocRegister64 = undefined
 
 -- e must be a scalar expression
-allocRegisterFor :: (?r::Refine, ?c::ECtx) => Expr -> State OFState Register
+allocRegisterFor :: (?r::Refine, ?c::ECtx) => Expr -> State OFState (Register, Maybe (Int, Int))
 allocRegisterFor e = do
     if w <= 32
-       then allocRegister32
+       then liftM (, Just (0, w - 1)) allocRegister32
        else if w <= 64
-               then allocRegister64
+               then liftM (, Just (0, w - 1)) allocRegister64
                else error $ "Cannot allocate OpenFlow register for expression " ++ show e
     where w = scalarExprWidth e
 
 freeRegister :: Register -> State OFState ()
 freeRegister = undefined
 
-setRegister :: Expr -> Register -> State OFState ()
-setRegister e r = modify (\s -> s{ofsRegisterMap = (e, r) : (ofsRegisterMap s)})
+setRegister :: Expr -> Register -> Maybe (Int, Int) -> State OFState ()
+setRegister e r slice = modify (\s -> s{ofsRegisterMap = (e, (r, slice)) : (ofsRegisterMap s)})
+
+lookupRegister :: Expr -> State OFState (Register, Maybe (Int, Int))
+lookupRegister = undefined
 
 scalarExprWidth :: (?r::Refine, ?c::ECtx) => Expr -> Int
 scalarExprWidth e = case typ' ?r ?c e of
@@ -146,13 +152,13 @@ mkOFSwitch r kmap pmap =
 
 mkOFSwitch' :: (?r::Refine, ?kmap::KMap, ?pmap::OFPMap) => State OFState ()
 mkOFSwitch' = do
-    regInport <- allocRegister32
+    regInPort <- allocRegister32
     mapM_ ((\pname -> let role = getRole ?r pname 
-                          pvar = name $ last $ roleKeys role in
-                      setRegister (EVar nopos pvar) regInport) . fst . fst) ?pmap
-    hSend <- mapM (mkOutputPortMap regInport . snd) ?pmap
-    hPortHandlers <- mapM (mkPortHandler regInport hSend . fst . fst) ?pmap
-    hInput <- mkInputPortMap regInport hPortHandlers
+                          pvar = EVar nopos $ name $ last $ roleKeys role in
+                      setRegister pvar regInPort $ Just (0, scalarExprWidth pvar - 1)) . fst . fst) ?pmap
+    hSend <- mapM (mkOutputPortMap regInPort . snd) ?pmap
+    hPortHandlers <- mapM (mkPortHandler regInPort hSend . fst . fst) ?pmap
+    hInput <- mkInputPortMap regInPort hPortHandlers
     return ()
 
 -- Input table: map input port number into logical Cocoon port number 
@@ -196,12 +202,12 @@ mkStatement next (SSet    _ l r)    = do let r' = evalExpr ?kmap r
                                              twophase = not $ null $ intersect lscalars rscalars
                                          if twophase
                                             then do regs <- mapM allocRegisterFor lscalars
-                                                    phase2 <- mkCopyTable 
-                                                              $ map (\(reg,e) -> (RHSVar (OFRegister reg) $ Just (0, scalarExprWidth e - 1), lexprToLHS e))
+                                                    phase2 <- mkCopyTable next
+                                                              $ map (\((reg,slice), e) -> (RHSVar (OFRegister reg) slice, lexprToLHS e))
                                                               $ zip regs lscalars
-                                                    phase1 <- mkStore phase2 r' $ map (\(reg,e) -> LHS (OFRegister reg) $ Just (0, scalarExprWidth e - 1))
+                                                    phase1 <- mkStore phase2 r' $ map (\((reg,slice), e) -> LHS (OFRegister reg) slice)
                                                                                 $ zip regs lscalars
-                                                    mapM_ freeRegister regs
+                                                    mapM_ (freeRegister . fst) regs
                                                     return phase1
                                             else mkStore next r' $ map lexprToLHS lscalars
 mkStatement _    (SSend   _ dst)    = do let ELocation _ n ks = evalExpr ?kmap dst
@@ -215,19 +221,99 @@ mkStatement next (SLet    _ _ n v)  = do let v' = evalExpr ?kmap v
                                          regs <- mapM (\e -> do reg <- allocRegisterFor e
                                                                 setRegister e reg
                                                                 return reg) scalars
-                                         mkStore next v' $ map (\(r,e) -> LHS (OFRegister r) $ Just (0, scalarExprWidth e - 1)) $ zip regs scalars
+                                         mkStore next v' $ map (\((r,slice), e) -> LHS (OFRegister r) slice) $ zip regs scalars
 mkStatement next (SFork   _ vs c b) = undefined
 
-mkStore :: HTable -> Expr -> [LHS] -> State OFState HTable
-mkStore = undefined
 
 mkCond :: Expr -> HTable -> Maybe HTable -> State OFState HTable
 mkCond = undefined
 
+mkStore (?r::Refine, ?role::Role, ?c::ECtx) :: HTable -> Expr -> [LHS] -> State OFState HTable
+mkStore next e dst = do
+    hmain <- mkEmptyTable
+    (h, _, acts) <- exprToRHS hmain e (Just dst)
+    setTable hmain $ OFTable [] (acts ++ [ActionGoto next])
+    return h
+
+-- Compute an expression and optionally place the result to a provided location
+-- next - next table in the chain
+-- e    - expression to be computed
+-- mlhs - location where the result of expression is to be stores, if allocated by the caller
+--        if no location is provided, then one will be allocated if needed and returned by the function
+-- returns: 
+--      - handle to the table that performs the computation or next if no additional tables were generated
+--      - location where the result of the computation can be found
+--      - possibly empty list of actions to be performed in order to place it there
+exprToRHS :: HTable -> Expr -> Maybe [LHS] -> State OFState (HTable, [RHS], [Action])
+exprToRHS h e mlhs = exprToRHS' h (simplifyCond e) mlhs
+
+exprToRHS' :: HTable -> Expr -> Maybe [LHS] -> State OFState (HTable, [RHS], [Action])
+exprToRHS' next e@(ECond _ cs d) | condNeeds1Table e = 
+exprToRHS' next (ECond _ [] d) mlhs = exprToRHS next d mlhs
+exprToRHS' next (ECond _ ((c,e):cs) d) mlhs = do
+    lhs <- case mlhs of
+                Just lhs' -> return lhs'
+                Nothing   -> mapM (liftM (\(r,slice) -> LHS (OFRegister r) slice) . allocRegisterFor) 
+                                  $ exprScalars ?r ?c e
+    (hThen, rhs, []) <- exprToRHS next e (Just lhs)
+    (hElse, _, [])   <- exprToRHS next (ECond nopos cs d) (Just lhs)
+    hCond <- mkCond c 
+                    -- for each case;
+                        -- mkCond
+                        -- call exprToRHS for each branch
+exprToRHS' next (EBool _ v) mlhs = 
+    return $ maybe (next, [rhs], []) 
+                   (\lhs -> (next, maybe [lhs2rhs lhs], [ActionSet lhs rhs])
+                   mlhs
+    where rhs = RHSConst $ ValInt 1 (if' v 1 0)
+
+exprToRHS' next (EInt _ w v) mlhs = 
+    return $ maybe (next, [rhs], []) 
+                   (\lhs -> (next, maybe [lhs2rhs lhs], [ActionSet lhs rhs])
+                   mlhs
+    where rhs = RHSConst $ ValInt w v
+
+exprToRHS' next e mlhs | exprIsPacketField e = 
+    return $ maybe (next, rhs, [])
+             (\lhs -> (next, map lhs2rhs lhs, map (uncurry ActionSet) $ zip lhs rhs))
+             mlhs
+    where rhs = map mkHeaderField $ exprScalars ?r ?c e
+
+exprToRHS' next e mlhs | exprIsVarField e = do
+    rhs <- mapM mkVarField $ exprScalars ?r ?c e
+    return $ maybe (next, rhs, [])
+             (\lhs -> (next, map lhs2rhs lhs, map (uncurry ActionSet) $ zip lhs rhs))
+             mlhs
+
+exprToRHS' next e mlhs | exprIsFuncField e = do 
+    hPlaceholder <- mkEmptyTable
+    -- Compute arguments; record their locations
+    (hArgs, rhss) <- foldM (\(next', rhss') a -> do (next'', rhs', []) <- exprToRHS next' a Nothing
+                                                    return (next'', rhss' ++ [rhs'])) 
+                           (hPlaceholder,[]) $ args e
+    -- create placeholder table
+    rhs <- mkPlaceholder hPlaceholder next rhss e
+    freeRegisters rhss
+    return (hArgs, rhs)
+
+                 | exprIsBuiltinField e = 
+                    -- Compute arguments; record their locations
+                    -- Invoke builtin method to construct RHS
+
+                 | otherwise = error $ "OpenFlow.exprToRHS: unexpected expression " ++ show e
+
+
+
 lexprToLHS :: Expr -> LHS
 lexprToLHS = undefined
 
-mkCopyTable :: [(RHS, LHS)] -> State OFState HTable
+mkCopyTable :: HTable -> [(RHS, LHS)] -> State OFState HTable
 mkCopyTable = undefined
+
+mkHeaderField :: Expr -> LHS
+mkHeaderField = undefined
+
+mkVarField :: Expr -> State OFState LHS
+mkVarField = undefined {-(liftM ((\(reg, slice) -> RHSVar (OFRegister reg) slice) . fromJust) . lookupRegister)-}
 
 -- SFork: use the first conjunct to generate multicast group.  Use the rest as filters.
