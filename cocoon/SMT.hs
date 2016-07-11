@@ -1,12 +1,14 @@
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
 
-module SMT (solveFor) where
+module SMT ( solveFor
+           , enumSolutions) where
 
-import qualified SMT.SMTSolver as SMT
-import qualified SMT.SMTLib2   as SMT
+import qualified Data.Map as M
 import Data.Maybe
 import Data.List
 
+import qualified SMT.SMTSolver as SMT
+import qualified SMT.SMTLib2   as SMT
 import Syntax
 import Name
 import Expr
@@ -17,8 +19,14 @@ import Builtins
 
 -- Solve equation e for variable var; returns all satisfying assignments.
 solveFor :: (?r::Refine) => Role -> [Expr] -> String -> [Expr]
-solveFor role es var = map exprFromSMT $ SMT.allSolutions solver (exprs2SMTQuery role es) var
+solveFor role es var = map exprFromSMT $ SMT.allSolutionsVar solver (exprs2SMTQuery role es) var
     where solver = SMT.newSMTLib2Solver SMT.z3Config
+
+enumSolutions :: (?r::Refine) => Role -> [Expr] -> [M.Map String Expr]
+enumSolutions role es = map (M.map exprFromSMT) models
+    where q = exprs2SMTQuery role es
+          solver = SMT.newSMTLib2Solver SMT.z3Config
+          models = SMT.allSolutions solver q
 
 exprs2SMTQuery :: (?r::Refine) => Role -> [Expr] -> SMT.SMTQuery
 exprs2SMTQuery role es = let ?role = role in
@@ -56,7 +64,7 @@ typ2SMT ctx x = case typ'' ?r ctx x of
                      TUser _ n    -> SMT.TStruct n
                      TArray _ t l -> SMT.TArray (typ2SMT ctx t) l
                      TLocation _  -> SMT.TUInt 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
-                     t            -> error $ "Topology.typ2SMT " ++ show t
+                     t            -> error $ "SMT.typ2SMT " ++ show t
 
 expr2SMT :: (?r::Refine) => Expr -> SMT.Expr
 expr2SMT (EVar _ k)          = SMT.EVar k
@@ -71,12 +79,13 @@ expr2SMT (EUnOp _ op e1)     = SMT.EUnOp op (expr2SMT e1)
 expr2SMT (ECond _ cs d)      = SMT.ECond (map (\(c,v) -> (expr2SMT c, expr2SMT v)) cs) (expr2SMT d)
 expr2SMT (ESlice _ e h l)    = SMT.ESlice (expr2SMT e) h l
 expr2SMT (EBuiltin _ f as)   = (bfuncToSMT $ getBuiltin f) $ map expr2SMT as
-expr2SMT e                   = error $ "Topology.expr2SMT " ++ show e
+expr2SMT e                   = error $ "SMT.expr2SMT " ++ show e
 
 -- Convert constant SMT expression to Expr
 exprFromSMT :: SMT.Expr -> Expr
 exprFromSMT (SMT.EBool b)      = EBool nopos b
 exprFromSMT (SMT.EInt w i)     = EInt nopos w i
 exprFromSMT (SMT.EStruct n fs) = EStruct nopos n $ map exprFromSMT fs
-exprFromSMT e                  = error $ "Topology.exprFromSMT " ++ show e
+exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
+
 

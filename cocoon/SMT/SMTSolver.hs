@@ -25,6 +25,9 @@ import GHC.Exts
 import Ops
 import Name
 
+maxSolutions :: Int
+maxSolutions = 1000
+
 data Type = TBool
           | TUInt Int
           | TStruct String
@@ -121,19 +124,19 @@ allValues q (TStruct n) = map (EStruct n) $ allvals fs
           allvals ((_,t):fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q t
 allValues _ (TArray _ _) = error "Not implemented: SMTSolver.allValues TArray"
 
-allSolutions :: SMTSolver -> SMTQuery -> String -> [Expr]
-allSolutions solver q var = sortWith solToArray $ allSolutions' solver q var
+allSolutionsVar :: SMTSolver -> SMTQuery -> String -> [Expr]
+allSolutionsVar solver q var = sortWith solToArray $ allSolutionsVar' solver q var
 
-allSolutions' :: SMTSolver -> SMTQuery -> String -> [Expr]
-allSolutions' solver q var = 
-    -- Find one solution; block it, call allSolutions' recursively to find more
+allSolutionsVar' :: SMTSolver -> SMTQuery -> String -> [Expr]
+allSolutionsVar' solver q var = 
+    -- Find one solution; block it, call allSolutionsVar' recursively to find more
     case smtGetModel solver q of
-         Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
+         Nothing           -> error "SMTSolver.allSolutionsVar: Failed to solve SMT query"
          Just Nothing      -> []
          Just (Just model) -> case M.lookup var model of
                                    Nothing  -> allValues q $ typ q Nothing $ EVar var
                                    Just val -> let q' = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)}
-                                               in val:(allSolutions' solver q' var)
+                                               in val:(allSolutionsVar' solver q' var)
 
 solToArray :: Expr -> [Integer]
 solToArray (EBool True)   = [1]
@@ -141,3 +144,20 @@ solToArray (EBool False)  = [0]
 solToArray (EInt _ i)     = [i]
 solToArray (EStruct _ es) = concatMap solToArray es
 solToArray e              = error $ "SMTSolver.solToArray " ++ show e
+
+
+allSolutions :: SMTSolver -> SMTQuery -> [Assignment]
+allSolutions solver q = allSolutions' 0 solver q
+
+allSolutions' :: Int -> SMTSolver -> SMTQuery -> [Assignment]
+allSolutions' nfound solver q = 
+    if nfound > maxSolutions
+       then error $ "SMTSolver.allSolutions: " ++ show nfound ++ " solutions found.  Aborting enumeration." 
+       else -- Find one solution; block it, call allSolutions' recursively to find more
+            case smtGetModel solver q of
+                 Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
+                 Just Nothing      -> []
+                 Just (Just model) -> let emodel = foldl' (\a (v,e) -> EBinOp And a (EBinOp Eq (EVar v) e)) (EBool True) $ M.toList model
+                                          q' = q{smtExprs = (EUnOp Not emodel) : (smtExprs q)}
+                                      in model : allSolutions' (nfound + 1) solver q'
+
