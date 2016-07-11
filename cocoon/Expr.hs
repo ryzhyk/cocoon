@@ -20,7 +20,8 @@ module Expr ( exprIsValidFlag
             , exprFuncsRec
             , exprRefersToPkt
             , exprScalars
-            , exprDeps, exprSubst) where
+            , exprDeps
+            , exprSubst) where
 
 import Data.List
 
