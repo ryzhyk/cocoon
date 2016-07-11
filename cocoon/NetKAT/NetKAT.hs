@@ -25,7 +25,10 @@ import qualified Data.Map    as M
 import qualified Data.IntMap as IM
 import Control.Monad
 import Control.Monad.State
+import Text.PrettyPrint
+import Numeric
 
+import PP
 import Topology
 import Syntax
 import Pos
@@ -47,6 +50,29 @@ data NKHeaderVal = NKEthSrc   Integer
                  | NKLocation Int
                  deriving (Eq, Ord)
 
+ppHeaderVal :: String -> NKHeaderVal -> Doc
+ppHeaderVal op (NKEthSrc   mac)    = pp "ethSrc"  <+> pp op <+> ppMAC mac
+ppHeaderVal op (NKEthDst   mac)    = pp "ethDst"  <+> pp op <+> ppMAC mac
+ppHeaderVal op (NKVlan     vlan)   = pp "vlan"    <+> pp op <+> pp vlan
+ppHeaderVal op (NKEthType  etht)   = pp "ethType" <+> pp op <+> pp "0x" <> (pp $ showHex etht "")
+ppHeaderVal op (NKIPProto  prot)   = pp "ipProto" <+> pp op <+> pp prot
+ppHeaderVal op (NKIP4Src   ip msk) = pp "ip4Src"  <+> pp op <+> ppIP ip msk
+ppHeaderVal op (NKIP4Dst   ip msk) = pp "ip4Dst"  <+> pp op <+> ppIP ip msk
+ppHeaderVal op (NKLocation port)   = pp "port"    <+> pp op <+> pp port
+
+ppMAC :: Integer -> Doc
+ppMAC mac = hcat 
+            $ punctuate (char ':') 
+            $ map pp
+            $ [bitSlice mac 7 0, bitSlice mac 15 8, bitSlice mac 23 16, bitSlice mac 31 24, bitSlice mac 39 32, bitSlice mac 47 40]
+
+ppIP :: Int -> Int -> Doc
+ppIP ip msk = (hcat 
+               $ punctuate (char '.') 
+               $ map pp
+               $ [bitSlice ip 7 0, bitSlice ip 15 8, bitSlice ip 23 16, bitSlice ip 31 24]) 
+              <> (if' (msk == 32) empty (char '/' <> pp msk))
+
 data NKPred = NKTrue
             | NKFalse
             | NKTest  NKHeaderVal
@@ -55,17 +81,40 @@ data NKPred = NKTrue
             | NKNeg   NKPred
             deriving (Eq, Ord)
 
+instance PP NKPred where
+    pp NKTrue             = pp "true"
+    pp NKFalse            = pp "false"
+    pp (NKTest hval)      = ppHeaderVal "=" hval
+    pp (NKAnd p1 p2)      = parens $ pp p1 <+> pp "and" <+> pp p2
+    pp (NKOr p1 p2)       = parens $ pp p1 <+> pp "or" <+> pp p2
+    pp (NKNeg p)          = parens $ pp "not" <+> pp p 
+
 data NKPolicy = NKFilter NKPred
               | NKMod    NKHeaderVal
               | NKUnion  NKPolicy NKPolicy
               | NKSeq    NKPolicy NKPolicy
               | NKITE    NKPred NKPolicy NKPolicy
 
+instance PP NKPolicy where
+     pp (NKFilter p)    = pp "filter" <+> pp p
+     pp (NKMod hval)    = ppHeaderVal ":=" hval
+     pp (NKUnion p1 p2) = parens $ pp p1 $$ pp "|" $$ pp p2
+     pp (NKSeq p1 p2)   = parens $ pp p1 <> semi $$ pp p2
+     pp (NKITE c t e)   = (pp "if" <+> pp c <+> pp "then")
+                          $$ 
+                          (nest' $ pp t)
+                          $$ 
+                          pp "else"
+                          $$
+                          (nest' $ pp e)
+
 nkid :: NKPolicy
 nkid   = NKFilter NKTrue
 
 nkdrop :: NKPolicy
 nkdrop = NKFilter NKFalse
+
+
 
 type PMap = [((String, String), IM.IntMap Int)]
 
