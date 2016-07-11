@@ -2,17 +2,19 @@
 
 typedef uint<32> IP4
 
+typedef uint<48> MAC
+
 typedef struct {
-    uint<48> dstAddr,
-    uint<48> srcAddr
+    MAC dstAddr,
+    MAC srcAddr
 } eth_t
 
 typedef struct {
     bool valid,
     uint<16> oper,
-    uint<48> sha,
+    MAC      sha,
     uint<32> spa,
-    uint<48> tha,
+    MAC      tha,
     uint<32> tpa
 } arp_t
 
@@ -49,8 +51,9 @@ typedef struct {
     uint<8> vport
 } VHPortId
 
+typedef uint<48> HostId
+
 (*  TODO: 
-    - Verified security policy
     - Service chaining
     - Multiple physical networks
  *)
@@ -69,15 +72,15 @@ assume (VHPortId port) iVHostPort(port) => iVHost(port.vhost)
 function vHPortVNet(VHPortId port): VNetId
 assume (VHPortId port) iVHostPort(port) => iVNet(vHPortVNet(port))
 
-function vHPort2Mac(VHPortId port): uint<48>
-function mac2VHPort(VNetId vnet, uint<48> mac): VHPortId
-assume (VHPortId port, uint<48> mac, VNetId vnet) (* bijection *)
+function vHPort2Mac(VHPortId port): MAC
+function mac2VHPort(VNetId vnet, MAC mac): VHPortId
+assume (VHPortId port, MAC mac, VNetId vnet) (* bijection *)
        iVHostPort(port) => 
            ((vHPortVNet(port) == vnet and vHPort2Mac(port) == mac) == (mac2VHPort(vnet, mac) == port))
-function bCastMAC(): uint<48> = 48'hffffffffffff
+function bCastMAC(): MAC = 48'hffffffffffff
 assume (VHPortId vport) bCastMAC() != vHPort2Mac(vport)
 
-function ip2mac(IP4 ip): uint<48>
+function ip2mac(IP4 ip): MAC
 
 
 function arpResponse(Packet p): Packet = 
@@ -146,5 +149,4 @@ role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) 
             }
         }
     }
-
 
