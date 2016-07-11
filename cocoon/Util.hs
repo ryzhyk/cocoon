@@ -110,5 +110,5 @@ msb 0 = 0
 msb 1 = 0
 msb n = 1 + (msb $ n `shiftR` 1)
 
-bitSlice :: Integer -> Int -> Int -> Integer
+bitSlice :: (Bits a, Num a) => a -> Int -> Int -> a
 bitSlice v h l = (v `shiftR` l) .&. (2^(h-l+1) - 1)
