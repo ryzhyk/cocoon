@@ -40,7 +40,6 @@ import Expr
 import PP
 import Boogie.Boogie
 import Util
-import OpenFlow.OpenFlow
 
 
 main = do

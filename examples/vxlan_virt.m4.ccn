@@ -4,6 +4,38 @@ include(`virtualization.m4.ccn')
 
 (* VxLAN-based virtualization on top of L3 physical networks *)
 
+refine {
+    function iHost(HostId hst): bool
+    function hostIP(HostId hst): IP4
+    function ip2Host(IP4 addr): HostId
+    assume (HostId hst) iHost(hst) => (hst == ip2Host(hostIP(hst)))
+
+    function iVHostPPort(VHPortId port): bool
+    assume (VHPortId port) iVHostPPort(port) => iVHost(port.vhost)
+
+    function v2pPort(VHPortId port): HostId
+    function p2vPort(HostId addr): VHPortId
+    assume (VHPortId port, HostId hst) (iVHostPPort(port) and (hst == v2pPort(port))) => iHost(hst) 
+    assume (VHPortId port, HostId hst) (iVHostPPort(port) and (hst == v2pPort(port))) => (p2vPort(hst) == port)
+
+    role VHostPIn[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = filter false
+    role VHostPOut[VHostId vhost, uint<8> port] | iVHostPPort(VHPortId{vhost, port}) = 
+        if pkt.vxlan == novxlan() then {
+            send VSwitchPlainOut[v2pPort(VHPortId{vhost, port})]
+        }
+
+    role VSwitchPlainOut[HostId hst] | iHost(hst) / not pkt.vxlan.valid = 
+        let HostId dhst = ip2Host(pkt.ip4.dst);
+        if (pkt.ip4.valid and iHost(dhst)) then
+            send VSwitchPlainIn[dhst]
+
+    role VSwitchPlainIn[HostId hst] | iHost(hst) / pkt.vxlan == novxlan() = 
+        let VHPortId vport = p2vPort(hst);
+        if iVHostPPort(vport) then {
+            send VHostPIn[vport.vhost, vport.vport]
+        }
+}
+
 refine VHostVOut {
     
     (* Physical topology *)
