@@ -27,6 +27,7 @@ import System.Directory
 import System.IO.Error
 import System.IO
 import Numeric
+import System.Console.GetOpt
 
 import Parse
 import Validate
@@ -41,21 +42,62 @@ import PP
 import Boogie.Boogie
 import Util
 
+data TOption = CCN String
+             | CFG String
+             | Bound String
+             | DoBoogie
+             | DoP4
+             | DoNetKAT
+        
+options :: [OptDescr TOption]
+options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
+          , Option []    ["cfg"]        (ReqArg CFG "FILE")            "Cocoon config file"
+          , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
+          , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
+          , Option []    ["p4"]         (NoArg DoP4)                   "enable P4 backend"
+          , Option []    ["netkat"]     (NoArg DoNetKAT)               "enable NetKAT backend"
+          ]
+
+data Config = Config { confCCNFile      :: FilePath
+                     , confCfgFile      :: Maybe FilePath
+                     , confBound        :: Int
+                     , confDoBoogie     :: Bool
+                     , confDoP4         :: Bool
+                     , confDoNetKAT     :: Bool
+                     }
+
+defaultConfig = Config { confCCNFile      = ""
+                       , confCfgFile      = Nothing
+                       , confBound        = 15
+                       , confDoBoogie     = False
+                       , confDoP4         = False
+                       , confDoNetKAT     = False
+                       }
+
+
+addOption :: TOption -> Config -> Config
+addOption (CCN f)   config = config{ confCCNFile  = f}
+addOption (CFG f)   config = config{ confCfgFile  = Just f}
+addOption (Bound b) config = config{ confBound    = case reads b of
+                                                         []        -> error "invalid bound specified"
+                                                         ((i,_):_) -> i}
+addOption DoBoogie  config = config{ confDoBoogie = True}
+addOption DoP4      config = config{ confDoP4     = True}
+addOption DoNetKAT  config = config{ confDoNetKAT = True}
 
 main = do
     args <- getArgs
     prog <- getProgName
-    when (length args > 3 || length args < 2) $ fail $ "Usage: " ++ prog ++ " <spec_file> <bound> [<config_file>]"
-    let fname  = args !! 0
-        cfname = if length args >= 3
-                    then Just $ args !! 2
-                    else Nothing
+    config <- case getOpt Permute options args of
+                   (flags, [], []) -> return $ foldr addOption defaultConfig flags
+                   _ -> fail $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options 
+
+    let fname  = confCCNFile config
+        cfname = confCfgFile config
         (dir, file) = splitFileName fname
         (basename,_) = splitExtension file
         workdir = dir </> basename
-    bound <- case readDec (args !! 1) of
-                  [(b, _)] -> return b
-                  _        -> fail $ "Invalid bound: " ++ (args !! 1)
+        bound = confBound config
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
     spec <- case parse cocoonGrammar fname fdata of
@@ -68,38 +110,39 @@ main = do
     putStrLn "Validation complete"
 
     let ps = pairs combined
-    let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined) bound) :
-                      map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2 bound)) ps
-        boogiedir = workdir </> "boogie"
-    createDirectoryIfMissing False boogiedir
-    oldfiles <- listDirectory boogiedir
-    mapM_ (removeFile . (boogiedir </>)) oldfiles
-    mapIdxM_ (\(_, (asms, mroles)) i -> do -- putStrLn $ "Verifying refinement " ++ show i ++ " with " ++ (show $ length asms) ++ " verifiable assumptions , " ++ (maybe "_" (show . length) mroles) ++ " roles" 
-                                           let specN = printf "spec%02d" i
-                                           mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension (specN ++ "_asm" ++ show j) "bpl") (render b)) asms
-                                           maybe (return ())
-                                                 (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension (specN ++ "_" ++ rl) "bpl") (render b)))
-                                                 mroles)
-             boogieSpecs
-    
-    putStrLn "Verification condition generation complete"
+
+    when (confDoBoogie config) $ do
+        let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined) bound) :
+                          map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2 bound)) ps
+            boogiedir = workdir </> "boogie"
+        createDirectoryIfMissing False boogiedir
+        oldfiles <- listDirectory boogiedir
+        mapM_ (removeFile . (boogiedir </>)) oldfiles
+        mapIdxM_ (\(_, (asms, mroles)) i -> do -- putStrLn $ "Verifying refinement " ++ show i ++ " with " ++ (show $ length asms) ++ " verifiable assumptions , " ++ (maybe "_" (show . length) mroles) ++ " roles" 
+                                               let specN = printf "spec%02d" i
+                                               mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension (specN ++ "_asm" ++ show j) "bpl") (render b)) asms
+                                               maybe (return ())
+                                                     (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension (specN ++ "_" ++ rl) "bpl") (render b)))
+                                                     mroles)
+                 boogieSpecs
+        putStrLn "Verification condition generation complete"
 
     topology <- case generateTopology final of
                      Left e  -> fail $ "Error generating network topology: " ++ e
                      Right t -> return t
-    let (mntopology, instmap) = generateMininetTopology final topology
-        p4switches = genP4Switches final topology
-    writeFile (workdir </> addExtension basename "mn") mntopology
-    mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap
-                                            writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
-                                            writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
-          p4switches      
-    -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
-    -- end of the compilation phase
-    putStrLn "Network generation complete"
-    hFlush stdout
-
-    maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
+    when (confDoP4 config) $ do
+        let (mntopology, instmap) = generateMininetTopology final topology
+            p4switches = genP4Switches final topology
+        writeFile (workdir </> addExtension basename "mn") mntopology
+        mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap
+                                                writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
+                                                writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
+              p4switches      
+        -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
+        -- end of the compilation phase
+        putStrLn "Network generation complete"
+        hFlush stdout
+        maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
 
 pairs :: [a] -> [(a,a)]
 pairs (x:y:xs) = (x,y) : pairs (y:xs)

@@ -136,7 +136,7 @@ def main():
 
     # Start the Cocoon process.  Wait for it to generate network topology,
     # and leave it running for future network updates
-    cmd = [args.cocoon, spec, args.bound, cfg]
+    cmd = [args.cocoon, "-i", spec, "-b", args.bound, "--cfg", cfg, "--p4"]
     print " ".join(cmd)
     cocoon = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     while cocoon.poll() == None:
