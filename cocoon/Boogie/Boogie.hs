@@ -55,10 +55,10 @@ refinementToBoogie :: Maybe Refine -> Refine -> Int -> ([(Assume, Doc)], Maybe [
 refinementToBoogie mabst conc maxdepth = (assums, roles)
     where assums = mapMaybe (\assm -> fmap (assm,) $ assumeToBoogie1 mabst conc assm) $ refineAssumes conc
           roles  = fmap (\abst -> concatMap (\role -> if refineIsMulticast Nothing abst role
-                                                         then [ (role, refinementToBoogie1 EncAsFunction abst conc role maxdepth)
-                                                              , ("_" ++ role, refinementToBoogie1 EncAsFunctionReverse abst conc role maxdepth)]
+                                                         then [ (role, refinementToBoogie1 EncAsFunction True abst conc role maxdepth)
+                                                              , ("_" ++ role, refinementToBoogie1 EncAsFunctionReverse True abst conc role maxdepth)]
                                                          else [{-(role, refinementToBoogie1  abst conc role maxdepth)-}
-                                                               (role, refinementToBoogie1 EncAsProcedure abst conc role maxdepth)])
+                                                               (role, refinementToBoogie1 EncAsProcedure False abst conc role maxdepth)])
                                             $ refineTarget conc)
                         mabst
 
@@ -96,8 +96,8 @@ assumeToBoogie1 mabst conc asm | not concdef = Nothing
 
 type RMap = M.Map String String
 
-refinementToBoogie1 :: Encoding -> Refine -> Refine -> String -> Int -> Doc
-refinementToBoogie1 enc abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, emptya, bounds, types, gvars, funcs, roles, assums, check]
+refinementToBoogie1 :: Encoding -> Bool -> Refine -> Refine -> String -> Int -> Doc
+refinementToBoogie1 enc allowDrop abst conc rname maxdepth = vcat $ punctuate (pp "") [{-ops,-} boogieHeader, emptya, bounds, types, gvars, funcs, roles, assums, check]
     where --ops    = mkBVOps conc
           emptya = mkEmptyArrays conc
           bounds = mkBoundsCheckers conc
@@ -124,19 +124,20 @@ refinementToBoogie1 enc abst conc rname maxdepth = vcat $ punctuate (pp "") [{-o
                                                 (let ?rmap = M.singleton rname ("a_" ++ rname) in
                                                  mkRoleAsProc abst $ getRole abst rname)
           assums = vcat $ map (mkAssume conc) $ refineAssumes conc
-          check  = mkCheck enc conc rname 
+          check  = mkCheck enc allowDrop conc rname 
 
 
-mkCheck :: Encoding -> Refine -> String -> Doc
-mkCheck enc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
-                         $$
-                         (modifies $ pp outputVar)
-                         $$
-                         lbrace
-                         $$
-                         (nest' body)
-                         $$
-                         rbrace
+mkCheck :: Encoding -> Bool -> Refine -> String -> Doc
+mkCheck enc allowDrop conc rname = 
+    (pp "procedure" <+> pp "main" <+> parens empty)
+    $$
+    (modifies $ pp outputVar)
+    $$
+    lbrace
+    $$
+    (nest' body)
+    $$
+    rbrace
     where role = getRole conc rname
           body = (vcat $ map ((pp "var" <+>) . (<> semi) . mkField) $ roleKeys role)
                  $$
@@ -158,10 +159,21 @@ mkCheck enc conc rname = (pp "procedure" <+> pp "main" <+> parens empty)
                      then call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
                      else call ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"])
                  $$
-                 case enc of
-                      EncAsProcedure       -> call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
-                      EncAsFunction        -> assrt $ apply ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
-                      EncAsFunctionReverse -> assrt $ apply ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar]
+                 if allowDrop 
+                    then (pp "if" <> (pp outputVar .== pp "Dropped()") <+> lbrace)
+                         $$
+                         (nest' $ pp "return" <> semi)
+                         $$
+                         (rbrace <+> pp "else" <+> lbrace)
+                         $$
+                         (nest' check)
+                         $$
+                         rbrace
+                     else check    
+          check = case enc of
+                       EncAsProcedure       -> call ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt"]
+                       EncAsFunction        -> assrt $ (apply ("a_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar])
+                       EncAsFunctionReverse -> assrt $ (apply ("c_" ++ rname) $ (map (pp . name) $ roleKeys role) ++ [pp "inppkt", pp outputVar])
 
 mkLocType :: Refine -> Doc
 mkLocType r = (pp "type" <+> pp "{:datatype}" <+> pp locTypeName <> semi)
@@ -304,16 +316,16 @@ mkStatement :: (?rmap::RMap, ?maxdepth::Int) => Refine -> ECtx -> Statement -> D
 mkStatement r ctx (SSeq _ s1 s2) = mkStatement r ctx s1 $$ mkStatement r ctx s2
 mkStatement _ _   (SPar _ _ _)   = error "Not implemented: Boogie.mkStatement SPar" {- run in sequence, copying packet -}
 mkStatement r ctx (SITE _ c t e) = (pp "if" <> (parens $ mkExpr r ctx c) <+> lbrace)
-                                  $$
-                                  (nest' $ mkStatement r ctx t)
-                                  $$
-                                  (maybe rbrace
-                                         (\s -> (rbrace <+> pp "else" <+> lbrace) 
-                                                $$
-                                                (nest' $ mkStatement r ctx s)
-                                                $$
-                                                rbrace)
-                                         e)
+                                   $$
+                                   (nest' $ mkStatement r ctx t)
+                                   $$
+                                   (maybe rbrace
+                                          (\s -> (rbrace <+> pp "else" <+> lbrace) 
+                                                 $$
+                                                 (nest' $ mkStatement r ctx s)
+                                                 $$
+                                                 rbrace)
+                                          e)
 mkStatement r ctx (STest _ c)    = pp "if" <> (parens $ mkExpr r ctx (EUnOp nopos Not c)) <+> (braces $ pp "return" <> semi)
 mkStatement r ctx (SSet _ l rhs) = checkBounds r ctx rhs
                                    $$
