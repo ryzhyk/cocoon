@@ -119,12 +119,12 @@ nkdrop = NKFilter NKFalse
 type PMap = [((String, String), IM.IntMap Int)]
 
 -- Generate all switches in the topology
-genSwitches :: Refine -> PhyTopology -> [NKPolicy]
+genSwitches :: Refine -> PhyTopology -> [(InstanceDescr, NKPolicy)]
 genSwitches r topology = 
     concatMap (\(switch, imap) -> map (\(descr, links) -> let kmap = M.fromList $ zip (map name $ roleKeys $ getRole r $ name switch) $ idescKeys descr
                                                               pmap = concatMap (\((i,o),plinks) -> let m = IM.fromList $ map (\(l,p,_) -> (l,p)) plinks
                                                                                                    in [((i,o), m)]) links
-                                                          in mkSwitch r kmap pmap) $ instMapFlatten switch imap) 
+                                                          in (descr, mkSwitch r kmap pmap)) $ instMapFlatten switch imap) 
               $ filter ((== NodeSwitch) . nodeType . fst) topology
 
 -- Generate NetKAT switch 
