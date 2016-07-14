@@ -13,3 +13,4 @@ ip netns exec $PID ip link set eth0 up
 ip netns exec $PID ip addr add 192.168.${1}.${2}/16 dev eth0
 ip netns exec $PID ip route add default via 192.168.${1}.${2}
 ovs-vsctl add-port cocoon ${VM}_ovs
+echo $PID
