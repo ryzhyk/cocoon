@@ -96,7 +96,7 @@ refine VHostVOut {
                         }
                     } else {
                         pkt.vlan.vid := vnet;
-                        send VSwitchTunOut[hst, dhst]
+                        send VSwitchTunOut[hst, tunPort(hst, dhst)]
                     }
                 }
             } else {
@@ -108,7 +108,7 @@ refine VHostVOut {
                     } else {
                         (* Remote destination -- encapsulate *)
                         pkt.vlan.vid := vnet;
-                        send VSwitchTunOut[hst, vHostLocation(to_vhport.vhost)]
+                        send VSwitchTunOut[hst, tunPort(hst, vHostLocation(to_vhport.vhost))]
 
                     }
                 }
@@ -119,12 +119,20 @@ refine VHostVOut {
         let VHPortId vhport = vSw2HLink(hst, vport);
         send VHostVIn[vhport.vhost, vhport.vport]
 
-    function iTunPort(HostId hst, HostId rhst): bool = iHost(hst) and iHost(rhst) and not (rhst == hst)
+    function iTunPort(HostId hst, uint<16> port): bool
     
-    role VSwitchTunOut[HostId hst, HostId rhst] | iTunPort(hst, rhst) = 
-        send VSwitchTunIn[rhst, hst]
+    function tunPort(HostId hst, HostId rhst): uint<16>
+    assume (HostId hst, HostId rhst) (iHost(hst) and iHost(rhst) and (not (hst == rhst))) => iTunPort(hst, tunPort(hst, rhst))
 
-    role VSwitchTunIn[HostId hst, HostId rhst] | iTunPort(hst, rhst) = 
+    function portTun(HostId hst, uint<16> port): HostId
+    assume (HostId hst, HostId rhst) (iHost(hst) and iHost(rhst) and (not (hst == rhst))) => (portTun(hst, tunPort(hst, rhst)) == rhst)
+
+    role VSwitchTunOut[HostId hst, uint<16> port] | iTunPort(hst, port) = 
+        let HostId rhst = portTun(hst, port);
+        send VSwitchTunIn[rhst, tunPort(rhst,hst)]
+
+    role VSwitchTunIn[HostId hst, uint<16>port] | iTunPort(hst, port) = 
+        let HostId rhst = portTun(hst, port);
         fork (VNetId vnet | iL2VNet(vnet) and hHostsVNet(hst, vnet)) {
             if (pkt.vlan.vid == vnet) then {
                 pkt.vlan.vid := 16'd0;
@@ -271,6 +279,18 @@ refine {
 
     function iVHostPPort(VHPortId port): bool = false
     function iVSwitchPPort(HostId hst, uint<16> swport):bool = false 
+
+    function iTunPort(HostId hst, uint<16> port): bool = port == 16'd0
+    
+    function tunPort(HostId hst, HostId rhst): uint<16> = 16'd0
+
+    function portTun(HostId hst, uint<16> port): HostId = 
+        case {
+            hst == 48'd0: 48'd1;
+            hst == 48'd1: 48'd0;
+            default: 48'hffffffffffff;
+        }
+
 
 (*
     role VHost[VHostId vhost] | iVHost(vhost) = filter false
