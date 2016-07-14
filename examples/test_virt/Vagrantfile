@@ -1,0 +1,13 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure(2) do |config|
+    (1..2).each do |i|
+        config.vm.define "host#{i}" do |h|
+            #h.vm.box = "ubuntu/xenial64"
+            h.vm.box = "boxcutter/ubuntu1604"
+            h.vm.network "private_network", ip: "192.168.50.#{i+1}"
+            h.vm.provision "shell", path: "hostinstall.sh", args: ["#{i}"]
+        end
+    end
+end
