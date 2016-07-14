@@ -207,6 +207,9 @@ refine VSwitchPlainOut{
 }
 
 refine {
+
+include(`vlan_virt.cfg.ccn')
+(*
     function iL2VNet(VNetId id): bool = id == 16'd1 or id == 16'd2
     function iVHost(VHostId id): bool = 
         id == 32'd0 or id == 32'd1 or id == 32'd2 or id == 32'd3 or id == 32'd4 or id == 32'd5
@@ -291,7 +294,7 @@ refine {
             default: 48'hffffffffffff;
         }
 
-
+*)
 (*
     role VHost[VHostId vhost] | iVHost(vhost) = filter false
     host VHost( (VHostVIn, VHostVOut) )

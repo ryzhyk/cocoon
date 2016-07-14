@@ -3,7 +3,8 @@
 import subprocess 
 import argparse
 import re
-
+import os
+import sys
 
 parser = argparse.ArgumentParser(description='Start virtual network testbed')
 parser.add_argument('--prefix', help='IP4 prefix of the private vagrant network',
@@ -39,18 +40,18 @@ def cocoon_config(hosts, tunnels, vms):
     iVHostPort = "function iVHostPort(VHPortId port): bool = iVHost(port.vhost) and port.vport == 8'd0"
     vHPortVNet = "function vHPortVNet(VHPortId port): VNetId = 16'd1"
     vHPort2Mac = "function vHPort2Mac(VHPortId port): MAC = case {\n" + \
-                 "\n".join(map(lambda (i,(h,p,mac)): "        port.vhost == 32'd" + str(i) + " and port.vport == 8'd0: 48'h" + "".join(mac.split(":")[::-1]) + ";", enumerate(vms))) + \
+                 "\n".join(map(lambda (i,(h,p,mac)): "        port.vhost == 32'd" + str(i) + " and port.vport == 8'd0: 48'h" + "".join(mac.split(":")) + ";", enumerate(vms))) + \
                  "\n        default: 48'h0;\n    }"
     mac2VHPort = "function mac2VHPort(VNetId vnet, MAC mac): VHPortId = case {\n" + \
                  "\n".join(map(lambda (i,(h,p,mac)): "        vnet == 16'd1 and mac == 48'h" + "".join(mac.split(":")) + ": VHPortId{32'd" + str(i) + ", 8'd0};", enumerate(vms))) + \
                  "\n        default: VHPortId{32'hffffffff, 8'hff};\n    }"
     hostIP     = "function hostIP(HostId hst): IP4 = case {\n" + \
-                 "\n".join(map(lambda (i,(h,addr)): "        hst == 48'd" + str(i) + ": 32'h" + "".join(addr.split(".")) + ";", enumerate(hosts))) + \
+                 "\n".join(map(lambda (i,(h,addr)): "        hst == 48'd" + str(i) + ": 32'h" + "".join(map(lambda x: "{0:0{1}x}".format(int(x),2), addr.split("."))) + ";", enumerate(hosts))) + \
                  "\n        default: 32'h0;\n    }"
     iVSwitchPort = "function iVSwitchPort(HostId hst, uint<16> swport): bool = " + \
                  " or ".join(map(lambda (i,(h,p,mac)): "(hst == 48'd" + str(h) + " and swport == 16'd" + str(p) + ")", enumerate(vms)))
     vHostLocation = "function vHostLocation(VHostId vhost): HostId = case {\n" + \
-                    "\n".join(map(lambda (i,(h,p,mac)): "        vhost == 16'd" + str(i) + ": 48'd" + str(h) + ";", enumerate(vms))) + \
+                    "\n".join(map(lambda (i,(h,p,mac)): "        vhost == 32'd" + str(i) + ": 48'd" + str(h) + ";", enumerate(vms))) + \
                     "\n        default: 48'd0;\n    }"
     vH2SwLink  = "function vH2SwLink(VHPortId hport): uint<16> = case {\n" + \
                  "\n".join(map(lambda (i,(h,p,mac)): "        hport == VHPortId{32'd" + str(i) + ", 8'd0}: 16'd" + str(p) + ";", enumerate(vms))) + \
@@ -74,8 +75,9 @@ def cocoon_config(hosts, tunnels, vms):
                       iVSwitchPPort, iTunPort, tunPort, portTun])
 
 try:
-    res = cmd("vagrant up")
+    curdir = os.path.dirname(os.path.realpath(sys.argv[0]))
 
+    res = cmd("vagrant up")
     #list vagrant vm's => Generate the list of hosts.
     res = cmd("vagrant status")
     hosts = map(lambda k: k.split()[0], filter(lambda k: 'running' in k, res.split('\n')))
@@ -120,8 +122,11 @@ try:
             port = ovs_portnum(h, iface)
             print "OVS tunnel port number: " + str(port)
             tunnels[hidx][rhidx] = port
+
     cfg = cocoon_config(map(lambda h: (h, host_addr[h]), hosts), tunnels, vms)
-    print cfg
+    print "Writing cocoon configuration file"
+    f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
+    f.write(cfg)
 except subprocess.CalledProcessError as e:
     print e
     print e.output
