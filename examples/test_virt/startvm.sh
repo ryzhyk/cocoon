@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VM=vm${1}
+VM=vm${2}
 CONTAINER_ID=`docker run -dti --net=none --name=$VM testvm /bin/bash`
 PID=`docker inspect -f {{.State.Pid}} ${CONTAINER_ID}`
 mkdir -p /var/run/netns

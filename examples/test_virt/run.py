@@ -2,6 +2,7 @@
 
 import subprocess 
 import argparse
+import re
 
 
 parser = argparse.ArgumentParser(description='Start virtual network testbed')
@@ -49,16 +50,25 @@ try:
     #start docker VM's inside vagrant VMs 
     for hidx, h in enumerate(hosts):
         vmcmd(h, "/vagrant/cleanvms.sh")
-        for i in range(1,args.hostvms):
+        for i in range(1,args.hostvms+1):
             print "Starting VM " + str(i) + " on " + h
             vmcmd(h, "/vagrant/startvm.sh " + str(hidx) + " " + str(i))
             vm = "vm" + str(i)
+            port_desc = filter(lambda k: (vm+"_ovs") in k, vmcmd(h, "ovs-ofctl dump-ports-desc cocoon").split("\n"))
+            if len(port_desc) != 1:
+                print "Unexpected number of OVS port descriptors found: " + str(len(port_desc))
+                sys.exit(-1)
+            port = int(re.findall(r"[\w']+",  port_desc[0])[0])
+            #mac = re.findall(r"\w\w:\w\w:\w\w:\w\w:\w\w:\w\w$", port_desc[0])[0]
+            print "OVS port number: " + str(port) + "; mac: " + mac
+
 
     #enumerate docker containers
 
     #identify OVS port numbers connected to VMs
 
     #build vxlan tunnels
+
 except subprocess.CalledProcessError as e:
     print e
     print e.output
