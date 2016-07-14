@@ -59,8 +59,19 @@ def cocoon_config(hosts, tunnels, vms):
                  "\n".join(map(lambda (i,(h,p,mac)): "        hst == 48'd" + str(h) + " and swport == 16'd" + str(p) + ": VHPortId{32'd" + str(i) + ", 8'd0};", enumerate(vms))) + \
                  "\n        default: VHPortId{32'd0, 8'd0};\n    }"
     iVHostPPort = "function iVHostPPort(VHPortId port): bool = false"
-    iVSwitchPPort = "function iVSwitchPPort(HostId hst, uint<16> swport): bool = false "
-    return "\n".join([iL2VNet, iHost, iVHost, iVHostPort, vHPortVNet, vHPort2Mac, mac2VHPort, hostIP, iVSwitchPort, vHostLocation, vH2SwLink, vSw2HLink, iVHostPPort, iVSwitchPPort])
+    iVSwitchPPort = "function iVSwitchPPort(HostId hst, uint<16> swport): bool = false"
+    iTunPort    = "function iTunPort(HostId hst, uint<16> port): bool = " +\
+                  " or ".join(map(lambda (hst, htunnels): " or ".join(map(lambda (rhst, port): "(hst == 48'd" + str(hst) + " and port == 16'd" + str(port) + ")", htunnels.iteritems())), tunnels.iteritems()))
+    tunPort     = "function tunPort(HostId hst, HostId rhst): uint<16> = case {\n" + \
+                  "\n".join(map(lambda (hst, htunnels): "\n".join(map(lambda (rhst, port): "        hst == 48'd" + str(hst) + " and rhst == 48'd" + str(rhst) + ": 16'd" + str(port) + ";", htunnels.iteritems())), tunnels.iteritems())) + \
+                  "\n        default: 16'd0;\n    }"
+    portTun     = "function portTun(HostId hst, uint<16> port): HostId = case {\n" + \
+                  "\n".join(map(lambda (hst, htunnels): "\n".join(map(lambda (rhst, port): "        hst == 48'd" + str(hst) + " and port == 16'd" + str(port) + ": 48'd" + str(rhst) + ";", htunnels.iteritems())), tunnels.iteritems())) + \
+                  "\n        default: 48'd0;\n    }"
+    return "\n".join([iL2VNet, iHost, iVHost, iVHostPort, vHPortVNet,  \
+                      vHPort2Mac, mac2VHPort, hostIP, iVSwitchPort,  \
+                      vHostLocation, vH2SwLink, vSw2HLink, iVHostPPort,  \
+                      iVSwitchPPort, iTunPort, tunPort, portTun])
 
 try:
     res = cmd("vagrant up")
@@ -100,7 +111,7 @@ try:
             print "Container's MAC address: " + mac
             vms.append((hidx,port,mac))
         # build vxlan tunnels
-        tunnels[h] = dict()
+        tunnels[hidx] = dict()
         for rhidx, rhst in enumerate(hosts):
             if rhst == h:
                 continue
@@ -108,7 +119,7 @@ try:
             vmcmd(h, "ovs-vsctl add-port cocoon " + iface + " -- set interface " + iface + " type=vxlan options:remote_ip=" + host_addr[rhst])
             port = ovs_portnum(h, iface)
             print "OVS tunnel port number: " + str(port)
-            tunnels[h][rhst] = port
+            tunnels[hidx][rhidx] = port
     cfg = cocoon_config(map(lambda h: (h, host_addr[h]), hosts), tunnels, vms)
     print cfg
 except subprocess.CalledProcessError as e:
