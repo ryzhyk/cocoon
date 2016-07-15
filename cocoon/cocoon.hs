@@ -26,7 +26,6 @@ import Data.List
 import System.Directory
 import System.IO.Error
 import System.IO
-import Numeric
 import System.Console.GetOpt
 
 import Parse
@@ -41,6 +40,7 @@ import Expr
 import PP
 import Boogie.Boogie
 import Util
+import qualified NetKAT.NetKAT as NK
 
 data TOption = CCN String
              | CFG String
@@ -143,6 +143,15 @@ main = do
         putStrLn "Network generation complete"
         hFlush stdout
         maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
+
+    when (confDoNetKAT config) $ do
+        let mkPhyLinks :: InstanceMap PortLinks -> InstanceMap PhyPortLinks
+            mkPhyLinks (InstanceMap (Left m)) = InstanceMap $ Left $ map (mapSnd mkPhyLinks) m
+            mkPhyLinks (InstanceMap (Right links)) = InstanceMap $ Right $ map (\(p,_,ports) -> (p, map(\(pnum,rport) -> (pnum, pnum, rport)) ports)) links
+        let phytopo = map (mapSnd mkPhyLinks) topology
+        let nkswitches = NK.genSwitches final phytopo
+        mapM_ (\((InstanceDescr n ks), sw) -> writeFile (workdir </> addExtension (addExtension n (concatMap (render . pp) ks)) "kat") 
+                                                        $ render $ pp sw) nkswitches 
 
 pairs :: [a] -> [(a,a)]
 pairs (x:y:xs) = (x,y) : pairs (y:xs)
