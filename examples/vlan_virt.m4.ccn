@@ -207,6 +207,11 @@ refine VSwitchPlainOut{
 }
 
 refine {
+    role VSwitch[HostId hst] | iHost(hst) = filter false
+    switch VSwitch((VSwitchIn, VSwitchOut), (VSwitchTunIn, VSwitchTunOut))
+}
+
+refine {
 
 include(`vlan_virt.cfg.ccn')
 (*
