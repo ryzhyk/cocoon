@@ -28,6 +28,10 @@ typedef struct {
 } ip4_t
 
 typedef struct {
+    uint<16> vid
+} vlan_t
+
+typedef struct {
     bool     valid,
     uint<24> vni,
     eth_t    eth,
@@ -37,10 +41,6 @@ typedef struct {
 } vxlan_t
 
 function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, vlan_t{16'd0}, noarp(), ip4_t{false, 8'd0, 32'h0, 32'h0}}
-
-typedef struct {
-    uint<16> vid
-} vlan_t
 
 typedef struct {
     eth_t    eth,
