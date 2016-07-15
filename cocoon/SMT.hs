@@ -32,7 +32,7 @@ exprs2SMTQuery :: (?r::Refine) => Role -> [Expr] -> SMT.SMTQuery
 exprs2SMTQuery role es = let ?role = role in
                          let es' = map expr2SMT es
                              smtvs = (SMT.Var pktVar (typ2SMT (CtxRole role) $ TUser nopos packetTypeName)) : 
-                                     (map (\k -> SMT.Var (name k) (typ2SMT (CtxRole role) k)) $ roleKeys role)
+                                     (map (\k -> SMT.Var (name k) (typ2SMT (CtxRole role) k)) $ roleKeys role ++ roleLocals role ++ roleForkVars role)
                              structs = mapMaybe (\d -> case tdefType d of
                                                             TStruct _ fs -> Just $ SMT.Struct (tdefName d) $ map (\f -> (name f, typ2SMT (CtxRole ?role) f)) fs
                                                             _            -> Nothing) 
