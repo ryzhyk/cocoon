@@ -55,7 +55,9 @@ func2SMT :: (?r::Refine) => Function -> SMT.Function
 func2SMT f@Function{..} = SMT.Function funcName 
                                        (map (\a -> (name a, typ2SMT (CtxFunc f) a)) funcArgs) 
                                        (typ2SMT (CtxFunc f) funcType)
-                                       (expr2SMT $ fromJust funcDef)
+                                       (expr2SMT $ maybe (error $ "SMT.func2SMT: undefined function " ++ name f)
+                                                         id
+                                                         funcDef)
 
 typ2SMT :: (?r::Refine, WithType a) => ECtx -> a -> SMT.Type
 typ2SMT ctx x = case typ'' ?r ctx x of
