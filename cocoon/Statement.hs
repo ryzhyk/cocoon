@@ -113,5 +113,5 @@ statSendsTo' (SHavoc _ _)      = []
 statSendsTo' (SAssume _ _)     = []
 statSendsTo' (SLet _ _ _ _)    = []
 statSendsTo' (SSendND _ _ _)   = error "statSendsTo' SSendND"
-statSendsTo' (SFork _ _ _ _)   = error "statSendsTo' SFork"
+statSendsTo' (SFork _ _ _ b)   = statSendsTo' b
 
