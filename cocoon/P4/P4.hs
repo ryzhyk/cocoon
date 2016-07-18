@@ -527,10 +527,6 @@ liftConds'' e =
                               case d' of  
                                    ECond _ dcs dd -> ECond nopos ((map (\(c,v) -> (cascadeToDisj $ liftConds' c, liftConds' v)) cs)++dcs) dd
                                    _              -> ECond nopos (map (\(c,v) -> (cascadeToDisj $ liftConds' c, liftConds' v)) cs)        d'
-    where combineCascades f es  = combineCascades' f es [] 
-          combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
-          combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
-          combineCascades' f [] es'                  = f es'
 
 -- XXX: this assumes that case conditions are mutually exclusive
 cascadeToDisj :: Expr -> Expr

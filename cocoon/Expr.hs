@@ -21,7 +21,8 @@ module Expr ( exprIsValidFlag
             , exprRefersToPkt
             , exprScalars
             , exprDeps
-            , exprSubst) where
+            , exprSubst
+            , combineCascades) where
 
 import Data.List
 
@@ -145,3 +146,9 @@ exprSubst arg val   (EUnOp _ op e)           = EUnOp nopos op $ exprSubst arg va
 exprSubst arg val   (ESlice _ e h l)         = ESlice nopos (exprSubst arg val e) h l
 exprSubst arg val   (ECond _ cs d)           = ECond nopos (map (\(c,e) -> (exprSubst arg val c, exprSubst arg val e)) cs) $ exprSubst arg val d
 
+combineCascades :: ([Expr] -> Expr) -> [Expr] -> Expr
+combineCascades f es  = combineCascades' f es []
+
+combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
+combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
+combineCascades' f [] es'                  = f es'
