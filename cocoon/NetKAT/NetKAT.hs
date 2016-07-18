@@ -54,7 +54,7 @@ data NKHeaderVal = NKEthSrc   Integer
 ppHeaderVal :: String -> NKHeaderVal -> Doc
 ppHeaderVal op (NKEthSrc   mac)    = pp "ethSrc"  <+> pp op <+> ppMAC mac
 ppHeaderVal op (NKEthDst   mac)    = pp "ethDst"  <+> pp op <+> ppMAC mac
-ppHeaderVal op (NKVlan     vlan)   = pp "vlan"    <+> pp op <+> pp vlan
+ppHeaderVal op (NKVlan     vlan)   = pp "vlanId"  <+> pp op <+> pp vlan
 ppHeaderVal op (NKEthType  etht)   = pp "ethType" <+> pp op <+> pp "0x" <> (pp $ showHex etht "")
 ppHeaderVal op (NKIPProto  prot)   = pp "ipProto" <+> pp op <+> pp prot
 ppHeaderVal op (NKIP4Src   ip msk) = pp "ip4Src"  <+> pp op <+> ppIP ip msk
@@ -101,13 +101,14 @@ instance PP NKPolicy where
      pp (NKMod hval)    = ppHeaderVal ":=" hval
      pp (NKUnion p1 p2) = parens $ pp p1 $$ pp "|" $$ pp p2
      pp (NKSeq p1 p2)   = parens $ pp p1 <> semi $$ pp p2
-     pp (NKITE c t e)   = (pp "if" <+> pp c <+> pp "then")
-                          $$ 
-                          (nest' $ pp t)
-                          $$ 
-                          pp "else"
-                          $$
-                          (nest' $ pp e)
+     pp (NKITE c t e)   = parens $
+                           ((pp "if" <+> pp c <+> pp "then")
+                           $$ 
+                           (nest' $ pp t)
+                           $$ 
+                           pp "else"
+                           $$
+                           (nest' $ pp e))
 
 nkid :: NKPolicy
 nkid   = NKFilter NKTrue
