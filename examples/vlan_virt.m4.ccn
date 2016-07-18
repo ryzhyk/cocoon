@@ -299,6 +299,8 @@ include(`vlan_virt.cfg.ccn')
             default: 48'hffffffffffff;
         }
 
+    function hHostsVNet(HostId hst, VNetId vnet): bool = true
+
 *)
 (*
     role VHost[VHostId vhost] | iVHost(vhost) = filter false

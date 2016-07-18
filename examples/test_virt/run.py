@@ -70,10 +70,11 @@ def cocoon_config(hosts, tunnels, vms):
                   "\n".join(map(lambda (hst, htunnels): "\n".join(map(lambda (rhst, port): "        hst == 48'd" + str(hst) + " and port == 16'd" + str(port) + ": 48'd" + str(rhst) + ";", htunnels.iteritems())), tunnels.iteritems())) + \
                   "\n        default: 48'd0;\n    }"
     hHostsVNet = "function hHostsVNet(HostId hst, VNetId vnet): bool = true"
+    connection = "function connection(VHPortId from, VHPortId to): bool = true"
     return "\n".join([iL2VNet, iHost, iVHost, iVHostPort, vHPortVNet,  \
                       vHPort2Mac, mac2VHPort, hostIP, iVSwitchPort,  \
                       vHostLocation, vH2SwLink, vSw2HLink, iVHostPPort,  \
-                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet])
+                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet, connection])
 
 try:
     curdir = os.path.dirname(os.path.realpath(sys.argv[0]))
