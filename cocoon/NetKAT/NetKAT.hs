@@ -27,6 +27,7 @@ import Control.Monad
 import Control.Monad.State
 import Text.PrettyPrint
 import Numeric
+import Debug.Trace
 
 import PP
 import Topology
@@ -63,7 +64,7 @@ ppHeaderVal op (NKLocation port)   = pp "port"    <+> pp op <+> pp port
 ppMAC :: Integer -> Doc
 ppMAC mac = hcat 
             $ punctuate (char ':') 
-            $ map pp
+            $ map (\n -> pp $ showHex n "")
             $ [bitSlice mac 7 0, bitSlice mac 15 8, bitSlice mac 23 16, bitSlice mac 31 24, bitSlice mac 39 32, bitSlice mac 47 40]
 
 ppIP :: Int -> Int -> Doc
@@ -168,12 +169,16 @@ mkStatement False (SSet _ l r)    = do
                              lscalars = exprScalars ?r ?c l
                              stats = map (\(le, re) -> NKMod $ mkHeaderVal le re) $ zip lscalars rscalars
                          in return $ foldr (\s ss -> NKSeq s ss) (last stats) (init stats)
-mkStatement _ (SSend _ dst)       = do
+mkStatement _ st@(SSend _ dst)       = do
     kmap <- get
     let ELocation _ n ks = evalExpr kmap dst
-    let EInt _ _ lpnum = last ks
-    let ppnum = (snd $ fromJust $ find ((==n) . snd . fst) ?pmap) IM.! (fromIntegral lpnum)
-    return $ NKMod $ NKLocation ppnum
+    case last ks of
+         EInt _ _ lpnum -> case IM.lookup (fromIntegral lpnum) (snd $ fromJust $ find ((==n) . snd . fst) ?pmap) of
+                                Nothing    -> return nkdrop
+                                Just ppnum -> return $ NKMod $ NKLocation ppnum
+         ECond _ cs d   -> mkStatement True $ foldr (\(c,v) s -> SITE nopos c (SSend nopos $ ELocation nopos n $ init ks ++ [v]) $ Just s)
+                                                    (SSend nopos $ ELocation nopos n $ init ks ++ [d]) cs
+         _              -> error $ "NetKAT.mkStatement " ++ show st
 mkStatement _     (SSendND _ _ _) = error "NetKAT.mkStatement SSendND"
 mkStatement _     (SHavoc _ _)    = error "NetKAT.mkStatement SHavoc"
 mkStatement _     (SAssume _ _)   = error "NetKAT.mkStatement SAssume"
@@ -183,15 +188,18 @@ mkStatement False (SLet _ _ n v)  = do
     let v' = evalExpr kmap v
     put $ M.insert n v' kmap
     return nkid
-mkStatement _     (SFork _ _ c _) | exprRefersToPkt c = error "NetKAT.mkStatement: fork condition refers to packet"
+mkStatement _     st@(SFork _ _ c _) | exprRefersToPkt c = error $ "NetKAT.mkStatement: fork condition refers to packet: " ++ show st
 mkStatement final st@(SFork _ vs c b) = do
     kmap <- get
     let c' = evalExpr kmap c
         sols = enumSolutions ?role [c']
-    branches <- mapM (\sol -> let ?kmap = foldl' (\km (var, val) -> M.insert var val km) kmap $ M.toList sol in 
-                              let freevars = (map name vs) \\ (map fst $ M.toList ?kmap) in
+    branches <- mapM (\sol -> let kmap' = foldl' (\km (var, val) -> M.insert var val km) kmap $ M.toList sol in 
+                              let freevars = (map name vs) \\ (map fst $ M.toList kmap') in
                               if null freevars
-                                 then mkStatement final b
+                                 then do put kmap'
+                                         res <- mkStatement final b
+                                         put kmap
+                                         return res
                                  else error $ "NetKAT.mkStatement " ++ show st ++ ". Unconstrained fork variables: " ++ show freevars) sols
     case branches of
          []   -> return nkdrop
@@ -199,16 +207,25 @@ mkStatement final st@(SFork _ vs c b) = do
          _    -> return $ foldl' NKUnion (head branches) (tail branches)
 
 mkCond :: (?r::Refine, ?c::ECtx, ?role::Role) => Expr -> NKPred
-mkCond   (EBool _ True)     = NKTrue
-mkCond   (EBool _ False)    = NKFalse
-mkCond   (EBinOp _ And l r) = NKAnd (mkCond l) (mkCond r)
-mkCond   (EBinOp _ Or l r)  = NKOr  (mkCond l) (mkCond r)
-mkCond e@(EBinOp _ Eq l r)  = case (l,r) of
-                                   (EInt _ _ _, _) -> NKTest $ mkHeaderVal r l
-                                   (_, EInt _ _ _) -> NKTest $ mkHeaderVal l r
-                                   _               -> error $ "NetKAT.mkCond " ++ show e
-mkCond   (EUnOp _ Not c)    = NKNeg (mkCond c)
-mkCond e                    = error $ "NetKAT.mkCond " ++ show e
+mkCond e = mkCond' $ exprSimplify e
+
+mkCond' :: (?r::Refine, ?c::ECtx, ?role::Role) => Expr -> NKPred
+mkCond'   (EBool _ True)     = NKTrue
+mkCond'   (EBool _ False)    = NKFalse
+mkCond'   (EBinOp _ And l r) = NKAnd (mkCond l) (mkCond r)
+mkCond'   (EBinOp _ Or l r)  = NKOr  (mkCond l) (mkCond r)
+mkCond'   (EBinOp _ Eq l@(ECond _ _ _) r) = mkCond $ combineCascades (\[l',r'] -> EBinOp nopos Eq l' r') [l, r]
+mkCond'   (EBinOp _ Eq l r@(ECond _ _ _)) = mkCond $ combineCascades (\[l',r'] -> EBinOp nopos Eq l' r') [l, r]
+mkCond' e@(EBinOp _ Eq l r)  = case (l,r) of
+                                    (EInt _ _ _, _) -> NKTest $ mkHeaderVal r l
+                                    (_, EInt _ _ _) -> NKTest $ mkHeaderVal l r
+                                    _               -> error $ "NetKAT.mkCond " ++ show e
+mkCond'   (EUnOp _ Not c)    = NKNeg (mkCond c)
+mkCond'   (ECond _ cs d)     = mkCond 
+                               $ disj 
+                               $ map (\((c,v), conds) -> conj [(EUnOp nopos Not $ disj conds), c, v]) 
+                               $ zip (cs ++ [(EBool nopos True, d)]) (inits $ map fst cs)
+mkCond' e                    = error $ "NetKAT.mkCond " ++ show e
 
 
 nkHeaders :: [(Expr, Expr -> NKHeaderVal)]
