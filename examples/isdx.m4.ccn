@@ -151,9 +151,9 @@ refine ASRouterIn {
         array!(prefixMatch(outboundPolicies(as, 10'd0), addr)[[[]]]forloop([[[i]]], [[[1]]], decr(MASKBITS), [[[, prefixMatch(outboundPolicies(as, 10'd[[[]]]i), addr)]]]))
     
     role ASRouterIn[ASId as, uint<8> port] | iAS(as) and port == 8'd0 = 
-forloop([[[i]]], [[[0]]], decr(MASKBITS), [[[        let bool bit[[[]]]i = prefixMatch(outboundPolicies(as, 10'd[[[]]]i), pkt.ip4.dst);
+forloop([[[i]]], [[[0]]], decr(MASKBITS), [[[        let bool asbit[[[]]]i = prefixMatch(outboundPolicies(as, 10'd[[[]]]i), pkt.ip4.dst);
 ]]])
-         pkt.eth.dstAddr := array!(bit0[[[]]]forloop([[[i]]], [[[1]]], decr(MASKBITS), [[[, bit[[[]]]i]]]))
+         pkt.eth.dstAddr := array!(asbit0[[[]]]forloop([[[i]]], [[[1]]], decr(MASKBITS), [[[, asbit[[[]]]i]]]))
          (*encode(as, pkt.ip4.dst)*)(* ++ next_hop(as, pkt.ip4.dst)*);
          pkt.eth.srcAddr := nextHop(as, pkt.ip4.dst);
          send ASSDXOut[as, 16'd0]
