@@ -16,6 +16,7 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams #-}
 
 module Eval ( KMap
+            , exprSimplify
             , evalExpr
             , evalExpr') where
 
@@ -34,6 +35,9 @@ import Builtins
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
+
+exprSimplify :: (?r::Refine, ?c::ECtx) => Expr -> Expr
+exprSimplify e = evalExpr M.empty e
 
 -- Partially evaluate expression: 
 -- Expand function definitions, substitute variable values defined in KMap
@@ -59,6 +63,7 @@ evalExpr' (EField _ s f)                =
          s'@(EStruct _ _ fs) -> let (TStruct _ sfs) = typ' ?r ?c s'
                                     fidx = fromJust $ findIndex ((== f) . name) sfs
                                 in fs !! fidx
+         ECond _ cs d        -> ECond nopos (map (mapSnd (\v -> evalExpr' $ EField nopos v f)) cs) (evalExpr' $ EField nopos d f)
          s'                  -> EField nopos s' f
 evalExpr' (ELocation _ r ks)            = ELocation nopos r $ map evalExpr' ks
 evalExpr' (EStruct _ s fs)              = EStruct nopos s $ map evalExpr' fs
