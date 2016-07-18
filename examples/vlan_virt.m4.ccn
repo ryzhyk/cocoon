@@ -139,9 +139,9 @@ refine VHostVOut {
                 if pkt.eth.dstAddr == bCastMAC() then {
                     fork(VHPortId vhport | iVHostPort(vhport) and 
                                            vHPortVNet(vhport) == vnet and 
-                                           vHostLocation(vhport.vhost) == hst and 
-                                           connection(mac2VHPort(vnet, pkt.eth.srcAddr), vhport)) {
-                        send VSwitchOut[hst, vH2SwLink(vhport)]
+                                           vHostLocation(vhport.vhost) == hst) {
+                        if connection(mac2VHPort(vnet, pkt.eth.srcAddr), vhport) then
+                            send VSwitchOut[hst, vH2SwLink(vhport)]
                     }
                 } else {
                     send VSwitchOut[hst, vH2SwLink(mac2VHPort(vnet, pkt.eth.dstAddr))]
