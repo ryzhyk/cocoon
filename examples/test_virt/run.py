@@ -22,8 +22,20 @@ def cmd(c):
     print res
     return res
 
+def cmd_async(c):
+    print c
+    p = subprocess.Popen(c, shell=True)
+    if p.poll() != None:
+        raise Exception(c + " terminated with error code " + str(p.returncode))
+    return p
+
+
 def vmcmd(h, c):
     return cmd("vagrant ssh " + h + " -- sudo -s -- " + c)
+
+def vmcmd_async(h, c):
+    return cmd_async("vagrant ssh " + h + " -- sudo -s -- " + c)
+
 
 def ovs_portnum(h, pname):
     port_desc = filter(lambda k: pname in k, vmcmd(h, "ovs-ofctl dump-ports-desc cocoon").split("\n"))
@@ -88,6 +100,7 @@ try:
     #get vagrant VM IP addresses
     host_addr = dict()
     for h in hosts:
+        vmcmd(h, "/vagrant/cleanvms.sh")
         print "Querying IP address of " + h
         res = vmcmd(h, "ifconfig | awk '/inet addr/{print substr($2,6)}' | grep " + args.prefix)
         ips = res.split()
@@ -97,12 +110,14 @@ try:
         print "Address found:" + ips[0]
         host_addr[h] = ips[0]
 
+    # Start frenetic controller on the first host
+    vmcmd_async(hosts[0], "/frenetic/_build/frenetic/frenetic.native  http-controller --verbosity debug --openflow-port 6653")
+
     #print "Address dictionary:" + str(host_addr)
 
     tunnels = dict()
     vms = []
     for hidx, h in enumerate(hosts):
-        vmcmd(h, "/vagrant/cleanvms.sh")
         #start docker VM's inside vagrant VMs 
         for i in range(1,args.hostvms+1):
             print "Starting VM " + str(i) + " on " + h
@@ -124,6 +139,7 @@ try:
             port = ovs_portnum(h, iface)
             print "OVS tunnel port number: " + str(port)
             tunnels[hidx][rhidx] = port
+        vmcmd(h, "ovs-vsctl set-controller cocoon tcp:" + host_addr[hosts[0]] + ":6653")
 
     cfg = cocoon_config(map(lambda h: (h, host_addr[h]), hosts), tunnels, vms)
     print "Writing cocoon configuration file"
