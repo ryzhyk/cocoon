@@ -47,7 +47,7 @@ def ovs_portnum(h, pname):
 
 def cocoon_config(hosts, tunnels, vms):
     iL2VNet    = "function iL2VNet(VNetId id): bool = id == 16'd1"
-    iHost      = "function iHost(HostId hst): bool = " + " or ".join(map(lambda (i,_): "hst == 48'd" + str(i), enumerate(hosts)))
+    iHost      = "function iHost(HostId hst): bool = " + " or ".join(map(lambda (i,(h,a,swid)): "hst == 48'd" + str(swid), enumerate(hosts)))
     iVHost     = "function iVHost(VHostId id): bool = " + " or ".join(map(lambda (i,_): "id == 32'd" + str(i), enumerate(vms)))
     iVHostPort = "function iVHostPort(VHPortId port): bool = iVHost(port.vhost) and port.vport == 8'd0"
     vHPortVNet = "function vHPortVNet(VHPortId port): VNetId = 16'd1"
@@ -58,7 +58,7 @@ def cocoon_config(hosts, tunnels, vms):
                  "\n".join(map(lambda (i,(h,p,mac)): "        vnet == 16'd1 and mac == 48'h" + "".join(mac.split(":")) + ": VHPortId{32'd" + str(i) + ", 8'd0};", enumerate(vms))) + \
                  "\n        default: VHPortId{32'hffffffff, 8'hff};\n    }"
     hostIP     = "function hostIP(HostId hst): IP4 = case {\n" + \
-                 "\n".join(map(lambda (i,(h,addr)): "        hst == 48'd" + str(i) + ": 32'h" + "".join(map(lambda x: "{0:0{1}x}".format(int(x),2), addr.split("."))) + ";", enumerate(hosts))) + \
+                 "\n".join(map(lambda (_,(h,addr,swid)): "        hst == 48'd" + str(swid) + ": 32'h" + "".join(map(lambda x: "{0:0{1}x}".format(int(x),2), addr.split("."))) + ";", enumerate(hosts))) + \
                  "\n        default: 32'h0;\n    }"
     iVSwitchPort = "function iVSwitchPort(HostId hst, uint<16> swport): bool = " + \
                  " or ".join(map(lambda (i,(h,p,mac)): "(hst == 48'd" + str(h) + " and swport == 16'd" + str(p) + ")", enumerate(vms)))
@@ -97,8 +97,9 @@ try:
     hosts = map(lambda k: k.split()[0], filter(lambda k: 'running' in k, res.split('\n')))
     print "Vagrant hosts:" + str(hosts)
 
-    #get vagrant VM IP addresses
+    #get vagrant VM IP addresses and switch id's
     host_addr = dict()
+    host_swid = dict()
     for h in hosts:
         vmcmd(h, "/vagrant/cleanvms.sh")
         print "Querying IP address of " + h
@@ -107,8 +108,12 @@ try:
         if len(ips) == 0:
             print "No IP addresses starting with " + args.prefix + " found"
             sys.exit(-1)
-        print "Address found:" + ips[0]
+        print "Address found: " + ips[0]
         host_addr[h] = ips[0]
+        res = vmcmd(h, "ovs-ofctl show cocoon")
+        host_swid[h] = int(re.search('dpid:(.+?)\n', res).group(1), 16)
+        print "Switch ID: " + str(host_swid[h])
+        
 
     # Start frenetic controller on the first host
     vmcmd_async(hosts[0], "/frenetic/_build/frenetic/frenetic.native  http-controller --verbosity debug --openflow-port 6653")
@@ -128,9 +133,9 @@ try:
             print "OVS port number: " + str(port)
             mac = re.findall(r"\w\w:\w\w:\w\w:\w\w:\w\w:\w\w", vmcmd(h, "ip netns exec " + pid + " ip link show eth0"))[0]
             print "Container's MAC address: " + mac
-            vms.append((hidx,port,mac))
+            vms.append((host_swid[h],port,mac))
         # build vxlan tunnels
-        tunnels[hidx] = dict()
+        tunnels[host_swid[h]] = dict()
         for rhidx, rhst in enumerate(hosts):
             if rhst == h:
                 continue
@@ -138,15 +143,19 @@ try:
             vmcmd(h, "ovs-vsctl add-port cocoon " + iface + " -- set interface " + iface + " type=vxlan options:remote_ip=" + host_addr[rhst])
             port = ovs_portnum(h, iface)
             print "OVS tunnel port number: " + str(port)
-            tunnels[hidx][rhidx] = port
+            tunnels[host_swid[h]][host_swid[rhst]] = port
         vmcmd(h, "ovs-vsctl set-controller cocoon tcp:" + host_addr[hosts[0]] + ":6653")
 
-    cfg = cocoon_config(map(lambda h: (h, host_addr[h]), hosts), tunnels, vms)
+    cfg = cocoon_config(map(lambda h: (h, host_addr[h], host_swid[h]), hosts), tunnels, vms)
     print "Writing cocoon configuration file"
     f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
     f.write(cfg)
+
+    # generate NetKAT policy
+
+    # verify generated configuration
+
+    # Feed NetKAT policy to controller
 except subprocess.CalledProcessError as e:
     print e
     print e.output
-
-
