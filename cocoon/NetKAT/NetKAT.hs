@@ -17,7 +17,7 @@ limitations under the License.
 
 -- Convert Cocoon spec to NetKAT
 
-module NetKAT.NetKAT(genSwitches) where
+module NetKAT.NetKAT where
 
 import Data.Maybe
 import Data.List
@@ -28,6 +28,7 @@ import Control.Monad.State
 import Text.PrettyPrint
 import Numeric
 import Debug.Trace
+import Text.Printf
 
 import PP
 import Topology
@@ -49,6 +50,7 @@ data NKHeaderVal = NKEthSrc   Integer
                  | NKIP4Src   Int Int
                  | NKIP4Dst   Int Int
                  | NKLocation Int
+                 | NKSwitch   Integer
                  deriving (Eq, Ord)
 
 ppHeaderVal :: String -> NKHeaderVal -> Doc
@@ -60,18 +62,19 @@ ppHeaderVal op (NKIPProto  prot)   = pp "ipProto" <+> pp op <+> pp prot
 ppHeaderVal op (NKIP4Src   ip msk) = pp "ip4Src"  <+> pp op <+> ppIP ip msk
 ppHeaderVal op (NKIP4Dst   ip msk) = pp "ip4Dst"  <+> pp op <+> ppIP ip msk
 ppHeaderVal op (NKLocation port)   = pp "port"    <+> pp op <+> pp port
+ppHeaderVal op (NKSwitch   sw)     = pp "switch"  <+> pp op <+> pp sw
 
 ppMAC :: Integer -> Doc
 ppMAC mac = hcat 
             $ punctuate (char ':') 
-            $ map (\n -> pp $ showHex n "")
-            $ [bitSlice mac 7 0, bitSlice mac 15 8, bitSlice mac 23 16, bitSlice mac 31 24, bitSlice mac 39 32, bitSlice mac 47 40]
+            $ map (\n -> pp $ ((printf "%.2x" n)::String))
+            $ [bitSlice mac 47 40, bitSlice mac 39 32, bitSlice mac 31 24, bitSlice mac 23 16, bitSlice mac 15 8, bitSlice mac 7 0]
 
 ppIP :: Int -> Int -> Doc
 ppIP ip msk = (hcat 
                $ punctuate (char '.') 
                $ map pp
-               $ [bitSlice ip 7 0, bitSlice ip 15 8, bitSlice ip 23 16, bitSlice ip 31 24]) 
+               $ [bitSlice ip 31 24, bitSlice ip 23 16, bitSlice ip 15 8, bitSlice ip 7 0]) 
               <> (if' (msk == 32) empty (char '/' <> pp msk))
 
 data NKPred = NKTrue
