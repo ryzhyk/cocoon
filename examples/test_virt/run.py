@@ -46,6 +46,18 @@ def ovs_portnum(h, pname):
     # Obtain OVS port numbers docker's are attached to
     return int(re.findall(r"[\w']+", port_desc[0])[0])
 
+def config_ifc(allowedToRead, proxies, taintsWith, connections, tainted):
+    fallowedToRead = "function allowedToRead(VHostId hst, tag_t tag): bool = " + \
+                     " or ".join(map(lambda (vhst, tag): "(tag == 64'd" + str(tag) + " and hst == 32'd" + str(vhst) + ")", allowedToRead))
+    fiProxyPort    = "function iProxyPort(VHPortId port): bool = " + " or ".join(map(lambda vhst: "port == VHPortId{32'd" + str(vhst) + ", 8'd0}", proxies))
+    ftaintsWith    = "function taintsWith(VHPortId port, tag_t tag): bool = " + \
+                     " or ".join(map(lambda (vhst, tag): "(port == VHPortId{32'd" + str(vhst) + ", 8'd0} and tag == 64'd" + str(tag) + ")", taintsWith))
+    fConnection    = "function connection(VHPortId from, VHPortId to): bool = " + \
+                     " or ".join(map(lambda (fhost, thost): "(from.vhost == 32'd" + str(fhost) + ") and (to.vhost == 32'd" + str(thost) + ")", connections))
+    ftainted       = "function tainted(VHostId hst, tag_t tag): bool = " + \
+                     " or ".join(map(lambda (vhst, tag): "(tag == 64'd" + str(tag) + " and hst == 32'd" + str(vhst) + ")", tainted))
+    return "\n".join([fallowedToRead, fiProxyPort, ftaintsWith, fConnection, ftainted])
+
 def cocoon_config(hosts, tunnels, vms):
     iL2VNet    = "function iL2VNet(VNetId id): bool = id == 16'd1"
     iHost      = "function iHost(HostId hst): bool = " + " or ".join(map(lambda (i,(h,a,swid)): "hst == 48'd" + str(swid), enumerate(hosts)))
@@ -83,11 +95,10 @@ def cocoon_config(hosts, tunnels, vms):
                   "\n".join(map(lambda (hst, htunnels): "\n".join(map(lambda (rhst, port): "        hst == 48'd" + str(hst) + " and port == 16'd" + str(port) + ": 48'd" + str(rhst) + ";", htunnels.iteritems())), tunnels.iteritems())) + \
                   "\n        default: 48'd0;\n    }"
     hHostsVNet = "function hHostsVNet(HostId hst, VNetId vnet): bool = true"
-    connection = "function connection(VHPortId from, VHPortId to): bool = true"
     return "\n".join([iL2VNet, iHost, iVHost, iVHostPort, vHPortVNet,  \
                       vHPort2Mac, mac2VHPort, hostIP, iVSwitchPort,  \
                       vHostLocation, vH2SwLink, vSw2HLink, iVHostPPort,  \
-                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet, connection])
+                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet])
 
 try:
     curdir = os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -148,9 +159,14 @@ try:
         vmcmd(h, "ovs-vsctl set-controller cocoon tcp:" + host_addr[hosts[0]] + ":6653")
 
     cfg = cocoon_config(map(lambda h: (h, host_addr[h], host_swid[h]), hosts), tunnels, vms)
+    ifc_cfg = config_ifc( [(0,1), (2,1)]
+                        , [0]
+                        , [(0,1)]
+                        , [(0,2),(2,0), (1,3), (3,1)]
+                        , [(0,1), (2,1)])
     print "Writing cocoon configuration file"
     f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
-    f.write(cfg)
+    f.write(cfg + "\n\n" + ifc_cfg)
     f.close()
     
     # compile cocoon to NetKAT
