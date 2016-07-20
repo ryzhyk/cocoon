@@ -192,23 +192,24 @@ mkStatement False (SLet _ _ n v)  = do
     let v' = evalExpr kmap v
     put $ M.insert n v' kmap
     return nkid
-mkStatement _     st@(SFork _ _ c _) | exprRefersToPkt c = error $ "NetKAT.mkStatement: fork condition refers to packet: " ++ show st
 mkStatement final st@(SFork _ vs c b) = do
     kmap <- get
     let c' = evalExpr kmap c
-        sols = enumSolutions ?role [c']
-    branches <- mapM (\sol -> let kmap' = foldl' (\km (var, val) -> M.insert var val km) kmap $ M.toList sol in 
-                              let freevars = (map name vs) \\ (map fst $ M.toList kmap') in
-                              if null freevars
-                                 then do put kmap'
-                                         res <- mkStatement final b
-                                         put kmap
-                                         return res
-                                 else error $ "NetKAT.mkStatement " ++ show st ++ ". Unconstrained fork variables: " ++ show freevars) sols
-    case branches of
-         []   -> return nkdrop
-         [br] -> return br
-         _    -> return $ foldl' NKUnion (head branches) (tail branches)
+    if exprRefersToPkt c'
+       then error $ "NetKAT.mkStatement: fork condition refers to packet: " ++ show st
+       else do let sols = enumSolutions ?role [c']
+               branches <- mapM (\sol -> let kmap' = foldl' (\km (var, val) -> M.insert var val km) kmap $ M.toList sol in 
+                                         let freevars = (map name vs) \\ (map fst $ M.toList kmap') in
+                                         if null freevars
+                                            then do put kmap'
+                                                    res <- mkStatement final b
+                                                    put kmap
+                                                    return res
+                                            else error $ "NetKAT.mkStatement " ++ show st ++ ". Unconstrained fork variables: " ++ show freevars) sols
+               case branches of
+                    []   -> return nkdrop
+                    [br] -> return br
+                    _    -> return $ foldl' NKUnion (head branches) (tail branches)
 
 mkCond :: (?r::Refine, ?c::ECtx, ?role::Role) => Expr -> NKPred
 mkCond e = mkCond' $ exprSimplify e
