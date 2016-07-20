@@ -149,7 +149,7 @@ try:
 
     cfg = cocoon_config(map(lambda h: (h, host_addr[h], host_swid[h]), hosts), tunnels, vms)
     print "Writing cocoon configuration file"
-    f = open(curdir + '/vlan_virt.cfg.ccn', 'w')
+    f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
     f.write(cfg)
     f.close()
     
@@ -157,7 +157,7 @@ try:
     m4file = curdir + "/../vlan_virt.m4.ccn"
     ccnfile = curdir + "/vlan_virt.ccn"
     nkfile = curdir + "/vlan_virt/policy.kat"
-    cmd("m4 -I " + curdir + " -I " + curdir + "/../ " + m4file + " > " + ccnfile)
+    cmd("m4 -I " + curdir + "/../ " + m4file + " > " + ccnfile)
 
     # generate NetKAT policy
     cmd(curdir + "/../../cocoon/dist/build/cocoon/cocoon -i " + ccnfile + " -b 15 --boogie --netkat")
