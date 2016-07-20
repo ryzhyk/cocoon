@@ -81,12 +81,13 @@ refine VHostVOut {
    
     role VSwitchIn[HostId hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
         let VHPortId from_vhport = vSw2HLink(hst, vport);
-        if pkt.eth.srcAddr == vHPort2Mac(from_vhport) and pkt.vlan.vid == 16'd0 then {
+        if pkt.eth.srcAddr == vHPort2Mac(from_vhport) then {
             (* Destination exists? *)
             let VNetId vnet = vSwPortVNet(hst, vport);
             if bCastMAC() == pkt.eth.dstAddr then {
                 fork(HostId dhst | iHost(dhst) and hHostsVNet(dhst, vnet)) {
                     if dhst == hst then {
+                        pkt.vlan.vid := 16'd0;
                         fork(VHPortId vhport | iVHostPort(vhport) and 
                                                vHPortVNet(vhport) == vnet and 
                                                vHostLocation(vhport.vhost) == hst and 
@@ -104,6 +105,7 @@ refine VHostVOut {
                 if iVHostPort(to_vhport) and connection(from_vhport, to_vhport) then {
                     if (vHostLocation(to_vhport.vhost) == hst) then { 
                         (* Local destination -- deliver *)
+                        pkt.vlan.vid := 16'd0;
                         send VSwitchOut[hst, vH2SwLink(to_vhport)]
                     } else {
                         (* Remote destination -- encapsulate *)

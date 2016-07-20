@@ -134,10 +134,10 @@ role VHostVIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) =
 role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
     (* Don't allow hosts to lie about their MAC address *)
-    if pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port}) ifelse(VIRT_STYLE,`VLAN', and pkt.vlan.vid == 16'd0,`') then {
+    if pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port}) then {
         if bCastMAC() == pkt.eth.dstAddr then {
             if iL2VNet(vnet) then {
-                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();',`')
+                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 16'd0;)
                 fork (VHPortId vhport | iVHostPort(vhport) and 
                                         vHPortVNet(vhport) == vnet and 
                                         vhport != VHPortId{vhost, port} and 
@@ -152,7 +152,7 @@ role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) 
             (* Deliver to destination MAC within virtual network *)
             let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
             if iVHostPort(dstvhport) and connection(VHPortId{vhost,port}, dstvhport) then {
-                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();',`')
+                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 16'd0;)
                 send VHostVIn[dstvhport.vhost, dstvhport.vport]
             }
         }
