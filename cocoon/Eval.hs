@@ -75,35 +75,40 @@ evalExpr' e@(EBinOp _ op lhs rhs)       =
         w = max w1 w2
     in case (lhs', rhs') of
             (EBool _ v1, EBool _ v2)   -> case op of
-                                               Eq  -> EBool nopos (v1 == v2)
-                                               Neq -> EBool nopos (v1 /= v2)
-                                               And -> EBool nopos (v1 && v2)
-                                               Or  -> EBool nopos (v1 || v2)
-                                               _   -> error $ "Eval.evalExpr' " ++ show e
+                                               Eq   -> EBool nopos (v1 == v2)
+                                               Neq  -> EBool nopos (v1 /= v2)
+                                               And  -> EBool nopos (v1 && v2)
+                                               Or   -> EBool nopos (v1 || v2)
+                                               Impl -> EBool nopos ((not v1) || v2)
+                                               _    -> error $ "Eval.evalExpr' " ++ show e
             (EBool _ True, _)          -> case op of
-                                               Eq  -> rhs'
-                                               Neq -> EUnOp nopos Not rhs'
-                                               And -> rhs'
-                                               Or  -> lhs'
-                                               _   -> error $ "Eval.evalExpr' " ++ show e
+                                               Eq   -> rhs'
+                                               Neq  -> evalExpr' $ EUnOp nopos Not rhs'
+                                               And  -> rhs'
+                                               Or   -> lhs'
+                                               Impl -> rhs'
+                                               _    -> error $ "Eval.evalExpr' " ++ show e
             (EBool _ False, _)         -> case op of
-                                               Eq  -> EUnOp nopos Not rhs'
-                                               Neq -> rhs'
-                                               And -> lhs'
-                                               Or  -> rhs'
-                                               _   -> error $ "Eval.evalExpr' " ++ show e
+                                               Eq   -> evalExpr' $ EUnOp nopos Not rhs'
+                                               Neq  -> rhs'
+                                               And  -> lhs'
+                                               Or   -> rhs'
+                                               Impl -> EBool nopos True
+                                               _    -> error $ "Eval.evalExpr' " ++ show e
             (_, EBool _ True)          -> case op of
-                                               Eq  -> lhs'
-                                               Neq -> EUnOp nopos Not lhs'
-                                               And -> lhs'
-                                               Or  -> rhs'
-                                               _   -> error $ "Eval.evalExpr' " ++ show e
+                                               Eq   -> lhs'
+                                               Neq  -> evalExpr' $ EUnOp nopos Not lhs'
+                                               And  -> lhs'
+                                               Or   -> rhs'
+                                               Impl -> rhs'
+                                               _    -> error $ "Eval.evalExpr' " ++ show e
             (_, EBool _ False)          -> case op of
-                                               Eq  -> EUnOp nopos Not lhs'
-                                               Neq -> lhs'
-                                               And -> rhs'
-                                               Or  -> lhs'
-                                               _   -> error $ "Eval.evalExpr' " ++ show e
+                                               Eq   -> evalExpr' $ EUnOp nopos Not lhs'
+                                               Neq  -> lhs'
+                                               And  -> rhs'
+                                               Or   -> lhs'
+                                               Impl -> evalExpr' $ EUnOp nopos Not lhs'
+                                               _    -> error $ "Eval.evalExpr' " ++ show e
             (EInt _ _ v1, EInt _ _ v2) -> case op of
                                                Eq     -> EBool nopos (v1 == v2)
                                                Neq    -> EBool nopos (v1 /= v2)
