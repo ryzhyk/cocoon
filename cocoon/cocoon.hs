@@ -150,8 +150,9 @@ main = do
             mkPhyLinks (InstanceMap (Right links)) = InstanceMap $ Right $ map (\(p,_,ports) -> (p, map(\(pnum,rport) -> (pnum, pnum, rport)) ports)) links
         let phytopo = map (mapSnd mkPhyLinks) topology
         let nkswitches = NK.genSwitches final phytopo
-        mapM_ (\((InstanceDescr n ks), sw) -> writeFile (workdir </> addExtension (addExtension n (concatMap (render . pp) ks)) "kat") 
-                                                        $ render $ pp sw) nkswitches 
+            policy = foldr (\(InstanceDescr _ ((EInt _ _ swid):_), pol) acc -> NK.NKITE (NK.NKTest $ NK.NKSwitch swid) pol acc) NK.nkdrop nkswitches
+        writeFile (workdir </> "policy.kat") $ render $ pp policy
+        putStrLn "NetKAT generation complete"
 
 pairs :: [a] -> [(a,a)]
 pairs (x:y:xs) = (x,y) : pairs (y:xs)

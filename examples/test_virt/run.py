@@ -5,6 +5,7 @@ import argparse
 import re
 import os
 import sys
+import requests
 
 parser = argparse.ArgumentParser(description='Start virtual network testbed')
 parser.add_argument('--prefix', help='IP4 prefix of the private vagrant network',
@@ -116,7 +117,7 @@ try:
         
 
     # Start frenetic controller on the first host
-    vmcmd_async(hosts[0], "/frenetic/_build/frenetic/frenetic.native  http-controller --verbosity debug --openflow-port 6653")
+    vmcmd_async(hosts[0], "/frenetic/_build/frenetic/frenetic.native  http-controller --verbosity debug --openflow-port 6653 --http-port 9000")
 
     #print "Address dictionary:" + str(host_addr)
 
@@ -148,14 +149,28 @@ try:
 
     cfg = cocoon_config(map(lambda h: (h, host_addr[h], host_swid[h]), hosts), tunnels, vms)
     print "Writing cocoon configuration file"
-    f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
+    f = open(curdir + '/vlan_virt.cfg.ccn', 'w')
     f.write(cfg)
+    f.close()
+    
+    # compile cocoon to NetKAT
+    m4file = curdir + "/../vlan_virt.m4.ccn"
+    ccnfile = curdir + "/vlan_virt.ccn"
+    nkfile = curdir + "/vlan_virt/policy.kat"
+    cmd("m4 -I " + curdir + " -I " + curdir + "/../ " + m4file + " > " + ccnfile)
 
     # generate NetKAT policy
+    cmd(curdir + "/../../cocoon/dist/build/cocoon/cocoon -i " + ccnfile + " -b 15 --boogie --netkat")
 
-    # verify generated configuration
+    # TODO: verify generated configuration
 
     # Feed NetKAT policy to controller
+
+    f = open(nkfile, 'r')
+    policy = f.read()
+    f.close()
+    requests.post("http://" + host_addr[hosts[0]] + ":9000/cocoon/update", policy)
+
 except subprocess.CalledProcessError as e:
     print e
     print e.output
