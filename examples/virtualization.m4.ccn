@@ -120,10 +120,10 @@ function connection(VHPortId from, VHPortId to): bool
 
 function tainted(VHostId hst, tag_t tag): bool
 assume (VHPortId port1, VHPortId port2, tag_t tag) 
-       (iProxyPort(port1) and taintsWith(port1, tag) and connection(port1, port2)) => tainted(port2.vhost, tag)
+       (iProxyPort(port1) and taintsWith(port1, tag) and iVHostPort(port2) and connection(port1, port2)) => tainted(port2.vhost, tag)
 
 assume (VHPortId port1, VHPortId port2, tag_t tag)
-       (tainted(port1.vhost, tag) and (not iProxyPort(port1)) and connection(port1, port2)) => tainted(port2.vhost, tag)
+       (tainted(port1.vhost, tag) and (not iProxyPort(port1)) and iVHostPort(port2) and connection(port1, port2)) => tainted(port2.vhost, tag)
 
 (* The main confidentiality property *)
 assume (VHostId hst, tag_t tag) tainted(hst, tag) => allowedToRead(hst, tag)
