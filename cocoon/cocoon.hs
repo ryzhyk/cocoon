@@ -145,6 +145,7 @@ main = do
         maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
 
     when (confDoNetKAT config) $ do
+        mapM_ (\f -> when (isNothing $ funcDef f) $ fail $ "Function " ++ name f ++ " is undefined") $ refineFuncs final
         let mkPhyLinks :: InstanceMap PortLinks -> InstanceMap PhyPortLinks
             mkPhyLinks (InstanceMap (Left m)) = InstanceMap $ Left $ map (mapSnd mkPhyLinks) m
             mkPhyLinks (InstanceMap (Right links)) = InstanceMap $ Right $ map (\(p,_,ports) -> (p, map(\(pnum,rport) -> (pnum, pnum, rport)) ports)) links
