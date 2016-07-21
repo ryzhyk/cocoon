@@ -45,6 +45,7 @@ import Util
 data NKHeaderVal = NKEthSrc   Integer
                  | NKEthDst   Integer
                  | NKVlan     Int
+                 | NKVlanPcp  Int
                  | NKEthType  Int
                  | NKIPProto  Int
                  | NKIP4Src   Int Int
@@ -57,6 +58,7 @@ ppHeaderVal :: String -> NKHeaderVal -> Doc
 ppHeaderVal op (NKEthSrc   mac)    = pp "ethSrc"  <+> pp op <+> ppMAC mac
 ppHeaderVal op (NKEthDst   mac)    = pp "ethDst"  <+> pp op <+> ppMAC mac
 ppHeaderVal op (NKVlan     vlan)   = pp "vlanId"  <+> pp op <+> pp vlan
+ppHeaderVal op (NKVlanPcp  pcp)    = pp "vlanPcp" <+> pp op <+> pp pcp
 ppHeaderVal op (NKEthType  etht)   = pp "ethType" <+> pp op <+> pp "0x" <> (pp $ showHex etht "")
 ppHeaderVal op (NKIPProto  prot)   = pp "ipProto" <+> pp op <+> pp prot
 ppHeaderVal op (NKIP4Src   ip msk) = pp "ip4Src"  <+> pp op <+> ppIP ip msk
@@ -205,7 +207,7 @@ mkStatement final st@(SFork _ vs c b) = do
                                                     res <- mkStatement final b
                                                     put kmap
                                                     return res
-                                            else error $ "NetKAT.mkStatement " ++ show st ++ ". Unconstrained fork variables: " ++ show freevars) sols
+                                            else error $ "NetKAT.mkStatement " ++ show st ++ " Unconstrained fork variables: " ++ show freevars) sols
                case branches of
                     []   -> return nkdrop
                     [br] -> return br
@@ -237,6 +239,7 @@ nkHeaders :: [(Expr, Expr -> NKHeaderVal)]
 nkHeaders = [ (ethSrc,  (\(EInt _ _ v) -> NKEthSrc v))
             , (ethDst,  (\(EInt _ _ v) -> NKEthDst v))
             , (vid,     (\(EInt _ _ v) -> NKVlan $ fromIntegral v))
+            , (pcp,     (\(EInt _ _ v) -> NKVlanPcp $ fromIntegral v))
             , (ip4Src,  (\(EInt _ _ v) -> NKIP4Src (fromIntegral v) 32))
             , (ip4Dst,  (\(EInt _ _ v) -> NKIP4Dst (fromIntegral v) 32))
             , (ip4Prot, (\(EInt _ _ v) -> NKIPProto $ fromIntegral v))]
@@ -251,6 +254,7 @@ nkHeaders = [ (ethSrc,  (\(EInt _ _ v) -> NKEthSrc v))
          ip4Prot = field ip4  "protocol"
          vlan    = field pkt  "vlan"
          vid     = field vlan "vid"
+         pcp     = field vlan "pcp"
 
 
 mkHeaderVal :: Expr -> Expr -> NKHeaderVal
