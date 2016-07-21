@@ -12,7 +12,10 @@ parser.add_argument('--prefix', help='IP4 prefix of the private vagrant network'
                     type=str, default="192.168", action="store", required=False)
 parser.add_argument('--hostvms', help='VMs per host',
                     type=int, default=2, action="store", required=False)
-
+parser.add_argument('--ifc', help='Test information flow control feature',
+                    default=False, action="store_true", required=False)
+parser.add_argument('--chaining', help='Test service chaining feature',
+                    default=False, action="store_true", required=False)
 args = parser.parse_args()
 
 
@@ -58,21 +61,62 @@ def config_ifc(allowedToRead, proxies, taintsWith, connections, tainted):
                      " or ".join(map(lambda (vhst, tag): "(tag == 64'd" + str(tag) + " and hst == 32'd" + str(vhst) + ")", tainted))
     return "\n".join([fallowedToRead, fiProxyPort, ftaintsWith, fConnection, ftainted])
 
+def config_noifc():
+    fallowedToRead = "function allowedToRead(VHostId hst, tag_t tag): bool = false"
+    fiProxyPort    = "function iProxyPort(VHPortId port): bool = false"
+    ftaintsWith    = "function taintsWith(VHPortId port, tag_t tag): bool = false"
+    fConnection    = "function connection(VHPortId from, VHPortId to): bool = true"
+    ftainted       = "function tainted(VHostId hst, tag_t tag): bool = false"
+    return "\n".join([fallowedToRead, fiProxyPort, ftaintsWith, fConnection, ftainted])
+
+def config_chaining():
+    return """
+    function iNFVHost(VHostId hst): bool = hst == 32'd1
+    function nextHop(eth_t p, VHPortId port): VHPortId = 
+        case {
+            vHPortVNet(port) == 12'd1 and (not (port == VHPortId{32'd1, 8'd0})): VHPortId{32'd1, 8'd0};
+            default: mac2VHPort(vHPortVNet(port), p.dstAddr);
+        }
+
+    function label(eth_t p, VHPortId port): uint<3> =
+        case {
+            port == VHPortId{32'd1, 8'd0}: 3'd1;
+            default: 3'd0;
+        }
+
+    function nextHopFromLabel(VNetId vid, eth_t p, uint<3> label): VHPortId =
+        case {
+            vid == 12'd1 and label == 3'd0: VHPortId{32'd1, 8'd0};
+            default: mac2VHPort(vid, p.dstAddr);
+        }
+    """
+
+def config_nochaining():
+    return """
+    function iNFVHost(VHostId hst): bool = false
+    function nextHop(eth_t p, VHPortId port): VHPortId = mac2VHPort(vHPortVNet(port), p.dstAddr)
+    function label(eth_t p, VHPortId port): uint<3> = 3'd0
+    function nextHopFromLabel(VNetId vid, eth_t p, uint<3> label): VHPortId = mac2VHPort(vid, p.dstAddr)
+    """
+
 def cocoon_config(hosts, tunnels, vms):
-    iL2VNet    = "function iL2VNet(VNetId id): bool = id == 16'd1"
+    iL2VNet    = "function iL2VNet(VNetId id): bool = id == 12'd1"
     iHost      = "function iHost(HostId hst): bool = " + " or ".join(map(lambda (i,(h,a,swid)): "hst == 48'd" + str(swid), enumerate(hosts)))
     iVHost     = "function iVHost(VHostId id): bool = " + " or ".join(map(lambda (i,_): "id == 32'd" + str(i), enumerate(vms)))
     iVHostPort = "function iVHostPort(VHPortId port): bool = iVHost(port.vhost) and port.vport == 8'd0"
-    vHPortVNet = "function vHPortVNet(VHPortId port): VNetId = 16'd1"
+    vHPortVNet = "function vHPortVNet(VHPortId port): VNetId = 12'd1"
     vHPort2Mac = "function vHPort2Mac(VHPortId port): MAC = case {\n" + \
                  "\n".join(map(lambda (i,(h,p,mac)): "        port.vhost == 32'd" + str(i) + " and port.vport == 8'd0: 48'h" + "".join(mac.split(":")) + ";", enumerate(vms))) + \
                  "\n        default: 48'h0;\n    }"
     mac2VHPort = "function mac2VHPort(VNetId vnet, MAC mac): VHPortId = case {\n" + \
-                 "\n".join(map(lambda (i,(h,p,mac)): "        vnet == 16'd1 and mac == 48'h" + "".join(mac.split(":")) + ": VHPortId{32'd" + str(i) + ", 8'd0};", enumerate(vms))) + \
+                 "\n".join(map(lambda (i,(h,p,mac)): "        vnet == 12'd1 and mac == 48'h" + "".join(mac.split(":")) + ": VHPortId{32'd" + str(i) + ", 8'd0};", enumerate(vms))) + \
                  "\n        default: VHPortId{32'hffffffff, 8'hff};\n    }"
     hostIP     = "function hostIP(HostId hst): IP4 = case {\n" + \
                  "\n".join(map(lambda (_,(h,addr,swid)): "        hst == 48'd" + str(swid) + ": 32'h" + "".join(map(lambda x: "{0:0{1}x}".format(int(x),2), addr.split("."))) + ";", enumerate(hosts))) + \
                  "\n        default: 32'h0;\n    }"
+    ip2Host    = "function ip2Host(IP4 addr): HostId = case {\n" + \
+            "\n".join(map(lambda (_,(h,addr,swid)): "        addr == 32'h" + "".join(map(lambda x: "{0:0{1}x}".format(int(x),2), addr.split("."))) + ": 48'd" + str(swid) + ";", enumerate(hosts))) + \
+                 "\n        default: 48'h0;\n    }"
     iVSwitchPort = "function iVSwitchPort(HostId hst, uint<16> swport): bool = " + \
                  " or ".join(map(lambda (i,(h,p,mac)): "(hst == 48'd" + str(h) + " and swport == 16'd" + str(p) + ")", enumerate(vms)))
     vHostLocation = "function vHostLocation(VHostId vhost): HostId = case {\n" + \
@@ -95,10 +139,14 @@ def cocoon_config(hosts, tunnels, vms):
                   "\n".join(map(lambda (hst, htunnels): "\n".join(map(lambda (rhst, port): "        hst == 48'd" + str(hst) + " and port == 16'd" + str(port) + ": 48'd" + str(rhst) + ";", htunnels.iteritems())), tunnels.iteritems())) + \
                   "\n        default: 48'd0;\n    }"
     hHostsVNet = "function hHostsVNet(HostId hst, VNetId vnet): bool = true"
+    p2vPort    = "function p2vPort(HostId addr): VHPortId = VHPortId{32'd0, 8'd0}"
+    vH2SwPLink = "function vH2SwPLink(VHPortId hport): uint<16> = 16'd0"
+    vSw2HPLink = "function vSw2HPLink(HostId hst, uint<16> swport): VHPortId = VHPortId{32'd0, 8'd0}"
     return "\n".join([iL2VNet, iHost, iVHost, iVHostPort, vHPortVNet,  \
-                      vHPort2Mac, mac2VHPort, hostIP, iVSwitchPort,  \
+                      vHPort2Mac, mac2VHPort, hostIP, ip2Host, iVSwitchPort,  \
                       vHostLocation, vH2SwLink, vSw2HLink, iVHostPPort,  \
-                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet])
+                      iVSwitchPPort, iTunPort, tunPort, portTun, hHostsVNet, \
+                      p2vPort, vH2SwPLink, vSw2HPLink])
 
 try:
     curdir = os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -159,14 +207,24 @@ try:
         vmcmd(h, "ovs-vsctl set-controller cocoon tcp:" + host_addr[hosts[0]] + ":6653")
 
     cfg = cocoon_config(map(lambda h: (h, host_addr[h], host_swid[h]), hosts), tunnels, vms)
-    ifc_cfg = config_ifc( [(0,1), (2,1)]
-                        , [0]
-                        , [(0,1)]
-                        , [(0,2),(2,0), (1,3), (3,1)]
-                        , [(0,1), (2,1)])
+
     print "Writing cocoon configuration file"
     f = open(curdir + '/../vlan_virt.cfg.ccn', 'w')
-    f.write(cfg + "\n\n" + ifc_cfg)
+    if args.ifc:
+        ifc_cfg = config_ifc( [(0,1), (2,1)]
+                            , [0]
+                            , [(0,1)]
+                            , [(0,2),(2,0), (1,3), (3,1)]
+                            , [(0,1), (2,1)])
+    else:
+        ifc_cfg = config_noifc()
+    cfg = cfg + "\n\n" + ifc_cfg
+    if args.chaining:
+        chaining_cfg = config_chaining()
+    else:
+        chaining_cfg = config_nochaining()
+    cfg = cfg + "\n\n" + chaining_cfg
+    f.write(cfg)
     f.close()
     
     # compile cocoon to NetKAT

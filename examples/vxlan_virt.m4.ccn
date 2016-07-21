@@ -5,6 +5,7 @@ include(`virtualization.m4.ccn')
 (* VxLAN-based virtualization on top of L3 physical networks *)
 
 refine {
+
     function iHost(HostId hst): bool
     function hostIP(HostId hst): IP4
     function ip2Host(IP4 addr): HostId
@@ -37,6 +38,8 @@ refine {
 }
 
 refine VHostVOut {
+    function nextHop(eth_t p, VHPortId port): VHPortId = mac2VHPort(vHPortVNet(port), p.dstAddr)
+    function iNFVHost(VHostId hst): bool = false
     
     (* Physical topology *)
     function vHostLocation(VHostId vhost): HostId
@@ -79,7 +82,7 @@ refine VHostVOut {
 
     function vxlanEncapsulate(Packet p, VNetId vnet, IP4 src, IP4 dst): Packet =
         Packet{ eth_t{48'd0, 48'd0}
-              , vlan_t{16'd0}
+              , vlan_t{3'd0, 12'd0}
               , noarp()
               , ip4_t{true, 8'd17(*UDP*), src, dst}
               , vxlan_t{true, vnet, p.eth, p.vlan, p.arp, p.ip4}}

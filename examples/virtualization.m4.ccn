@@ -28,7 +28,8 @@ typedef struct {
 } ip4_t
 
 typedef struct {
-    uint<16> vid
+    uint<3>  pcp,
+    uint<12> vid
 } vlan_t
 
 typedef struct {
@@ -40,7 +41,7 @@ typedef struct {
     ip4_t    ip4
 } vxlan_t
 
-function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, vlan_t{16'd0}, noarp(), ip4_t{false, 8'd0, 32'h0, 32'h0}}
+function novxlan(): vxlan_t = vxlan_t{false, 24'd0, eth_t{48'd0, 48'd0}, vlan_t{3'd0, 12'd0}, noarp(), ip4_t{false, 8'd0, 32'h0, 32'h0}}
 
 typedef struct {
     eth_t    eth,
@@ -50,7 +51,7 @@ typedef struct {
     vxlan_t  vxlan
 } Packet
 
-ifelse(VIRT_STYLE, `VXLAN', `typedef uint<24> VNetId', `typedef uint<16> VNetId')
+ifelse(VIRT_STYLE, `VXLAN', `typedef uint<24> VNetId', `typedef uint<12> VNetId')
 
 typedef uint<32> VHostId
 typedef struct {
@@ -61,7 +62,6 @@ typedef struct {
 typedef uint<48> HostId
 
 (*  TODO: 
-    - Service chaining
     - Multiple physical networks
  *)
 
@@ -75,6 +75,10 @@ assume (VNetId id) not (iL3VNet(id) and iL2VNet(id))
 function iVHost(VHostId id): bool
 function iVHostPort(VHPortId port): bool
 assume (VHPortId port) iVHostPort(port) => iVHost(port.vhost)
+
+(* NF's are a subset of vhosts that are allowed to send packets with arbitrary src address *)
+function iNFVHost(VHostId hst): bool
+assume (VHostId hst) iNFVHost(hst) => iVHost(hst)
 
 function vHPortVNet(VHPortId port): VNetId
 assume (VHPortId port) iVHostPort(port) => iVNet(vHPortVNet(port))
@@ -128,16 +132,20 @@ assume (VHPortId port1, VHPortId port2, tag_t tag)
 (* The main confidentiality property *)
 assume (VHostId hst, tag_t tag) tainted(hst, tag) => allowedToRead(hst, tag)
 
+(* Service chaining *)
+function nextHop(eth_t p, VHPortId port): VHPortId
+assume (VHPortId fport, VHPortId tport, eth_t p) (iVHostPort(fport) and nextHop(p, fport) == tport and iVHostPort(tport)) => (vHPortVNet(tport) == vHPortVNet(fport))
 
 role VHostVIn[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = filter false
 
 role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) = 
     let VNetId vnet = vHPortVNet(VHPortId{vhost, port});
     (* Don't allow hosts to lie about their MAC address *)
-    if pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port}) then {
+    if (iNFVHost(vhost) and (not (pkt.eth.dstAddr == bCastMAC()))) or 
+       (pkt.eth.srcAddr == vHPort2Mac(VHPortId{vhost, port})) then {
         if bCastMAC() == pkt.eth.dstAddr then {
             if iL2VNet(vnet) then {
-                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 16'd0;)
+                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 12'd0;)
                 fork (VHPortId vhport | iVHostPort(vhport) and 
                                         vHPortVNet(vhport) == vnet and 
                                         vhport != VHPortId{vhost, port} and 
@@ -150,9 +158,9 @@ role VHostVOut[VHostId vhost, uint<8> port] | iVHostPort(VHPortId{vhost, port}) 
             }
         } else {
             (* Deliver to destination MAC within virtual network *)
-            let VHPortId dstvhport = mac2VHPort(vnet, pkt.eth.dstAddr);
+            let VHPortId dstvhport = nextHop(pkt.eth, VHPortId{vhost, port});
             if iVHostPort(dstvhport) and connection(VHPortId{vhost,port}, dstvhport) then {
-                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 16'd0;)
+                ifelse(VIRT_STYLE,`VXLAN', `pkt.vxlan := novxlan();', pkt.vlan.vid := 12'd0; pkt.vlan.pcp := 3'd0;)
                 send VHostVIn[dstvhport.vhost, dstvhport.vport]
             }
         }
