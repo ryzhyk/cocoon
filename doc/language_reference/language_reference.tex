@@ -1,0 +1,316 @@
+\documentclass{report}
+
+\usepackage{hyperref}
+\usepackage{color}
+\usepackage[usenames]{xcolor}
+\usepackage{tikz}
+
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+\usepackage[letterpaper, left=25mm, right=25mm]{geometry} 
+
+% New definitions
+\algnewcommand\algorithmicswitch{\textbf{case}}
+\algnewcommand\algorithmiccase{\textbf{}}
+% New "environments"
+\algdef{SE}[SWITCH]{Switch}{EndSwitch}[1]{\algorithmicswitch\ #1\ {\bf of}}{\algorithmicend\ \algorithmicswitch}%
+\algdef{SE}[CASE]{Case}{EndCase}[1]{\algorithmiccase\ #1 :}{\algorithmicend\ \algorithmiccase}%
+\algtext*{EndSwitch}%
+\algtext*{EndCase}%
+
+%\usepackage[T1]{fontenc}
+
+\definecolor{lgray}{gray}{0.9}
+
+\usepackage{listings}
+
+\lstnewenvironment{ccnlisting}[1]
+{\vspace{3mm}
+ \lstset{
+    backgroundcolor=\color{lgray},
+    basicstyle=\small\ttfamily, 
+%    keywordstyle=\bfseries,
+    keywordstyle=\underbar,
+    identifierstyle=,
+    commentstyle=\slshape,
+    stringstyle=,
+    showstringspaces=false,
+    keywords={ and
+             , bool 
+             , case
+             , default
+             , endrefine
+             , filter
+             , fork
+             , function 
+             , assume 
+             , host 
+             , havoc 
+             , let 
+             , not 
+             , or 
+             , pkt 
+             , refine 
+             , role 
+             , send 
+             , struct 
+             , switch
+             , case 
+             , if 
+             , then 
+             , else
+             , true
+             , false
+             , uint
+             , typedef},
+    sensitive=false,
+    morecomment=[l]{//},
+    morecomment=[s]{(*}{*)},
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=1pt,
+    emphstyle=\bfseries,
+    belowskip=0pt,
+    aboveskip=0pt,
+    #1
+}}{\vspace{3mm}}
+
+\lstnewenvironment{bnflisting}[1]
+{\vspace{3mm}
+ \lstset{
+    backgroundcolor=\color{lgray},
+    basicstyle=\small\ttfamily,
+    keywordstyle=\underbar,
+    identifierstyle=,
+    commentstyle=\slshape,
+    stringstyle=,
+    showstringspaces=false,
+    keywords=,
+    sensitive=false,
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=1pt,
+    emphstyle=\bfseries,
+    belowskip=0pt,
+    aboveskip=0pt,
+    #1
+}}{\vspace{3mm}}
+
+
+\newcommand{\src}[1]{\texttt{#1}}
+
+\newcommand{\comment}[1]{{\textit{\textbf{#1}}}}
+
+
+\title{Cocoon Language Reference}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+
+%The second type of magic blocks are magic blocks with 
+%\emph{goals}.  These are needed because not all correctness 
+%conditions can be captured using postconditions and assertions.  
+%For correctness conditions specified using goals (see 
+%Section~\ref{s:o:correctness}), the synthesis algorithm computes a 
+%strategy for each goal; however the scheduling of strategies is 
+%left to the user, i.e., the user decides when to execute each 
+%strategy by assigning goals to magic blocks. \comment{TODO: I 
+%still have not figured out the exact meaning of this construct.}
+
+%\section{Constraints on the environment}
+
+\chapter{Syntax reference}\label{s:reference}
+
+\section{Top-level declarations}
+
+A cocoon specification is a sequence of refinements:
+\begin{bnflisting}{}
+<spec> := <refinement>*
+\end{bnflisting}
+
+A refinement declaration starts with a possibly empty list of names of roles that 
+are being refined.  These roles must be defined in the body of the refinement.
+The body of the refinement consists of type definitions, function declarations,
+role declarations, assumptions, and node declarations.
+\begin{bnflisting}{}
+<refinement> := "refine" [<identifier>(,<identifier>)*] 
+                "{"<decl>*"}"
+
+<decl> := <typeDef>
+        | <funcDecl>
+        | <roleDecl>
+        | <assumption>
+        | <nodeDecl>
+\end{bnflisting}
+
+\section{Types}
+
+Type definition introduces a new user-defined type.  This type is visible in all
+subsequent refinements.
+
+\begin{bnflisting}{}
+<typeDef> := "typedef" <typeSpec> <identifier>
+\end{bnflisting}
+
+\begin{bnflisting}{}
+<typeSpec> := <arrayType>
+            | <uintType>
+            | <boolType>
+            | <userType>
+            | <structType>
+\end{bnflisting}
+
+\begin{bnflisting}{}
+<uintType>   := "uint" "<" <decimal> ">"
+<boolType>   := "bool"
+<userType>   := <identifier>
+<arrayType>  := "[" <typeSpec> ";" <decimal> "]"
+<structType> := "struct" "{" 
+                 <field> ("," <field>)*
+                "}"
+<field> := <typeSpec> <identifier>
+\end{bnflisting}
+
+\section{Functions}
+
+Cocoon functions are pure.  A function can have optional definition.
+An undefined function can be defined in a subsequent refinement.  A
+defined function cannot be re-defined.
+
+\begin{bnflisting}{}
+<funcDecl> := "function" <identifier>"("[<arg>(,<arg>)*]")"
+              ":" <typeSpec> // return type
+              ["=" <expr>]   // optional function definition
+\end{bnflisting}
+
+\begin{bnflisting}{}
+<arg> := <typeSpec> <identifier>
+\end{bnflisting}
+
+Assumptions have the form $\forall x_1\ldots x_n . e$, 
+where $e$ is a boolean-valued expression that only depends on variables $x_i$ and
+may contain calls to one or more functions.
+When all functions referenced by the assumption become defined, the assumption can be
+validated.
+
+\begin{bnflisting}{}
+<assumption> = "assume" 
+           "("[<arg>(,<arg>)*]")" // universally-quantified vars
+           <expr>                 // bolean expression
+\end{bnflisting}
+
+\section{Expressions}
+
+
+\begin{bnflisting}{}
+<expr> := <term>
+        | "not" <expr>
+        | "(" <expr> ")"
+        | <expr> "%" <expr>
+        | <expr> "+" <expr>
+        | <expr> "-" <expr>
+        | <expr> ">>" <expr>
+        | <expr> "<<" <expr>
+        | <expr> "++" <expr>
+        | <expr> "==" <expr>
+        | <expr> "!=" <expr>
+        | <expr> "<" <expr>
+        | <expr> "<=" <expr>
+        | <expr> ">" <expr>
+        | <expr> ">=" <expr>
+        | <expr> "and" <expr>
+        | <expr> "or" <expr>
+        | <expr> "=>" <expr>
+        | <expr> "." <identifier> // struct field
+        | <expr> "["<decimal> "," <decimal>"]" // bit slice
+\end{bnflisting}
+
+\begin{bnflisting}{}
+<term> := <structTerm>   // struct given by listing its fields
+        | <applyTerm>    // user-defined function call
+        | <builtinTerm>  // builtin function call
+        | <instanceTerm> // role instance (used in send statements)
+        | <intTerm>      // integer constant
+        | <boolTerm>     // boolean constant
+        | <packetTerm>   // special packet variable
+        | <varTerm>      // variable reference: role key or local var
+        | <dotvarTerm>   // dot-variable reference
+        | <condTerm>     // case split
+\end{bnflisting}
+
+\begin{bnflisting}{}
+<structTerm>   := <identifier> "{" <expr> (,<expr>)* "}"
+<applyTerm>    := <identifier> "(" [<expr> (,<expr>)*] ")"
+<builtinTerm>  := <identifier> "!" "(" [<expr> (,<expr>)*] ")"
+<instanceTerm> := <identifier> "[" [<expr> (,<expr>)*] "]"
+<boolTerm>     := "true" | "false"
+<packetTerm>   := "pkt"
+<varTerm>      := <identifier>
+<dotvarTerm>   := "." <identifier>
+<condTerm>     := "case" "{"
+                  (<expr> ":" <expr> ";")*
+                  "default" ":" <expr> ";"
+                  "}"
+<intTerm>      := [<width>] "'d" <decimal>
+                | [<width>] "'h" <hexadecimal>
+                | [<width>] "'o" <octal>
+                | [<width>] "'b" <binary>
+<width> := <decimal>
+\end{bnflisting}
+
+\section{Roles}
+
+\begin{bnflisting}{}
+<roleDecl> := "role" <identifier> 
+              "("[<arg>(,<arg>)*]")" // role keys
+              ["|" <expr>]    // constraint on role keys
+              ["/" <expr>]    // constraint on input packets
+              "=" <stat>      // role body
+\end{bnflisting}
+
+\section{Statements}
+
+\begin{bnflisting}{}
+<stat> := <test> 
+        | <ite>
+        | <send>
+        | <sendNondet>
+        | <set>
+        | <havoc>
+        | <assume>
+        | <let>           // local variable declaration
+        | <fork>
+        | "{" <stat> "}"
+        | "(" <stat> ")"
+        | <stat> ";" <stat>
+
+<test>       := "filter" <expr>
+<sendNondet> := "?" "send" <identifier> "[" <expr> "]"
+<send>       := "send" <expr> // expression must return role instance
+<set>        := <expr> ":=" <expr>
+<ite>        := "if" <expr> "then" <stat> ["else" <stat>]
+<havoc>      := "havoc" <expr>
+<assume      := "assume" <expr>
+<let>        := "let" <typeSpec> <identifier> "=" <expr>
+<fork>       := "fork" "(" <arg> (,<arg>)* "|" <expr> ")" <stat>
+\end{bnflisting}
+
+\section{Nodes}
+
+There are two types of nodes: switches and hosts.  
+
+\begin{bnflisting}{}
+<nodeDecl> := ("switch" | "host") <identifier> "(" 
+              "(" <identifier> "," <identifier> ")" // list of in/out port pairs
+              ("," "(" <identifier> "," <identifier> ")")*
+              ")"
+\end{bnflisting}
+
+
+\end{document}
