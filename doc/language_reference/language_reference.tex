@@ -22,13 +22,14 @@
 %\usepackage[T1]{fontenc}
 
 \definecolor{lgray}{gray}{0.9}
+\definecolor{lyellow}{cmyk}{0,0,0.3,0}
 
 \usepackage{listings}
 
 \lstnewenvironment{ccnlisting}[1]
 {\vspace{3mm}
  \lstset{
-    backgroundcolor=\color{lgray},
+    backgroundcolor=\color{lyellow},
     basicstyle=\small\ttfamily, 
 %    keywordstyle=\bfseries,
     keywordstyle=\underbar,
@@ -149,6 +150,40 @@ role declarations, assumptions, and node declarations.
         | <nodeDecl>
 \end{bnflisting}
 
+\subsection*{Example}
+
+\begin{ccnlisting}{}
+(* This refinement provides a new implementation of the HostOut role.
+   It can also define new roles; however it cannot re-define other 
+   previously defined roles that do not appear *)
+refine HostOut{ 
+
+    (* Uninterpreted function declaration *)
+    function nCoreRedundant(): uint<8>
+    
+    (* Interpreted function declaration *)
+    function iTORPort(TORPortId port): bool = 
+        iTOR(port.pod, port.tor) and port.port < nTORPorts()
+
+    (* Assumption *)
+    assume (HostPortId hport) 
+           iHostPort(hport) => iTORPort(hostSwitchConnection(hport))
+
+    (* Role refined by this refinement *)
+    role HostOut[HostId hst, uint<8> port] 
+    | iHostPort(HostPortId{hst, port}) = 
+        let TORPortId swport = hostSwitchConnection(HostPortId{hst, port});
+        send TORIn[swport.pod, swport.tor, swport.port]
+
+    (* New role *)
+    role TORIn[uint<8> pod, uint<8> tor, uint<8> port] 
+    | iTORPort(TORPortId{pod, tor, port}) = 
+        ...
+}
+\end{ccnlisting}
+    
+
+
 \section{Types}
 
 Type definition introduces a new user-defined type.  This type is visible in all
@@ -177,6 +212,26 @@ subsequent refinements.
 <field> := <typeSpec> <identifier>
 \end{bnflisting}
 
+Note:
+\begin{itemize}
+    \item Every complete cocoon specification must declare \texttt{Packet} type.
+        It must match packet headers supported by the target backend.
+\end{itemize}
+
+\subsection*{Example}
+
+\begin{ccnlisting}{}
+typedef struct {
+    uint<48> dstAddr,
+    uint<48> srcAddr
+} eth_t
+
+typedef uint<12> VLANId
+
+typedef [bool; 3] PIP // array of 3 booleans
+\end{ccnlisting}
+
+
 \section{Functions}
 
 Cocoon functions are pure.  A function can have optional definition.
@@ -204,6 +259,24 @@ validated.
            "("[<arg>(,<arg>)*]")" // universally-quantified vars
            <expr>                 // bolean expression
 \end{bnflisting}
+
+\subsection*{Examples}
+
+\begin{ccnlisting}{}
+(* Uninterpreted function declaration *)
+function vHostLocation(VHostId vhost): HostId
+
+(* Assumption restricting possible values of the uninterpreted function *)
+assume (VHostId vhost) iVHost(vhost) => iHost(vHostLocation(vhost))
+
+...
+
+(* Uninterpreted function is defined in one of subsequent refinements *)
+function vHostLocation(VHostId vhost): HostId = case {
+        vhost == 32'd0 or vhost == 32'd2 or vhost == 32'd4: 48'd0;
+        default: 48'd1;
+    }
+\end{ccnlisting}
 
 \section{Expressions}
 
@@ -274,6 +347,54 @@ validated.
               "=" <stat>      // role body
 \end{bnflisting}
 
+\subsection*{Example}
+
+\begin{ccnlisting}{}
+(* Role with two keys *)
+role VSwitchIn[HostId hst, uint<16> vport] | iVSwitchPort(hst, vport) = 
+    (* Local variable declaration: binding *)
+    let VHPortId from_vhport = vSw2HLink(hst, vport);
+    if (iNFVHost(from_vhport.vhost) and (not (pkt.eth.dstAddr == bCastMAC()))) or 
+       pkt.eth.srcAddr == vHPort2Mac(from_vhport) then {
+        let VNetId vnet = vSwPortVNet(hst, vport);
+        if bCastMAC() == pkt.eth.dstAddr then {
+            fork(HostId dhst | iHost(dhst) and hHostsVNet(dhst, vnet)) {
+                if dhst == hst then {
+                    pkt.vlan.vid := 12'd0;
+                    fork(VHPortId vhport | iVHostPort(vhport) and 
+                                           vHPortVNet(vhport) == vnet and 
+                                           vHostLocation(vhport.vhost) == hst and 
+                                           vH2SwLink(vhport) != vport and
+                                           connection(from_vhport, vhport)) {
+                        send VSwitchOut[hst, vH2SwLink(vhport)]
+                    }
+                } else {
+                    pkt.vlan.vid := vnet;
+                    send VSwitchTunOut[hst, tunPort(hst, dhst)]
+                }
+            }
+        } else {
+            let VHPortId to_vhport = nextHop(pkt.eth, from_vhport);
+            if iVHostPort(to_vhport) and connection(from_vhport, to_vhport) then {
+                if (vHostLocation(to_vhport.vhost) == hst) then { 
+                    (* Local destination -- deliver *)
+                    pkt.vlan.vid := 12'd0;
+                    pkt.vlan.pcp := 3'd0;
+                    send VSwitchOut[hst, vH2SwLink(to_vhport)]
+                } else {
+                    (* Remote destination -- encapsulate *)
+                    pkt.vlan.vid := vnet;
+                    pkt.vlan.pcp := label(pkt.eth, from_vhport);
+                    send VSwitchTunOut[hst, 
+                                       tunPort(hst, 
+                                               vHostLocation(to_vhport.vhost))]
+
+                }
+            }
+        }
+    }
+\end{ccnlisting}
+
 \section{Statements}
 
 \begin{bnflisting}{}
@@ -296,10 +417,50 @@ validated.
 <set>        := <expr> ":=" <expr>
 <ite>        := "if" <expr> "then" <stat> ["else" <stat>]
 <havoc>      := "havoc" <expr>
-<assume      := "assume" <expr>
+<assume>     := "assume" <expr>
 <let>        := "let" <typeSpec> <identifier> "=" <expr>
 <fork>       := "fork" "(" <arg> (,<arg>)* "|" <expr> ")" <stat>
 \end{bnflisting}
+
+Note:
+\begin{itemize}
+    \item Only fields of the special \texttt{pkt} variable can be modified 
+        with \texttt{:=} or \texttt{havoc}.
+    \item Every field can be modified at most once by a role.  Packet fields
+        that are not modified by the role keep their input values.        
+    \item Local variables are declared and assigned at the same time using 
+        \texttt{let}.  Their values never change.
+\end{itemize}
+
+\subsection*{Examples}
+
+\begin{ccnlisting}{}
+filter false (* drop all packets *)
+\end{ccnlisting}
+
+\begin{ccnlisting}{}
+filter true (* no-op *)
+\end{ccnlisting}
+
+\begin{ccnlisting}{}
+(* Role with two keys: as and port *)
+role ASSDXIn[ASId as, ASPort port] | iASPort(as, port) = filter false
+
+...
+
+(* Multicast packet to all instances of role ASSDXIn, whose "as" key satisfies the
+   condition prefixMatch(.as, pkt.ip4.dst), where .as refers to the as key
+   of ASSDXIn, and pkt.ip4.dst is the destination IP of the packet.  *)
+?send ASSDXIn[prefixMatch(.as, pkt.ip4.dst)]
+
+(* Unicast to a single instance of ASSDXIn *)
+send ASSDXIn[defdst, inboundPolicy(defdst, pkt.ip4)]
+\end{ccnlisting}
+
+\begin{ccnlisting}{}
+(* Assign the mtag header of the packet *)
+pkt.mtag := computeMTag(pod, tor, dstAddr)
+\end{ccnlisting}
 
 \section{Nodes}
 
