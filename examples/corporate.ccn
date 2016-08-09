@@ -1,0 +1,145 @@
+(* TODO: external hosts, NAT *)
+
+typedef uint<32> IP4
+typedef uint<48> MAC
+
+function bcastAddr(): MAC = 48'hffffffffffff
+
+typedef struct {
+    uint<16> etherType,
+    MAC dstAddr,
+    MAC srcAddr
+} eth_t
+
+function etherTypeIP4(): uint<16> = 16'h0800
+
+typedef struct {
+    uint<8> protocol,
+    IP4 src,
+    IP4 dst
+} ip4_t
+
+typedef uint<12> vid_t
+
+typedef struct {
+    vid_t vid
+} vlan_t
+
+typedef struct {
+    eth_t    eth,
+    vlan_t   vlan,
+    ip4_t    ip
+} Packet
+
+typedef uint<64> hid_t
+
+function cHost(hid_t hid): bool
+function cVlan(vid_t vid): bool
+function vidRouter(vid_t vid): MAC
+assume (vid_t vid) cVlan(vid) => (not cMAC(vidRouter(vid)))
+assume (vid_t vid) cVlan(vid) => (vid != 12'd0)
+
+function ip2vid(IP4 ip): vid_t
+function hid2ip(hid_t hid): IP4
+function ip2hid(IP4 ip): hid_t
+assume (hid_t hid) cHost(hid) => (ip2hid(hid2ip(hid)) == hid)
+assume (IP4 ip) cHost(ip2hid(ip)) => (hid2ip(ip2hid(ip)) == ip)
+
+function mac2hid(MAC mac): hid_t
+function hid2mac(hid_t hid): MAC
+assume (hid_t hid) cHost(hid) => (mac2hid(hid2mac(hid)) == hid)
+assume (MAC mac) cHost(mac2hid(mac)) => (hid2mac(mac2hid(mac)) == mac)
+
+function ip2mac(IP4 ip): MAC = hid2mac(ip2hid(ip))
+function mac2ip(MAC mac): IP4 = hid2ip(mac2hid(mac))
+function mac2vid(MAC mac): vid_t = ip2vid(mac2ip(mac))
+
+function hid2vid(hid_t hid): vid_t = ip2vid(hid2ip(hid))
+assume (hid_t hid) cHost(hid) => cVlan(hid2vid(hid))
+
+function cIP(IP4 ip): bool = cHost(ip2hid(ip))
+function cMAC(MAC mac): bool = cHost(mac2hid(mac))
+
+function acl(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool
+
+role Broadcast[hid_t hid] | cHost(hid) / pkt.eth.dstAddr == bcastAddr() = 
+    fork(hid_t dsthid | hid2vid(dsthid) == hid2vid(hid)) {
+        send HostIn[dsthid]
+    } 
+
+role LocalUnicast[hid_t hid] | cHost(hid) = 
+    filter cMAC(pkt.eth.dstAddr) and mac2vid(pkt.eth.dstAddr) == hid2vid(hid);
+    send HostIn[mac2hid(pkt.eth.dstAddr)]
+
+role GlobalUnicast[hid_t hid] | cHost(hid) = 
+    filter pkt.eth.etherType == etherTypeIP4();
+    let hid_t dhid = ip2hid(pkt.ip.dst);
+    let vid_t dvid = ip2vid(pkt.ip.dst);
+    let vid_t vid = hid2vid(hid);
+    filter ip2vid(pkt.ip.src) == vid and dvid != vid;
+    filter acl(vid, dvid, pkt.ip);
+    filter cHost(dhid);
+    pkt.vlan.vid := 12'd0;
+    pkt.eth.dstAddr := ip2mac(pkt.ip.dst);
+    send HostIn[dhid]
+
+role HostOut[hid_t hid] | cHost(hid) =
+    filter pkt.vlan.vid == 12'd0;
+    if pkt.eth.dstAddr == bcastAddr() then {
+        send Broadcast[hid]
+    } else if pkt.eth.dstAddr == vidRouter(hid2vid(hid)) then {
+        send GlobalUnicast[hid]
+    } else {
+        send LocalUnicast[hid]
+    }
+
+role HostIn[hid_t hid] | cHost(hid) = filter false
+
+(* Introduce dedicated routers for subnets *)
+refine GlobalUnicast {
+    function aclSrc(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool
+    function aclDst(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool
+    assume (vid_t svid, vid_t dvid, ip4_t ip) (aclSrc(svid, dvid, ip) and aclDst(svid, dvid, ip)) == acl(svid, dvid, ip)
+
+    role OutGateway[vid_t vid] | cVlan(vid) = 
+        filter pkt.eth.etherType == etherTypeIP4();
+        filter pkt.vlan.vid == vid;
+        let vid_t svid = ip2vid(pkt.ip.src);
+        let vid_t dvid = ip2vid(pkt.ip.dst);
+        (* Sender is not lying about their subnet *)
+        filter svid == vid;
+        (* Destination vid exists and is different from source subnet *)
+        filter cVlan(dvid) and dvid != vid;
+        filter aclSrc(svid, dvid, pkt.ip);
+        pkt.vlan.vid := 12'd0;
+        send InGateway[dvid]
+
+    role InGateway[vid_t vid] | cVlan(vid) = 
+        filter pkt.eth.etherType == etherTypeIP4();
+        filter pkt.vlan.vid == 12'd0;
+        let vid_t svid = ip2vid(pkt.ip.src);
+        let vid_t dvid = ip2vid(pkt.ip.dst);
+        filter dvid == vid;
+        filter aclDst(svid, dvid, pkt.ip);
+        (*pkt.vlan.vid := dvid;*)
+        pkt.eth.dstAddr := ip2mac(pkt.ip.dst);
+        filter cIP(pkt.ip.dst);
+        send HostIn[ip2hid(pkt.ip.dst)]            
+
+    role GlobalUnicast[hid_t hid] | cHost(hid) = 
+        let vid_t vid = hid2vid(hid);
+        pkt.vlan.vid := vid;
+        send OutGateway[vid]
+}
+
+(* Introduce L3 routing *)
+refine {
+}
+
+
+
+refine {
+    function cHost(hid_t hid): bool = hid == 64'd1 or hid == 64'd2
+    function cVlan(vid_t vid): bool = vid == 12'd1 or vid == 12'd2
+
+}
