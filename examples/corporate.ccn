@@ -49,6 +49,7 @@ function mac2hid(MAC mac): hid_t
 function hid2mac(hid_t hid): MAC
 assume (hid_t hid) cHost(hid) => (mac2hid(hid2mac(hid)) == hid)
 assume (MAC mac) cHost(mac2hid(mac)) => (hid2mac(mac2hid(mac)) == mac)
+assume (IP4 ip) ip2mac(ip) != bcastAddr()
 
 function ip2mac(IP4 ip): MAC = hid2mac(ip2hid(ip))
 function mac2ip(MAC mac): IP4 = hid2ip(mac2hid(mac))
@@ -63,12 +64,11 @@ function cMAC(MAC mac): bool = cHost(mac2hid(mac))
 function acl(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool
 
 role HostOut[hid_t hid] | cHost(hid) =
-    pkt.vlan.vid := 12'd0;
-    if pkt.eth.dstAddr == bcastAddr() then {
+    (*if pkt.eth.dstAddr == bcastAddr() then {
         fork(hid_t dsthid | hid2vid(dsthid) == hid2vid(hid)) {
             send HostIn[dsthid]
         } 
-    } else if pkt.eth.dstAddr == vidRouterMAC(hid2vid(hid)) then {
+    } else *) if pkt.eth.dstAddr == vidRouterMAC(hid2vid(hid)) then {
         filter pkt.eth.etherType == etherTypeIP4();
         let hid_t dhid = ip2hid(pkt.ip.dst);
         let vid_t dvid = ip2vid(pkt.ip.dst);
@@ -77,8 +77,10 @@ role HostOut[hid_t hid] | cHost(hid) =
         filter acl(vid, dvid, pkt.ip);
         filter cHost(dhid);
         pkt.eth.dstAddr := ip2mac(pkt.ip.dst);
+        pkt.vlan.vid := 12'd0;
         send HostIn[dhid]
     } else {
+        pkt.vlan.vid := 12'd0;
         filter cMAC(pkt.eth.dstAddr) and mac2vid(pkt.eth.dstAddr) == hid2vid(hid);
         send HostIn[mac2hid(pkt.eth.dstAddr)]
     }
@@ -118,12 +120,11 @@ refine HostOut {
         send HostIn[ip2hid(pkt.ip.dst)]
 
     role HostOut[hid_t hid] | cHost(hid) =
-        if pkt.eth.dstAddr == bcastAddr() then {
-            pkt.vlan.vid := 12'd0;
+(*        if pkt.eth.dstAddr == bcastAddr() then {
             fork(hid_t dsthid | hid2vid(dsthid) == hid2vid(hid)) {
                 send HostIn[dsthid]
             } 
-        } else if pkt.eth.dstAddr == vidRouterMAC(hid2vid(hid)) then {
+        } else *)if pkt.eth.dstAddr == vidRouterMAC(hid2vid(hid)) then {
             let vid_t vid = hid2vid(hid);
             pkt.vlan.vid := vid;
             send OutGateway[vid]
@@ -168,6 +169,7 @@ refine OutGateway {
     function pid2mac(pid_t pid): MAC
     function mac2pid(MAC mac): pid_t
     assume (pid_t pid) cConnectedRouterPort(pid) => (mac2pid(pid2mac(pid)) == pid)
+    assume (pid_t pid) pid2mac(pid) != bcastAddr()
     assume (MAC mac) cConnectedRouterPort(mac2pid(mac)) => (pid2mac(mac2pid(mac)) == mac)
     assume (vid_t vid) cVlan(vid) => cConnectedRouterPort(mac2pid(vidRouterMAC(vid)))
 
@@ -185,11 +187,9 @@ refine OutGateway {
 
     (* Router can send packets with vid==0 to other routers with interfaces in the same zone *)
     role RouterOut[hid_t rid, uint<16> port] | cRouterPort(pid_t{rid, port}) = 
-        if pkt.vlan.vid == 12'd0 then {
-            let pid_t dstpid = mac2pid(pkt.eth.dstAddr);
-            filter cConnectedRouterPort(dstpid) and routerPortZone(dstpid) == routerPortZone(pid_t{rid, port});
-            send RouterIn[dstpid.hid, dstpid.port]
-        } 
+        let pid_t dstpid = mac2pid(pkt.eth.dstAddr);
+        filter cConnectedRouterPort(dstpid) and routerPortZone(dstpid) == routerPortZone(pid_t{rid, port});
+        send RouterIn[dstpid.hid, dstpid.port]
 
     role RouterIn[hid_t rid, uint<16> port] | cRouterPort(pid_t{rid, port}) = 
         filter pkt.eth.etherType == etherTypeIP4();
@@ -218,41 +218,95 @@ refine OutGateway {
 
 
 (* L2 switching *)
-(*
-refine HostOut {
-
+refine HostOut, RouterOut {
     function cSwitch(hid_t sid): bool
     assume (hid_t sid) cSwitch(sid) => not cHost(sid)
     assume (hid_t rid) cRouter(rid) => cSwitch(rid)
-    assume (hid_t rid) cHost(hid) => not cSwitch(hid)
 
-    function cPort(pid_t pid): bool = (cSwitch(pid.hid) and pid.port < nPorts(hid)) or (cHost(pid.hid) and port == 16'd0)
+    function cPort(pid_t pid): bool = cSwitchPort(pid) or cHostPort(pid)
+    function cConnectedPort(pid_t pid): bool = cPort(pid) and portConnected(pid)
+
+    function cSwitchPort(pid_t pid): bool = cSwitch(pid.hid) and pid.port < nPorts(pid.hid)
+    function cConnectedSwitchPort(pid_t pid): bool = cSwitchPort(pid) and portConnected(pid)
+
+    function cHostPort(pid_t pid): bool = cHost(pid.hid) and pid.port == 16'd0
+    function cConnectedHostPort(pid_t pid): bool = cHostPort(pid) and portConnected(pid)
+    assume (pid_t pid) cHostPort(pid) => portConnected(pid)
+
     function link(pid_t pid): pid_t
-    assume (pid_t pid) (cPort(pid) and portConnected(pid)) => (cPort(link(pid)) and portConnected(link(pid)) and (link(link(pid)) == pid))
+    assume (pid_t pid) cConnectedPort(pid) => cConnectedPort(link(pid))
+    assume (pid_t pid) cConnectedPort(pid) => (link(link(pid)) == pid)
+    assume (pid_t pid) cConnectedHostPort(pid) => cSwitchPort(link(pid))
 
-    assume (vid_t vid) cVlan(vid) => cRouter(routerPort(vid))
+    function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16>
+    assume (hid_t sid, vid_t vid, MAC dst) cSwitch(sid) => cSwitchPort(pid_t{sid, l2NextHop(sid, vid, dst)})
 
-    role SwitchIn[hid_t sid, uint<16> port] | cSwitch(sid) and port < nPorts(sid) = 
+    function linkTrans1(hid_t sid, MAC dst): bool = sid == mac2pid(dst).hid or
+                                                    (cSwitch(sid) and 
+                                                     portConnected(pid_t{sid, l2NextHop(sid, 12'd0, dst)}) and
+                                                     (link(pid_t{sid, l2NextHop(sid, 12'd0, dst)}) == mac2pid(dst)))
+    function linkTrans2(hid_t sid, MAC dst): bool = sid == mac2pid(dst).hid or
+                                                    (cSwitch(sid) and
+                                                     portConnected(pid_t{sid, l2NextHop(sid, 12'd0, dst)}) and
+                                                     linkTrans1(link(pid_t{sid, l2NextHop(sid, 12'd0, dst)}).hid, dst))
+    assume (pid_t pid, MAC dst)
+           (cRouterPort(pid) and cRouterPort(mac2pid(dst)) and routerPortZone(mac2pid(dst)) == routerPortZone(pid)) =>
+           linkTrans2(link(pid).hid, dst)
+
+    function vlinkTrans1(hid_t sid, vid_t vid, MAC dst): bool = (sid == mac2hid(dst)) or
+                                                                (cSwitch(sid) and 
+                                                                 portConnected(pid_t{sid, l2NextHop(sid, vid, dst)}) and
+                                                                 (link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid == mac2hid(dst)))
+    function vlinkTrans2(hid_t sid, vid_t vid, MAC dst): bool = (sid == mac2hid(dst)) or
+                                                                (cSwitch(sid) and 
+                                                                 portConnected(pid_t{sid, l2NextHop(sid, vid, dst)}) and
+                                                                 vlinkTrans1(link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid, vid, dst))
+    assume (hid_t hid, vid_t vid, MAC dst)
+           (cHost(hid) and hid2vid(hid) == vid and mac2vid(dst) == vid) =>
+           vlinkTrans2(link(pid_t{hid, 16'd0}).hid, vid, dst)
+
+    function gwlinkTrans1(hid_t sid, vid_t vid): bool = (sid == vidRouter(vid)) or
+                                                        (cSwitch(sid) and 
+                                                         portConnected(pid_t{sid, l2NextHop(sid, vid, vidRouterMAC(vid))}) and
+                                                         (link(pid_t{sid, l2NextHop(sid, vid, vidRouterMAC(vid))}).hid == vidRouter(vid)))
+    function gwlinkTrans2(hid_t sid, vid_t vid): bool = (sid == vidRouter(vid)) or
+                                                        (cSwitch(sid) and 
+                                                         portConnected(pid_t{sid, l2NextHop(sid, vid, vidRouterMAC(vid))}) and
+                                                         gwlinkTrans1(link(pid_t{sid, l2NextHop(sid, vid, vidRouterMAC(vid))}).hid, vid))
+    assume (hid_t hid, vid_t vid)
+           (cHost(hid) and hid2vid(hid) == vid) =>
+           gwlinkTrans2(link(pid_t{hid, 16'd0}).hid, vid)
+
+    role SwitchIn[hid_t sid, uint<16> port] | cSwitchPort(pid_t{sid,port}) = 
         let pid_t srcport = link(pid_t{sid, port});
+        (* tag packet if coming from end host *)
         if cHost(srcport.hid) then {
-            pkt.vlan.vid := hid2vid(srcport.hid);
-        } 
-        if cRouter(pid_t{sid,port}) and 
-           pkt.vlan.vid != 12'd0 and 
-           vidRouter(pkt.vlan.vid) == vid and 
-           pkt.eth.dstAddr == vidRouterMAC(pkt.vlan.vid) then {
-        } else if cRouter(pid_t{sid,port}) and 
-                  pkt.vlan.vid == 12'd0 and 
-                  vidRouter(pkt.vlan.vid) == vid and 
-                  pkt.eth.dstAddr == vidRouterMAC(pkt.vlan.vid) then {
-        } else {
-            send SwitchOut[sid, nextHop(pkt.vlan.vid, pkt.eth.dstAddr)]
+            pkt.vlan.vid := hid2vid(srcport.hid)
+        };
+        if cRouter(sid) and 
+           pkt.vlan.vid == 12'd0 and
+           pid2mac(pid_t{sid,port}) == pkt.eth.dstAddr then {
+            (*if this is a router and this packet is for this router then send it to the router *)
+            send RouterIn[sid, port]
+        } else if cRouter(sid) and
+                  pkt.vlan.vid != 12'd0 and
+                  pkt.eth.dstAddr == vidRouterMAC(pkt.vlan.vid) and
+                  sid == vidRouter(pkt.vlan.vid) then {
+            (* if this is an OutGateway and this packet is an outbound packet, deliver to the gateway *)
+            send OutGateway[pkt.vlan.vid]
+        } (*else if pkt.eth.dstAddr == bcastAddr() then {
+            fork(hid_t dsthid | hid2vid(dsthid) == hid2vid(srcport.hid)) {
+                send HostIn[dsthid]
+            } 
+        } *) else {
+            (* Otherwise, apply l2 routing policy *)
+            send SwitchOut[sid, l2NextHop(sid, pkt.vlan.vid, pkt.eth.dstAddr)]
         }
 
-    role SwitchOut[hid_t sid, uint<16> port] | cSwitch(sid) and port < nPorts(sid) = 
+    role SwitchOut[hid_t sid, uint<16> port] | cSwitchPort(pid_t{sid,port}) = 
         filter portConnected(pid_t{sid,port});
         let pid_t dstport = link(pid_t{sid, port});
-        if cHost(dstport.hid) then {
+        if cHostPort(dstport) then {
             pkt.vlan.vid := 12'd0;
             send HostIn[dstport.hid]
         } else {
@@ -260,18 +314,27 @@ refine HostOut {
         }
         
     role HostOut[hid_t hid] | cHost(hid) = 
-        if portConnected(pid_t{hid, 16'd0}) then {
-            let swport = link(pid_t{hid, 16'd0});
-            send SwitchIn[swport.hid, swport.port]
-        }
+        filter portConnected(pid_t{hid, 16'd0});
+        let pid_t swport = link(pid_t{hid, 16'd0});
+        send SwitchIn[swport.hid, swport.port]
+
+    role RouterOut[hid_t rid, uint<16> port] | cRouterPort(pid_t{rid, port}) = 
+        send SwitchOut[rid, port (*l2NextHop(rid, 12'd0, pkt.eth.dstAddr)*)]
 }
-*)
+
+(* Combine L2 and L3 switching *)
+(*
+refine {
+    assume (hid_t rid) cRouter(rid) => cSwitch(rid)
+    assume (vid_t vid) cVlan(vid) => cRouter(routerPort(vid))
+} *)
 
 refine {
     function cHost(hid_t hid): bool = hid == 64'd1 or hid == 64'd2
     function cVlan(vid_t vid): bool = vid == 12'd1 or vid == 12'd2
 
     function cRouter(hid_t rid): bool = rid == 64'd10000001 or rid == 64'd10000002
+    function cSwitch(hid_t sid): bool = cRouter(sid)
     function nPorts(hid_t hid): uint<16> = 16'd32
 
 }
