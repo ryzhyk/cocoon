@@ -302,11 +302,11 @@ stest   = STest   nopos <$ reserved "filter" <*> expr
 ssendnd = SSendND nopos <$ reservedOp "?" <* reserved "send" <*> identifier <*> (brackets expr)
 ssend   = SSend   nopos <$ reserved "send" <*> expr
 sset    = SSet    nopos <$> expr <*> (reservedOp ":=" *> expr)
-site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat) <*> (optionMaybe $ reserved "else" *> stat)
+site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat') <*> (optionMaybe $ reserved "else" *> stat')
 shavoc  = SHavoc  nopos <$ reserved "havoc" <*> expr
 sassume = SAssume nopos <$ reserved "assume" <*> expr
 slet    = SLet    nopos <$ reserved "let" <*> typeSpec <*> identifier <*> (reservedOp "=" *> expr)
-sfork   = (\(vs,c) st -> SFork nopos vs c st) <$ reserved "fork" <*> (parens $ (,) <$> (commaSep1 arg) <*> (reservedOp "|" *> expr)) <*> stat
+sfork   = (\(vs,c) st -> SFork nopos vs c st) <$ reserved "fork" <*> (parens $ (,) <$> (commaSep1 arg) <*> (reservedOp "|" *> expr)) <*> stat'
 
 stable = [ [sbinary ";" SSeq AssocRight]
          , [sbinary "|" SPar AssocRight]
