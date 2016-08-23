@@ -106,6 +106,7 @@ main = do
     combined <- case validate spec of
                      Left e   -> fail $ "Validation error: " ++ e
                      Right rs -> return rs
+    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
     let final = last combined
     putStrLn "Validation complete"
 

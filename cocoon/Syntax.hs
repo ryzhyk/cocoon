@@ -66,6 +66,21 @@ instance WithPos Refine where
     pos = refinePos
     atPos r p = r{refinePos = p}
 
+instance PP Refine where
+    pp Refine{..} = (pp "refine" <+> (hcat $ punctuate comma $ map pp refineTarget) <+> lbrace)
+                    $$
+                    (nest' $ (vcat $ map pp refineTarget)
+                             $$
+                             (vcat $ map pp refineFuncs)
+                             $$
+                             (vcat $ map pp refineAssumes)
+                             $$
+                             (vcat $ map pp refineRoles)
+                             $$
+                             (vcat $ map pp refineNodes))
+                    $$
+                    rbrace
+
 errR :: (MonadError String me) => Refine -> Pos -> String -> me a
 errR r p e = throwError $ spos p ++ ": " ++ e ++ " (when processing refinement at " ++ (spos $ pos r) ++ ")"
 
@@ -111,6 +126,12 @@ instance WithPos Role where
 instance WithName Role where
     name = roleName
 
+instance PP Role where
+    pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ hcat $ punctuate comma $ map pp roleKeys)
+                   <> pp "|" <+> pp roleKeyRange <+> pp "/" <+> pp rolePktGuard <+> pp "=")
+                  $$
+                  (nest' $ pp roleBody)
+
 data NodeType = NodeSwitch
               | NodeHost
               deriving Eq
@@ -133,6 +154,14 @@ instance WithPos Node where
 
 instance WithName Node where
     name = nodeName
+
+instance PP Node where
+    pp Node{..} = case nodeType of
+                       NodeSwitch -> pp "switch"
+                       NodeHost   -> pp "host"
+                  <+>
+                  (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
+
 
 data Assume = Assume { assPos  :: Pos
                      , assVars :: [Field]
@@ -170,6 +199,12 @@ instance WithPos Function where
 
 instance WithName Function where
     name = funcName
+
+instance PP Function where
+    pp Function{..} = (pp "function" <+> pp funcName <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) <> colon <+> pp funcType <>
+                       maybe empty (\_ -> pp "=") funcDef)
+                      $$
+                      maybe empty (nest' . pp) funcDef
 
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
