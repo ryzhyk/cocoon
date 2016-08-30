@@ -1,0 +1,4 @@
+#!/bin/bash
+
+./gen_purdue.py > tmp.prd && echo "generated network" &&\
+time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide tmp.prd
