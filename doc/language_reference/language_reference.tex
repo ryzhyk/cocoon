@@ -492,7 +492,7 @@ There are two types of nodes: switches and hosts.
 
 \textrm{case body} & cbod & = & \cdot \mid \textrm{$e_1$ : $e_2$; } cbod \\
 \textrm{expression} & e & = & \texttt{not}~e \mid e_1 \otimes e_2 \mid e \texttt{.} id \mid e \texttt{[$n$, $n$]} \\
-              &   &   &  \mid \texttt{$id$\{$es$\}} \mid \texttt{$id$($es$)} \mid \texttt{$id$!($es$)} \mid \texttt{$id$ [ $es$ ]} \\
+              &   &   &  \mid \texttt{$id$\{$es$\}} \mid \texttt{$id$($es$)} \mid \texttt{$id$!($es$)} \mid \texttt{$id$[$es$]} \\
               &   &   &  \mid \texttt{true} \mid \texttt{false} \mid \texttt{pkt} \mid id \mid \texttt{.$id$} \\
               &   &   &  \mid \texttt{case \{$cbod$; default : $e$ ; \}} \mid \texttt{ [$n$]~'d~n } \\
               & es & = & e \mid e, es \\
@@ -501,7 +501,7 @@ There are two types of nodes: switches and hosts.
                                  \mid id
                                  \mid \texttt{[} \tau \texttt{;} n \texttt{]}
                                  \mid \texttt{struct \{} \textit{args} \texttt{\}} \\
-\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$} \mid \texttt{?send $id$ [$e$]} \mid \texttt{send $d$} \\
+\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$} \mid \texttt{?send $id$[$e$]} \mid \texttt{send $e$} \\
                    &   &   & \mid e_3 \texttt{:=} e_2 \mid \texttt{if $e$ then $a_1$} \mid \texttt{if $e$ then $a_1$ else $a_2$} \\
                    &   &   & \mid \texttt{havoc $e$} \mid \texttt{assume $e$} \mid \texttt{let $\tau$ $id$ = $e$} \mid \texttt{fork ($args$ | $e$) $a$} \\
                    & as & = & a \mid a, as \\
