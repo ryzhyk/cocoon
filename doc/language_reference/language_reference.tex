@@ -485,15 +485,14 @@ There are two types of nodes: switches and hosts.
 \textrm{identifier} & id & & \\
                     & ids & = & id \mid id, ids \\ [6pt]
 
-\textrm{argument} & arg & = & \tau~id \\
-                  & args & = & arg \mid arg, args \\
-\textrm{fields} & \textit{fields} & = & \tau~id \mid \tau~id, fs \\
+\textrm{arguments}
+                  & args & = & \tau~id \mid \tau~id, args \\
 \textrm{port pairs} & ps & = & \texttt{($id$, $id$)} \mid \texttt{($id$, $id$)}, ps \\
 \textrm{role constraints} & cs & = & \cdot \mid \texttt{|~$e$} \mid \texttt{/~$e$} \mid \texttt{|~$e$}~\texttt{/~$e$} \\ [6pt]
 
 \textrm{case body} & cbod & = & \cdot \mid \textrm{$e_1$ : $e_2$; } cbod \\
 \textrm{expression} & e & = & \texttt{not}~e \mid e_1 \otimes e_2 \mid e \texttt{.} id \mid e \texttt{[$n$, $n$]} \\
-              &   &   &  \mid \texttt{$id$\{$es$\}} \mid \texttt{$id$($es$)} \mid \texttt{$id$!($es$)} \mid \texttt{$id$ [ $es$ ]} \\
+              &   &   &  \mid \texttt{$id$\{$es$\}} \mid \texttt{$id$($es$)} \mid \texttt{$id$!($es$)} \mid \texttt{$id$[$es$]} \\
               &   &   &  \mid \texttt{true} \mid \texttt{false} \mid \texttt{pkt} \mid id \mid \texttt{.$id$} \\
               &   &   &  \mid \texttt{case \{$cbod$; default : $e$ ; \}} \mid \texttt{ [$n$]~'d~n } \\
               & es & = & e \mid e, es \\
@@ -501,16 +500,16 @@ There are two types of nodes: switches and hosts.
                                  \mid \texttt{bool}
                                  \mid id
                                  \mid \texttt{[} \tau \texttt{;} n \texttt{]}
-                                 \mid \texttt{struct \{} \textit{fields} \texttt{\}} \\
-\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$} \mid \texttt{?send $id$ [$e$]} \mid \texttt{send $d$} \\
-                   &   &   & \mid e_3 \texttt{:=} e_2 \mid \texttt{if $e$ then $s_1$} \mid \texttt{if $e$ then $a_1$ else $a_2$} \\
-                   &   &   & \mid \texttt{havoc}~$e$ \mid \texttt{assume}~$e$ \mid \texttt{let $\tau$ $id$ = $e$} \mid \texttt{fork ($args$ | $e$) $a$} \\
+                                 \mid \texttt{struct \{} \textit{args} \texttt{\}} \\
+\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$} \mid \texttt{?send $id$[$e$]} \mid \texttt{send $e$} \\
+                   &   &   & \mid e_3 \texttt{:=} e_2 \mid \texttt{if $e$ then $a_1$} \mid \texttt{if $e$ then $a_1$ else $a_2$} \\
+                   &   &   & \mid \texttt{havoc $e$} \mid \texttt{assume $e$} \mid \texttt{let $\tau$ $id$ = $e$} \mid \texttt{fork ($args$ | $e$) $a$} \\
                    & as & = & a \mid a, as \\
 \textrm{declaration} & d & = & \texttt{typedef}~\tau~id \\
-                     &   &   \mid & \texttt{function}~id \texttt{(} args \texttt{)} : \tau \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau = e \\
-                     &   &   \mid & \texttt{role~$id$ ($args$)~$cs$~ = $as$} \\
-                     &   &   \mid & \texttt{assume ($args$) $e$} \\
-                     &   &   \mid & \texttt{switch $id$ $ps$} \mid \texttt{host $id$ $ps$} \\
+                     &   &   & \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau = e \\
+                     &   &   & \mid \texttt{role~$id$ ($args$)~$cs$~ = $as$} \\
+                     &   &   & \mid \texttt{assume ($args$) $e$} \\
+                     &   &   & \mid \texttt{switch $id$ $ps$} \mid \texttt{host $id$ $ps$} \\
                      & ds & = & d \mid d, ds \\
 \textrm{refinement} & r & = & \texttt{refine}~ids~ds \\
 \textrm{spec} & spec & = & r \mid r, spec \\
