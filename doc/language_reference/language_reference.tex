@@ -488,7 +488,9 @@ There are two types of nodes: switches and hosts.
 \textrm{arguments}
                   & args & = & \tau~id \mid \tau~id, args \\
 \textrm{port pairs} & ps & = & \texttt{($id$, $id$)} \mid \texttt{($id$, $id$)}, ps \\
-\textrm{role constraints} & cs & = & \cdot \mid \texttt{|~$e$} \mid \texttt{/~$e$} \mid \texttt{|~$e$}~\texttt{/~$e$} \\ [6pt]
+\textrm{role constraints} & cs & = & \cdot \mid \texttt{|~$e$} % restrict role parameters
+                                     \mid \texttt{/~$e$}       % restrict packets this role accepts
+                                     \mid \texttt{|~$e$}~\texttt{/~$e$} \\ [6pt]
 
 \textrm{case body} & cbod & = & \cdot \mid \textrm{$e_1$ : $e_2$; } cbod \\
 \textrm{expression} & e & = & \texttt{not}~e \mid e_1 \otimes e_2 \mid e \texttt{.} id \mid e \texttt{[$n$, $n$]} \\
@@ -519,5 +521,14 @@ There are two types of nodes: switches and hosts.
 \label{fig:core_calc}
 \end{figure}
 
+Things that are not implementable:
+%
+\begin{itemize}
+
+\item \texttt{?send $id$ [$e$]}
+\item \texttt{havoc $e$}
+\item \texttt{assume $e$}
+
+\end{itemize}
 
 \end{document}
