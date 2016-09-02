@@ -168,6 +168,13 @@ class Spec0:
     def __str__(self):
         return '%s\n\n+\n\n%s' % (self.local, self.remote)
 
+# Spec0 refactored into an OpenFlow-friendly format of policy; topology.
+class Spec0_1:
+    def __init__(self, local_pol, remote_pol, host_topo):
+        self.local_pol = local_pol
+        self.remote_pol = remote_pol
+        self.host_topo = host_topo
+
 # Distribute access control to each LAN gateway.
 class Spec1:
     def __init__(self, local, host_to_router, router_to_router, router_to_host, host_switches):
@@ -692,7 +699,7 @@ class PurdueNetwork:
             spec2.host_switches)
 
 
-p = PurdueNetwork(3, 14, 11, 11, 11)
+p = PurdueNetwork(4, 4, 4, 4, 4)
 spec0 = p.gen_spec_0()
 spec1 = p.gen_spec_1(spec0)
 spec2 = p.gen_spec_2(spec1)
