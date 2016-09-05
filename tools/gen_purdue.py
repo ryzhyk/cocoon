@@ -168,12 +168,31 @@ class Spec0:
     def __str__(self):
         return '%s\n\n+\n\n%s' % (self.local, self.remote)
 
-# Spec0 refactored into an OpenFlow-friendly format of policy; topology.
+# Spec0 refactored into an OpenFlow-friendly format of policy; topology for one
+# big switch.
 class Spec0_1:
-    def __init__(self, local_pol, remote_pol, host_topo):
-        self.local_pol = local_pol
-        self.remote_pol = remote_pol
+    def __init__(self, local, remote, host_topo, router_topo, host_switches):
+        self.local = local
+        self.remote = remote
         self.host_topo = host_topo
+        self.router_topo = router_topo
+        self.host_switches = host_switches
+    def __str__(self):
+        return '''
+( {host_topo} );
+(
+(( {local} )
++ 
+( {remote} ))
+;
+( {router_topo} ))*
+;
+( {host_switches} ); port = 1
+'''.format( host_switches=self.host_switches
+          , host_topo=self.host_topo
+          , router_topo=self.router_topo
+          , local=self.local
+          , remote=self.remote )
 
 # Distribute access control to each LAN gateway.
 class Spec1:
@@ -342,6 +361,7 @@ class PurdueNetwork:
         self.next_switch += 1
         return rv
 
+
     def gen_local_forwarding(self):
         local_forwarding = []
 
@@ -377,6 +397,44 @@ class PurdueNetwork:
             '( %s )\n\n;\n\n( %s )\n\n;\n\n( %s )' % ( '\n+ '.join(nonlocal_forwarding),
                                             acl,
                                             acl_forwarding))
+        return spec_0
+
+    def gen_spec_0_1(self):
+        switch = self.get_next_switch()
+
+        # Local forwarding.
+        local_forwarding = []
+        for lan in self.lans:
+            local_forwarding.append('\n+ '.join(['port = %d; ip4Dst = %d; port := %d' % (
+                h1.mac, int_of_ip(h2.ip), h2.mac) for h1 in lan.hosts for h2 in lan.hosts]))
+
+        # Topology connecting each host to the single big switch.
+        host_topo = '\n+ '.join(['sw = %d; port = 0; sw := %d; port := %d' % (
+            h.mac, switch, h.mac) for lan in self.lans for h in lan.hosts])
+        router_topo = '\n+ '.join(['sw = %d; port = %d; sw := %d; port := 1' % (
+            switch, h.mac, h.mac) for lan in self.lans for h in lan.hosts])
+
+        # Non-local forwarding filter.
+        nonlocal_predicate = []
+        for lan in self.lans:
+            local_pred = '\n+ '.join(map(lambda h: 'port = %d' % h.mac, lan.hosts))
+            local_ip = '\n+ '.join(map(lambda h: 'ip4Dst = %d' % int_of_ip(h.ip), lan.hosts))
+            nonlocal_predicate.append('sw = %d; (%s); ~(%s)' % (switch, local_pred, local_ip))
+
+        # Build ACL forwarding.
+        all_hosts = [h for lan in self.lans for h in lan.hosts]
+        acl_forwarding = '\n+ '.join(map(lambda h: 'ip4Dst = %d; port := %d' % (int_of_ip(h.ip), h.mac), all_hosts))
+        acl = ';\n'.join(['~(ip4Src = %d; ip4Dst = %d)' % (int_of_ip(h1.ip), int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
+
+        spec_0 = Spec0_1(
+            '( %s )' % '\n\n+\n\n'.join(local_forwarding),
+            '( %s )\n\n;\n\n( %s )\n\n;\n\n( %s )' % ( '\n+ '.join(nonlocal_predicate),
+                                            acl,
+                                            acl_forwarding),
+            host_topo,
+            router_topo,
+            '\n+ '.join(['sw = %d' % h.mac for lan in self.lans for h in lan.hosts]))
+
         return spec_0
 
     def gen_spec_1(self, spec0):
@@ -699,12 +757,13 @@ class PurdueNetwork:
             spec2.host_switches)
 
 
-p = PurdueNetwork(4, 4, 4, 4, 4)
+p = PurdueNetwork(2, 2, 2, 2, 2)
 spec0 = p.gen_spec_0()
+spec01 = p.gen_spec_0_1()
 spec1 = p.gen_spec_1(spec0)
 spec2 = p.gen_spec_2(spec1)
 spec3 = p.gen_spec_3(spec2)
 print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % spec3
 print '\n<=\n'
-print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % spec0
+print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % spec01
 
