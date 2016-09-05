@@ -1,7 +1,8 @@
 #!/usr/bin/python
 
-import random
+import argparse
 import networkx
+import random
 import sys
 
 debug = False
@@ -757,13 +758,78 @@ class PurdueNetwork:
             spec2.host_switches)
 
 
-p = PurdueNetwork(2, 2, 2, 2, 2)
-spec0 = p.gen_spec_0()
-spec01 = p.gen_spec_0_1()
-spec1 = p.gen_spec_1(spec0)
-spec2 = p.gen_spec_2(spec1)
-spec3 = p.gen_spec_3(spec2)
-print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % spec3
-print '\n<=\n'
-print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % spec01
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument( "num_lans"
+                       , help="number of LANs"
+                       , type=int)
+    parser.add_argument( "num_lan_hosts"
+                       , help="number of hosts per LAN"
+                       , type=int)
+    parser.add_argument( "num_acl_rules"
+                       , help="number of (hostIP, dstIP) blacklist ACL rules"
+                       , type=int)
+    parser.add_argument( "num_fabric_switches"
+                       , help="number of switches connecting gateway routers"
+                       , type=int)
+    parser.add_argument( "num_lan_switches"
+                       , help="number of switches per LAN"
+                       , type=int)
+    parser.add_argument( "--source_spec"
+                       , help="higher-level spec"
+                       , default=0
+                       , type=int
+                       , choices=[0, 1, 2, 3] )
+    parser.add_argument( "--target_spec"
+                       , help="lower-level spec"
+                       , default=3
+                       , type=int
+                       , choices=[0, 1, 2, 3] )
+
+    args = parser.parse_args()
+
+    if args.num_lans < 2:
+        sys.stderr.write('must have at least 2 LANs')
+        sys.exit(1)
+    if args.num_lan_hosts < 1:
+        sys.stderr.write('must have at least 1 host per LAN')
+        sys.exit(1)
+    if args.num_acl_rules < 1:
+        sys.stderr.write('must have at least 1 ACL rule')
+        sys.exit(1)
+    if args.num_fabric_switches < 1:
+        sys.stderr.write('must have at least 1 fabric switch')
+        sys.exit(1)
+    if args.num_lan_switches < 1:
+        sys.stderr.write('must have at least 1 switch per LAN')
+        sys.exit(1)
+    if args.source_spec >= args.target_spec:
+        sys.stderr.write('source spec must be less than target spec')
+        sys.exit(1)
+
+    p = PurdueNetwork( args.num_lans
+                     , args.num_lan_hosts
+                     , args.num_acl_rules
+                     , args.num_fabric_switches
+                     , args.num_lan_switches )
+
+    spec0 = p.gen_spec_0()
+    spec01 = p.gen_spec_0_1()
+    spec1 = p.gen_spec_1(spec0)
+    spec2 = p.gen_spec_2(spec1)
+    spec3 = p.gen_spec_3(spec2)
+
+    def num_to_spec(n):
+        if n == 0:
+            return spec01
+        if n == 1:
+            return spec1
+        if n == 2:
+            return spec2
+        if n == 3:
+            return spec3
+
+    print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % num_to_spec(args.target_spec)
+    print '\n<=\n'
+    print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % num_to_spec(args.source_spec)
 

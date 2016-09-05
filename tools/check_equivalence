@@ -1,4 +1,9 @@
 #!/bin/bash
 
-./gen_purdue.py > tmp.prd && echo "generated network" &&\
-time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide tmp.prd
+if [ $1 = "-h" -o $1 = "--help" ]
+	then
+		./gen_purdue.py $@
+	else
+		./gen_purdue.py $@ > tmp.prd && echo "generated network" && echo ""  &&\
+        time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide tmp.prd
+fi
