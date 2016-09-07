@@ -503,7 +503,7 @@ There are two types of nodes: switches and hosts.
                                  \mid id
                                  \mid \texttt{[} \tau \texttt{;} n \texttt{]}
                                  \mid \texttt{struct \{} \textit{args} \texttt{\}} \\
-\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$} \mid \texttt{?send $id$[$e$]} \mid \texttt{send $e$} \\
+\textrm{statement} & a & = & \texttt{filter}~e \mid \texttt{?send $id$[$e$]} \mid \texttt{send $e$} \\
                    &   &   & \mid e_3 \texttt{:=} e_2 \mid \texttt{if $e$ then $a_1$} \mid \texttt{if $e$ then $a_1$ else $a_2$} \\
                    &   &   & \mid \texttt{havoc $e$} \mid \texttt{assume $e$} \mid \texttt{let $\tau$ $id$ = $e$} \mid \texttt{fork ($args$ | $e$) $a$} \\
                    & as & = & a \mid a, as \\
