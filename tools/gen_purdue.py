@@ -94,6 +94,15 @@ def topology_of_networkx(g):
                     n, port, neighbor, g.node[neighbor]['ports'][n]))
     return '\n+ '.join(t)
 
+def export_topology_of_networkx(g, out):
+    for n in g:
+        for (neighbor, port) in g.node[n]['ports'].iteritems():
+            out.write('(%s %d, %d)--(%s %d, %d)\n' % (
+                g.node[n]['type'].upper(), n, port,
+                g.node[neighbor]['type'].upper(), neighbor,
+                g.node[neighbor]['ports'][n]))
+
+
 # Will return '' for a path of length 1 (i.e. a self loop).
 def policy_of_path(g, path, target):
     assert(len(path) > 0)
@@ -313,16 +322,18 @@ port = 1
 
 class PurdueNetwork:
 
-    def __init__(self, num_lans, num_hosts_per_lan, num_acl_rules, num_routers, num_switches_per_lan):
-        self.num_lans = num_lans
-        self.num_hosts_per_lan = num_hosts_per_lan
-        self.num_acl_rules = num_acl_rules
-        self.num_routers = num_routers
-        self.num_switches_per_lan = num_switches_per_lan
-        self.next_switch = num_lans * num_hosts_per_lan
+    def __init__(self, args):
+        self.num_lans = args.num_lans
+        self.num_hosts_per_lan = args.num_lan_hosts
+        self.num_acl_rules = args.num_acl_rules
+        self.num_routers = args.num_fabric_switches
+        self.num_switches_per_lan = args.num_lan_switches
+        self.args = args
 
-        assert(0 < num_hosts_per_lan <= 256)
-        assert(1 < num_lans <= 16777216)
+        self.next_switch = self.num_lans * self.num_hosts_per_lan
+
+        assert(0 < self.num_hosts_per_lan <= 256)
+        assert(1 < self.num_lans <= 16777216)
 
         # Build virtual LANs.
         def mkHost(lan_num, host_num, vlan):
@@ -331,15 +342,15 @@ class PurdueNetwork:
 
         def mkLAN(lan_num):
             subnet = convert_to_subnet(lan_num)
-            hosts = map(lambda i: mkHost(lan_num, lan_num * num_hosts_per_lan + i, lan_num), range(num_hosts_per_lan))
+            hosts = map(lambda i: mkHost(lan_num, lan_num * self.num_hosts_per_lan + i, lan_num), range(self.num_hosts_per_lan))
             return LAN(subnet, self.get_next_switch(), [], hosts, lan_num)
 
-        self.lans = map(mkLAN, range(num_lans))
+        self.lans = map(mkLAN, range(self.num_lans))
         self.subnet_to_lan = {self.lans[i].subnet : i for i in xrange(len(self.lans)) }
 
         # Build ACL.
         self.acl_pairs = []
-        for i in xrange(num_acl_rules):
+        for i in xrange(self.num_acl_rules):
             lan1idx = random.randrange(len(self.lans))
             lan2idx = random.randrange(len(self.lans))
             while lan1idx == lan2idx:
@@ -428,13 +439,38 @@ class PurdueNetwork:
         acl = ';\n'.join(['~(ip4Src = %d; ip4Dst = %d)' % (int_of_ip(h1.ip), int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
 
         spec_0 = Spec0_1(
-            '( %s )' % '\n\n+\n\n'.join(local_forwarding),
-            '( %s )\n\n;\n\n( %s )\n\n;\n\n( %s )' % ( '\n+ '.join(nonlocal_predicate),
+            '( %s )' % '\n+\n'.join(local_forwarding),
+            '( %s )\n;\n( %s )\n;\n( %s )' % ( '\n+ '.join(nonlocal_predicate),
                                             acl,
                                             acl_forwarding),
             host_topo,
             router_topo,
             '\n+ '.join(['sw = %d' % h.mac for lan in self.lans for h in lan.hosts]))
+
+        if self.args.export_hsa:
+            out = self.args.export_hsa
+
+            out.write('### SPEC 0 ###')
+            out.write('--- NETKAT SWITCH FUNCTION ---\n')
+            out.write('%s\n+\n%s\n' % (spec_0.local, spec_0.remote))
+            out.write('\n')
+    
+            out.write('--- TOPOLOGY ---\n')
+            for lan in self.lans:
+                for h in lan.hosts:
+                    out.write('(HOST %d, %d)--(SWITCH %d, %d)\n' % (h.mac, 1, switch, h.mac))
+            out.write('\n')
+    
+            out.write('--- HOSTS ---\n')
+            for lan in self.lans:
+                for h in lan.hosts:
+                    out.write('HOST %d, %s\n' % (h.mac, h.ip))
+            out.write('\n')
+    
+            out.write('--- ACL (BLACKLIST IP PAIRS) ---\n')
+            for (src, dst) in self.acl_pairs:
+                out.write('(%s, %s)\n' % (src.ip, dst.ip))
+            out.write('\n')
 
         return spec_0
 
@@ -748,14 +784,42 @@ class PurdueNetwork:
                 p7=p7,
                 p8=p8,
                 router_to_router_pol=spec2.router_to_router_pol))
-
-        return Spec3(
+        
+        spec3 = Spec3(
             '\n+ '.join(preface),
             '\n\n+\n\n'.join(topo),
             '\n\n+\n\n'.join(pol),
             spec2.router_to_router_topo,
             spec2.router_to_router_pol,
             spec2.host_switches)
+
+        if self.args.export_hsa:
+            out = self.args.export_hsa
+
+            out.write('### SPEC 3 ###')
+            out.write('--- NETKAT SWITCH FUNCTION ---\n')
+            out.write('%s\n+\n%s\n' % (spec3.local_pols, spec3.router_to_router_pol))
+            out.write('\n')
+    
+            out.write('--- TOPOLOGY ---\n')
+            for lan in self.lans:
+                for h in lan.hosts:
+                    for g in [lan.g for lan in self.lans] + [self.routers]:
+                        export_topology_of_networkx(g, out)
+            out.write('\n')
+    
+            out.write('--- HOSTS ---\n')
+            for lan in self.lans:
+                for h in lan.hosts:
+                    out.write('HOST %d, %s\n' % (h.mac, h.ip))
+            out.write('\n')
+    
+            out.write('--- ACL (BLACKLIST IP PAIRS) ---\n')
+            for (src, dst) in self.acl_pairs:
+                out.write('(%s, %s)\n' % (src.ip, dst.ip))
+            out.write('\n')
+
+        return spec3
 
 
 if __name__ == '__main__':
@@ -775,6 +839,7 @@ if __name__ == '__main__':
     parser.add_argument( "num_lan_switches"
                        , help="number of switches per LAN"
                        , type=int)
+
     parser.add_argument( "--source_spec"
                        , help="higher-level spec"
                        , default=0
@@ -785,6 +850,13 @@ if __name__ == '__main__':
                        , default=3
                        , type=int
                        , choices=[0, 1, 2, 3] )
+
+    parser.add_argument( "--export_hsa"
+                            , help="Export the configuration information for Spec0 and Spec3 to apply header space analysis."
+                            , type=argparse.FileType('w') )
+    parser.add_argument( "--export_cocoon"
+                            , help="Export the configuration information for Spec0 and Spec3 to apply Cocoon. (Not yet implemented.)"
+                            , type=argparse.FileType('w') )
 
     args = parser.parse_args()
 
@@ -807,11 +879,7 @@ if __name__ == '__main__':
         sys.stderr.write('source spec must be less than target spec')
         sys.exit(1)
 
-    p = PurdueNetwork( args.num_lans
-                     , args.num_lan_hosts
-                     , args.num_acl_rules
-                     , args.num_fabric_switches
-                     , args.num_lan_switches )
+    p = PurdueNetwork( args )
 
     spec0 = p.gen_spec_0()
     spec01 = p.gen_spec_0_1()
@@ -833,3 +901,8 @@ if __name__ == '__main__':
     print '\n<=\n'
     print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % num_to_spec(args.source_spec)
 
+    # Clean up.
+    if args.export_hsa:
+        args.export_hsa.close()
+    if args.export_cocoon:
+        args.export_cocoon.close()
