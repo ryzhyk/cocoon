@@ -104,7 +104,7 @@ def export_topology_of_networkx(g, out):
 
 
 # Will return '' for a path of length 1 (i.e. a self loop).
-def policy_of_path(g, path, target):
+def policy_of_path(g, path, target, ethDst_of_target):
     assert(len(path) > 0)
     switch_pols = []
     current = path[0]
@@ -112,13 +112,13 @@ def policy_of_path(g, path, target):
         if 'host' in g.node[target]:
             switch_pols.append('sw = %d; ethDst = %d; ip4Dst = %d; port := %d' % (
                 current,
-                target,
+                ethDst_of_target(target),
                 int_of_ip(g.node[target]['host'].ip),
                 g.node[current]['ports'][n]))
         else:
             switch_pols.append('sw = %d; ethDst = %d; port := %d' % (
                 current,
-                target,
+                ethDst_of_target(target),
                 g.node[current]['ports'][n]))
         current = n
     return '\n+ '.join(switch_pols)
@@ -127,7 +127,7 @@ def policy_of_path(g, path, target):
 # graph where nodes are annotated with type='switch' | 'router' | 'host'  and port
 # dictionaries.  Routers are assumed to be the edges of the network and have
 # MAC addresses equal to their node ID.
-def spp_of_networkx(g):
+def spp_of_networkx(g, ethDst_of_target=(lambda x: x)):
     routers = [n for (n, data) in filter(
         lambda (n, data): data['type'] == 'router' or data['type'] == 'host',
         g.nodes(data=True))]
@@ -144,7 +144,7 @@ def spp_of_networkx(g):
             path = networkx.shortest_path(g, source=r1, target=r2)
             if g.node[path[0]]['type'] == 'host':
                 path = path[1:]
-            p = policy_of_path(g, path, r2)
+            p = policy_of_path(g, path, r2, ethDst_of_target)
             if len(p) > 0:
                 paths.append(p)
     return '\n+ '.join(paths)
@@ -614,6 +614,18 @@ class PurdueNetwork:
                     sys.stderr.write('%s %d: %s\n' % (d['type'], n, d['ports']))
                 sys.stderr.write('\n')
 
+        # Each gateway router has two ports: One connected to the
+        # router-to-router fabric, and another connected to its LAN.  Generate
+        # a distinct MAC address for LAN-facing router ports.
+        extra_router_macs = {}
+        for lan in self.lans:
+            extra_router_macs[lan.router] = self.get_next_switch()
+        def relabel_macs(mac):
+            if mac in extra_router_macs:
+                return extra_router_macs[mac]
+            else:
+                return mac
+
         preface = []
         topo = []
         pol = []
@@ -631,7 +643,7 @@ class PurdueNetwork:
 
             # Generate intra-LAN L2 forwarding.
             t = topology_of_networkx(lan.g)
-            p = spp_of_networkx(lan.g)
+            p = spp_of_networkx(lan.g, relabel_macs)
 
             # Attach VLANs at the hosts.
             attach_vlan = ['sw = %d; ~(ethDst = %d); vlan := %d' % (h.mac, h.mac, h.vlan) for h in lan.hosts]
