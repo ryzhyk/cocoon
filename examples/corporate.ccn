@@ -175,9 +175,9 @@ refine OutGateway {
 
     (* L3 routing policy *)
     function l3NextHop(hid_t rid, vid_t vid): nexthop_t
-    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid)) => cConnectedRouterPort(pid_t{rid, l3NextHop(rid, vid).port})
-    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid)) => cConnectedRouterPort(mac2pid(l3NextHop(rid, vid).addr))
-    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid)) => routerPortZone(pid_t{rid, l3NextHop(rid, vid).port}) == routerPortZone(mac2pid(l3NextHop(rid, vid).addr))
+    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid) and vidRouter(vid) != rid) => cConnectedRouterPort(pid_t{rid, l3NextHop(rid, vid).port})
+    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid) and vidRouter(vid) != rid) => cConnectedRouterPort(mac2pid(l3NextHop(rid, vid).addr))
+    assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid) and vidRouter(vid) != rid) => routerPortZone(pid_t{rid, l3NextHop(rid, vid).port}) == routerPortZone(mac2pid(l3NextHop(rid, vid).addr))
 
     (* at most 2 hops between L3 routers *)
     assume (hid_t rid, vid_t vid) (cRouter(rid) and cVlan(vid)) => rid == vidRouter(vid) or
@@ -242,13 +242,13 @@ refine HostOut, RouterOut {
     assume (pid_t pid) cConnectedHostPort(pid) => cSwitchPort(link(pid))
 
     function l2Hit(hid_t hid, vid_t vid, MAC dstaddr): bool = l2distance(hid, vid, dstaddr) > 8'd0
-    function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16>
     function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8>
+    function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16>
     assume (hid_t sid, vid_t vid, MAC dst) (cSwitch(sid) and (l2distance(sid, vid, dst) > 8'd0)) => cConnectedSwitchPort(pid_t{sid, l2NextHop(sid, vid, dst)})
 
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) > 8'd0) => cSwitch(sid)
-    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => cConnectedRouterPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
-    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => pid2mac(link(pid_t{sid, l2NextHop(sid, vid, dst)})) == dst
+    assume (hid_t sid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => cConnectedRouterPort(link(pid_t{sid, l2NextHop(sid, 12'd0, dst)}))
+    assume (hid_t sid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => pid2mac(link(pid_t{sid, l2NextHop(sid, 12'd0, dst)})) == dst
 
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst == vidRouterMAC(vid)) => cConnectedRouterPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst == vidRouterMAC(vid)) => link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid == vidRouter(vid)
@@ -260,11 +260,11 @@ refine HostOut, RouterOut {
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) > 8'd1)  => l2distance(link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid, vid, dst) == (l2distance(sid, vid, dst) - 8'd1) 
 
     assume (pid_t pid, MAC dst)
-           (cConnectedRouterPort(pid) and cConnectedRouterPort(mac2pid(dst)) and routerPortZone(mac2pid(dst)) == routerPortZone(pid) and link(pid) != mac2pid(dst)) => 
+           (pid != mac2pid(dst) and cConnectedRouterPort(pid) and cConnectedRouterPort(mac2pid(dst)) and routerPortZone(mac2pid(dst)) == routerPortZone(pid) and link(pid) != mac2pid(dst)) => 
            ((l2distance(link(pid).hid, 12'd0, dst) <= 8'd5) and (l2distance(link(pid).hid, 12'd0, dst) > 8'd0))
 
     assume (pid_t pid, MAC dst)
-           (cConnectedRouterPort(pid) and cConnectedRouterPort(mac2pid(dst)) and routerPortZone(mac2pid(dst)) == routerPortZone(pid)) => 
+           (pid != mac2pid(dst) and cConnectedRouterPort(pid) and cConnectedRouterPort(mac2pid(dst)) and routerPortZone(mac2pid(dst)) == routerPortZone(pid)) => 
            cSwitch(link(pid).hid)
 
     assume (hid_t hid, MAC dst)
@@ -330,15 +330,150 @@ refine HostOut, RouterOut {
         filter cConnectedRouterPort(pid_t{rid,port});
         filter cConnectedRouterPort(dstpid);
         filter routerPortZone(dstpid) == routerPortZone(pid_t{rid, port});
-        send SwitchOut[rid, port (*l2NextHop(rid, 12'd0, pkt.eth.dstAddr)*)]
+        if (dstpid.hid == rid) then {
+            send RouterIn[rid, dstpid.port]
+        } else {
+            send SwitchOut[rid, port (*l2NextHop(rid, 12'd0, pkt.eth.dstAddr)*)]
+        }
 }
 
 refine {
     function cHost(hid_t hid): bool = hid == 64'd1 or hid == 64'd2
     function cVlan(vid_t vid): bool = vid == 12'd1 or vid == 12'd2
 
-    function cRouter(hid_t rid): bool = rid == 64'd10000001 or rid == 64'd10000002
-    function cSwitch(hid_t sid): bool = cRouter(sid)
-    function nPorts(hid_t hid): uint<16> = 16'd32
+    function vidRouterMAC(vid_t vid): MAC = 
+        case {
+            vid == 12'd1: 48'haaaaaaaaaaaa;
+            vid == 12'd2: 48'hbbbbbbbbbbbb;
+            default:      48'h0;
+        }
 
+    function ip2vid(IP4 ip): vid_t = 
+        case {
+            ip == 32'h01020304: 12'd2;
+            ip == 32'h05060708: 12'd1;
+            default:            12'd0;
+        }
+
+    function hid2ip(hid_t hid): IP4 = 
+        case {
+            hid == 64'd1: 32'h01020304;
+            hid == 64'd2: 32'h05060708;
+            default:      32'h0;
+        }
+    function ip2hid(IP4 ip): hid_t =
+        case {
+            ip == 32'h01020304: 64'd1;
+            ip == 32'h05060708: 64'd2;
+            default:            64'd0;
+        }
+
+    function acl(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = 
+        (ip.src == 32'h01020304 and ip.dst == 32'h05060708) or
+        (ip.src == 32'h05060708 and ip.dst == 32'h01020304)
+
+    function aclSrc(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = acl(srcvlan, dstvlan, ip)
+    function aclDst(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = true
+
+    function cZone(zid_t zid): bool = zid == 32'd1 or zid == 32'd2 or zid == 32'd3
+
+    function cRouter(hid_t rid): bool = rid == 64'd10000001 or rid == 64'd10000002
+    function vidRouter(vid_t vid): hid_t = 
+        case {
+            vid == 12'd1: 64'd10000001;
+            vid == 12'd2: 64'd10000002;
+            default:      64'd0;
+        }
+
+    function nPorts(hid_t hid): uint<16> = 
+        case {
+           cHost(hid):   16'd1;
+           cRouter(hid): 16'd2;
+           default:      16'd0;
+        }
+
+    function portConnected(pid_t pid): bool = true (* assume all ports are connected *)
+    
+    function routerPortZone(pid_t pid): zid_t = 
+        case { 
+            pid == pid_t{64'd10000001, 16'd0}: 32'd1;
+            pid == pid_t{64'd10000001, 16'd1}: 32'd3;
+            pid == pid_t{64'd10000002, 16'd0}: 32'd2;
+            pid == pid_t{64'd10000002, 16'd1}: 32'd3;
+            default: 32'd0;
+        }
+
+    function pid2mac(pid_t pid): MAC = 
+        case { 
+            pid == pid_t{64'd1,        16'd0}: 48'hcccccccccccc;
+            pid == pid_t{64'd2,        16'd0}: 48'hdddddddddddd;
+            pid == pid_t{64'd10000001, 16'd0}: 48'haaaaaaaaaaaa;
+            pid == pid_t{64'd10000001, 16'd1}: 48'ha0a0a0a0a0a0;
+            pid == pid_t{64'd10000002, 16'd0}: 48'hbbbbbbbbbbbb;
+            pid == pid_t{64'd10000002, 16'd1}: 48'hb0b0b0b0b0b0;
+            default:                           48'd0;
+        }
+
+    function mac2pid(MAC mac): pid_t = 
+        case {
+            mac == 48'hcccccccccccc: pid_t{64'd1,        16'd0};
+            mac == 48'hdddddddddddd: pid_t{64'd2,        16'd0};
+            mac == 48'haaaaaaaaaaaa: pid_t{64'd10000001, 16'd0};
+            mac == 48'ha0a0a0a0a0a0: pid_t{64'd10000001, 16'd1};
+            mac == 48'hbbbbbbbbbbbb: pid_t{64'd10000002, 16'd0};
+            mac == 48'hb0b0b0b0b0b0: pid_t{64'd10000002, 16'd1};
+            default:                 pid_t{64'd0, 16'd0};
+        }
+
+    function l3NextHop(hid_t rid, vid_t vid): nexthop_t = 
+        case {
+            rid == 64'd10000001 and vid == 12'd2: nexthop_t{48'hb0b0b0b0b0b0, 16'd1};
+            rid == 64'd10000002 and vid == 12'd1: nexthop_t{48'ha0a0a0a0a0a0, 16'd1};
+            default:                              nexthop_t{48'd0, 16'd0};
+        }
+
+    function cSwitch(hid_t sid): bool = cRouter(sid) (* the only switches in this topology are routers *)
+
+    function link(pid_t pid): pid_t = 
+        case {
+            pid == pid_t{64'd1,        16'd0}: pid_t{64'd10000001, 16'd0};
+            pid == pid_t{64'd2,        16'd0}: pid_t{64'd10000002, 16'd0};
+            pid == pid_t{64'd10000001, 16'd0}: pid_t{64'd1,        16'd0};
+            pid == pid_t{64'd10000001, 16'd1}: pid_t{64'd10000002, 16'd1};
+            pid == pid_t{64'd10000002, 16'd0}: pid_t{64'd2,        16'd0};
+            pid == pid_t{64'd10000002, 16'd1}: pid_t{64'd10000001, 16'd1};
+            default:                           pid_t{64'd0,        16'd0};
+        }
+
+    function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> = 
+        case {
+            hid == 64'd10000001 and vid == 12'd0 and dstaddr == 48'hb0b0b0b0b0b0: 8'd1;
+            hid == 64'd10000002 and vid == 12'd0 and dstaddr == 48'ha0a0a0a0a0a0: 8'd1;
+
+            hid == 64'd10000001 and vid == 12'd1 and dstaddr == 48'hdddddddddddd: 8'd2;
+            hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 8'd1;
+            hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hbbbbbbbbbbbb: 8'd1;
+
+            hid == 64'd10000002 and vid == 12'd1 and dstaddr == 48'hdddddddddddd: 8'd1;
+            hid == 64'd10000002 and vid == 12'd1 and dstaddr == 48'haaaaaaaaaaaa: 8'd1;
+            hid == 64'd10000002 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 8'd2;
+
+            default: 8'd0;
+        }
+
+    function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> = 
+        case {
+            hid == 64'd10000001 and vid == 12'd0 and dstaddr == 48'hb0b0b0b0b0b0: 16'd1;
+            hid == 64'd10000002 and vid == 12'd0 and dstaddr == 48'ha0a0a0a0a0a0: 16'd1;
+
+            hid == 64'd10000001 and vid == 12'd1 and dstaddr == 48'hdddddddddddd: 16'd1;
+            hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 16'd0;
+            hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hbbbbbbbbbbbb: 16'd1;
+
+            hid == 64'd10000002 and vid == 12'd1 and dstaddr == 48'hdddddddddddd: 16'd0;
+            hid == 64'd10000002 and vid == 12'd1 and dstaddr == 48'haaaaaaaaaaaa: 16'd1;
+            hid == 64'd10000002 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 16'd1;
+
+            default: 16'd0;
+        }
 }
