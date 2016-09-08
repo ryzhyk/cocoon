@@ -4,6 +4,13 @@ if [ $1 = "-h" -o $1 = "--help" ]
 	then
 		./gen_purdue.py $@
 	else
-		./gen_purdue.py $@ > tmp.prd && echo "generated network" && echo ""  &&\
-        time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide tmp.prd
+		./gen_purdue.py $@
+        if [ $? -ne 0 ]; then exit 1; fi
+        echo "generated network" && echo ""
+        echo -n "testing cmp01.prd: "
+        time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide cmp01.prd
+        echo -n "testing cmp12.prd: "
+        time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide cmp12.prd
+        echo -n "testing cmp23.prd: "
+        time ~/sandboxes/frenetic/_build/frenetic/frenetic.native decide cmp23.prd
 fi

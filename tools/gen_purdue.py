@@ -110,10 +110,11 @@ def policy_of_path(g, path, target, ethDst_of_target):
     current = path[0]
     for n in path[1:]:
         if 'host' in g.node[target]:
-            switch_pols.append('sw = %d; ethDst = %d; ip4Dst = %d; port := %d' % (
+            switch_pols.append('sw = %d; ethDst = %d; ip4Dst = %d; vlan = %d; port := %d' % (
                 current,
                 ethDst_of_target(target),
                 int_of_ip(g.node[target]['host'].ip),
+                g.node[target]['host'].vlan,
                 g.node[current]['ports'][n]))
         else:
             switch_pols.append('sw = %d; ethDst = %d; port := %d' % (
@@ -151,10 +152,10 @@ def spp_of_networkx(g, ethDst_of_target=(lambda x: x)):
 
 # Add a dictionary to each node mapping neighboring nodes to port numbers.
 # Port numbers start at 2.
-def add_ports_to_networkx(g):
+def add_ports_to_networkx(g, starting_port):
     for n in g:
         d = {}
-        p = 2
+        p = starting_port
         for neighbor in g[n].keys():
             d[neighbor] = p
             p += 1
@@ -239,6 +240,91 @@ port = 1
           , router_to_host=self.router_to_host
           , host_switches=self.host_switches )
 
+class Spec1_1:
+    def __init__( self
+                , preface
+                , router_to_host_topo
+                , router_to_host_pol
+                , router_to_router_topo
+                , router_to_router_pol
+                , hosts):
+        self.preface = preface
+        self.router_to_host_topo = router_to_host_topo
+        self.router_to_host_pol = router_to_host_pol
+        self.router_to_router_topo = router_to_router_topo
+        self.router_to_router_pol = router_to_router_pol
+        self.hosts = hosts
+
+    def __str__(self):
+        return '''
+( {hosts} ); port = 0;
+( {preface} );
+(
+( ( {router_to_host_pol} )
++
+( {router_to_router_pol} ) )
+; 
+( ( {router_to_host_topo} )
++
+( {router_to_router_topo} ) )
+)*;
+( {hosts} ); port = 1
+'''.format( preface=self.preface
+          , router_to_host_topo = self.router_to_host_topo
+          , router_to_host_pol = self.router_to_host_pol
+          , router_to_router_topo = self.router_to_router_topo
+          , router_to_router_pol = self.router_to_router_pol
+          , hosts = self.hosts )
+
+class Spec2_1:
+    def __init__( self
+                , preface
+                , router_to_host_topo
+                , router_to_host_pol
+                , router_to_router_topo
+                , router_to_router_pol
+                , router_to_router_preface
+                , router_to_router_tail
+                , hosts):
+        self.preface = preface
+        self.router_to_host_topo = router_to_host_topo
+        self.router_to_host_pol = router_to_host_pol
+        self.router_to_router_topo = router_to_router_topo
+        self.router_to_router_pol = router_to_router_pol
+        self.router_to_router_preface = router_to_router_preface
+        self.router_to_router_tail = router_to_router_tail
+        self.hosts = hosts
+
+    def __str__(self):
+        return '''
+( {hosts} ); port = 0;
+( {preface} );
+(
+(
+( {router_to_router_tail} )
+;
+( {router_to_host_pol} )
++
+( {router_to_router_preface} )
+;
+( {router_to_router_pol} )
+) ; (
+( {router_to_host_topo} )
++
+( {router_to_router_topo} )
+)
+)*;
+( {hosts} ); port = 1
+'''.format( preface=self.preface
+          , router_to_host_topo = self.router_to_host_topo
+          , router_to_host_pol = self.router_to_host_pol
+          , router_to_router_topo = self.router_to_router_topo
+          , router_to_router_pol = self.router_to_router_pol
+          , router_to_router_preface = self.router_to_router_preface
+          , router_to_router_tail = self.router_to_router_tail
+          , hosts = self.hosts )
+
+
 # Add L2 switching between routers.
 class Spec2:
     def __init__(self, local, host_to_router, router_to_router_topo, router_to_router_pol, router_to_host, host_switches):
@@ -261,7 +347,8 @@ port = 0;
 
 +
 
-( {router_to_router_pol}; {router_to_router_topo}; {router_to_router_pol} )*
+({router_to_router_pol});
+( ({router_to_router_topo}); ({router_to_router_pol}) )*
 
 +
 
@@ -516,6 +603,109 @@ class PurdueNetwork:
             , '\n+ '.join(local_forwarding_from_router)
             , '\n+ '.join(['sw = %d' % h.mac for lan in self.lans for h in lan.hosts]))
 
+    def gen_spec_1_1(self):
+
+        # Preface: Move packets emitted from hosts to the router.
+        preface = []
+        for lan in self.lans:
+            for h in lan.hosts:
+                preface.append('sw = %d; sw := %d; port := %d' % (h.mac, lan.router, h.mac))
+        preface = 'port = 0; ( %s )' % ('\n+ '.join(preface))
+
+        router_to_host_topo = []
+        for lan in self.lans:
+            for h in lan.hosts:
+                router_to_host_topo.append('sw = %d; port = %d; sw := %d; port := 1' % (lan.router, h.mac, h.mac))
+        router_to_host_topo = '\n+ '.join(router_to_host_topo)
+ 
+        acl = '; '.join(['~(ip4Src = %d; ip4Dst = %d)' % (
+                    int_of_ip(src.ip), int_of_ip(dst.ip))
+                    for (src, dst) in self.acl_pairs])
+           
+        router_to_host_pol = []
+        for lan in self.lans:
+            local_action = ' + '.join(['ip4Dst = %d; port := %d' % (int_of_ip(h.ip), h.mac) for h in lan.hosts])
+            local_pred = ' + '.join(['port = %d' % h2.mac for h2 in lan.hosts])
+            router_to_host_pol.append('sw = %d; ( %s ); ( %s )' % (
+                lan.router, local_pred, local_action))
+            router_to_host_pol.append('sw = %d; ~( %s ); ( %s ); ( %s )' % (
+                lan.router, local_pred, acl, local_action))
+        router_to_host_pol = '\n+ '.join(router_to_host_pol)
+
+        router_to_router_topo = []
+        for lan in self.lans:
+            for other_lan in filter(lambda x: x != lan, self.lans):
+                router_to_router_topo.append('sw = %d; port = %d; sw := %d; port := %d' % (
+                    lan.router, other_lan.router,
+                    other_lan.router, lan.router))
+        router_to_router_topo = '\n+ '.join(router_to_router_topo)
+
+        router_to_router_pol = []
+        for lan in self.lans:
+            tmp = []
+            for h in lan.hosts:
+                tmp.append('ip4Dst = %d' % (int_of_ip(h.ip)))
+            other_routers = ['sw = %d' % other_lan.router for other_lan in filter(lambda x: x != lan, self.lans)]
+            router_to_router_pol.append('( %s );\n( %s );\nport := %d' % (
+                '\n+ '.join(other_routers),
+                '\n+ '.join(tmp),
+                lan.router))
+        router_to_router_pol = '\n\n+\n\n'.join(router_to_router_pol)
+
+        hosts = '\n+ '.join(['sw = %d' % h.mac for lan in self.lans for h in lan.hosts])
+        return Spec1_1( preface
+                      , router_to_host_topo
+                      , router_to_host_pol
+                      , router_to_router_topo
+                      , router_to_router_pol
+                      , hosts)
+
+    def gen_spec_2_1(self, spec11):
+        # Local and host-to-router are unchanged from spec1.  Router-to-router
+        # now replaces the ethDst with the target gateway router at the source
+        # gateway router, and router-to-host reconstitutes the appropriate
+        # ethDst.
+
+        # Build router-to-router network.
+        g = connected_waxman_graph(self.num_routers)
+        relabel = {i:self.get_next_switch() for i in xrange(self.num_routers)}
+        for n in g:
+            g.node[n]['type'] = 'switch'
+        networkx.relabel_nodes(g, relabel, copy=False)
+        for lan in self.lans:
+            g.add_node(lan.router, type='router')
+            g.add_edge(lan.router, relabel[random.randrange(self.num_routers)])
+        add_ports_to_networkx(g, self.next_switch)
+        self.routers = g
+
+        router_to_router_preface = []
+        for lan in self.lans:
+            tmp = []
+            for h in lan.hosts:
+                tmp.append('ip4Dst = %d' % (int_of_ip(h.ip)))
+            other_routers = ['sw = %d' % other_lan.router for other_lan in filter(lambda x: x != lan, self.lans)]
+            router_to_router_preface.append('( %s );\n( %s );\nethDst := %d' % (
+                '\n+ '.join(other_routers),
+                '\n+ '.join(tmp),
+                lan.router))
+        router_to_router_preface = '\n\n+\n\n'.join(router_to_router_preface + ['pass'])
+
+        router_to_router_tail = '\n+ '.join(['sw = %d; ip4Dst = %d; ethDst := %d' % (
+            lan.router, int_of_ip(h.ip), h.mac) for lan in self.lans for h in lan.hosts]
+            + ['pass'])
+
+        router_to_router_pol = spp_of_networkx(self.routers)
+        router_to_router_topo = topology_of_networkx(self.routers)
+
+        return Spec2_1( spec11.preface
+                      , spec11.router_to_host_topo
+                      , spec11.router_to_host_pol
+                      , router_to_router_topo
+                      , router_to_router_pol
+                      , router_to_router_preface
+                      , router_to_router_tail
+                      , spec11.hosts)
+
     def gen_spec_2(self, spec1):
         # Local and host-to-router are unchanged from spec1.  Router-to-router
         # now replaces the ethDst with the target gateway router at the source
@@ -531,7 +721,7 @@ class PurdueNetwork:
         for lan in self.lans:
             g.add_node(lan.router, type='router')
             g.add_edge(lan.router, relabel[random.randrange(self.num_routers)])
-        add_ports_to_networkx(g)
+        add_ports_to_networkx(g, self.next_switch)
         self.routers = g
 
         router_to_host_preface = []
@@ -576,7 +766,7 @@ class PurdueNetwork:
             for n in g:
                 g.node[n]['type'] = 'switch'
             networkx.relabel_nodes(g, relabel, copy=False)
-            add_ports_to_networkx(g)
+            add_ports_to_networkx(g, 2)
 
             # Attach router.
             attach_point = random.randrange(self.num_switches_per_lan)
@@ -607,7 +797,7 @@ class PurdueNetwork:
 
             lan.g = g
 
-        if debug:
+        if args.debug:
             for lan in self.lans:
                 for n in lan.g:
                     d = lan.g.node[n]
@@ -643,7 +833,8 @@ class PurdueNetwork:
 
             # Generate intra-LAN L2 forwarding.
             t = topology_of_networkx(lan.g)
-            p = spp_of_networkx(lan.g, relabel_macs)
+            l2 = spp_of_networkx(lan.g, relabel_macs)
+            assert(l2)
 
             # Attach VLANs at the hosts.
             attach_vlan = ['sw = %d; ~(ethDst = %d); vlan := %d' % (h.mac, h.mac, h.vlan) for h in lan.hosts]
@@ -786,7 +977,7 @@ class PurdueNetwork:
 
             ( {p8} )
             """.format(
-                l2=p,
+                l2=l2,
                 p1=p1,
                 p2=p2,
                 p3=p3,
@@ -803,7 +994,7 @@ class PurdueNetwork:
             '\n\n+\n\n'.join(pol),
             spec2.router_to_router_topo,
             spec2.router_to_router_pol,
-            spec2.host_switches)
+            spec2.hosts)
 
         if self.args.export_hsa:
             out = self.args.export_hsa
@@ -852,23 +1043,16 @@ if __name__ == '__main__':
                        , help="number of switches per LAN"
                        , type=int)
 
-    parser.add_argument( "--source_spec"
-                       , help="higher-level spec"
-                       , default=0
-                       , type=int
-                       , choices=[0, 1, 2, 3] )
-    parser.add_argument( "--target_spec"
-                       , help="lower-level spec"
-                       , default=3
-                       , type=int
-                       , choices=[0, 1, 2, 3] )
-
     parser.add_argument( "--export_hsa"
-                            , help="Export the configuration information for Spec0 and Spec3 to apply header space analysis."
-                            , type=argparse.FileType('w') )
+                       , help="Export the configuration information for Spec0 and Spec3 to apply header space analysis."
+                       , type=argparse.FileType('w') )
     parser.add_argument( "--export_cocoon"
-                            , help="Export the configuration information for Spec0 and Spec3 to apply Cocoon. (Not yet implemented.)"
-                            , type=argparse.FileType('w') )
+                       , help="Export the configuration information for Spec0 and Spec3 to apply Cocoon. (Not yet implemented.)"
+                       , type=argparse.FileType('w') )
+
+    parser.add_argument( "--debug"
+                       , help="print debug info"
+                       , action="store_true" )
 
     args = parser.parse_args()
 
@@ -887,31 +1071,38 @@ if __name__ == '__main__':
     if args.num_lan_switches < 1:
         sys.stderr.write('must have at least 1 switch per LAN')
         sys.exit(1)
-    if args.source_spec >= args.target_spec:
-        sys.stderr.write('source spec must be less than target spec')
-        sys.exit(1)
 
     p = PurdueNetwork( args )
 
-    spec0 = p.gen_spec_0()
+#     spec0 = p.gen_spec_0()
+#     spec1 = p.gen_spec_1(spec0)
+#     spec2 = p.gen_spec_2(spec1)
+#     spec3 = p.gen_spec_3(spec2)
+
     spec01 = p.gen_spec_0_1()
-    spec1 = p.gen_spec_1(spec0)
-    spec2 = p.gen_spec_2(spec1)
-    spec3 = p.gen_spec_3(spec2)
+    spec11 = p.gen_spec_1_1()
+    spec21 = p.gen_spec_2_1(spec11)
+    spec3 = p.gen_spec_3(spec21)
 
     def num_to_spec(n):
         if n == 0:
             return spec01
         if n == 1:
-            return spec1
+            return spec11
         if n == 2:
-            return spec2
+            return spec21
         if n == 3:
             return spec3
 
-    print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % num_to_spec(args.target_spec)
-    print '\n<=\n'
-    print '\n(\n%s\n)\nvlan := 0; ethDst := 0' % num_to_spec(args.source_spec)
+    for i in xrange(3):
+        out_file = 'cmp%s%s.prd' % (i, i+1)
+        print 'Writing Spec%s vs. Spec%s to %s' % (i, i+1, out_file)
+
+        out = file(out_file, 'w')
+        out.write('\n(\n%s\n)\nvlan := 0; ethDst := 0\n' % num_to_spec(i+1))
+        out.write('\n<=\n\n')
+        out.write('\n(\n%s\n)\nvlan := 0; ethDst := 0\n' % num_to_spec(i))
+        out.close()
 
     # Clean up.
     if args.export_hsa:
