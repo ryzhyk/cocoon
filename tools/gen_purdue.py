@@ -150,6 +150,55 @@ def spp_of_networkx(g, ethDst_of_target=(lambda x: x)):
                 paths.append(p)
     return '\n+ '.join(paths)
 
+def cocoon_of_networkx(g):
+    routers = [n for (n, data) in filter(
+        lambda (n, data): data['type'] == 'router' or data['type'] == 'host',
+        g.nodes(data=True))]
+
+    # TODO: switch this to compute shortest path from all nodes to each router.
+    # Then, for each node for each target router, compute a policy for the next
+    # hop.
+
+    distances = {}
+    out_ports = {}
+    for sw in g:
+        distances[sw] = {}
+        out_ports[sw] = {}
+        for r in routers:
+            if sw == r:
+                continue
+
+            # TODO: it's grossly inefficient to recompute the path for every
+            # switch.
+
+            path = networkx.shortest_path(g, source=sw, target=r)
+            distances[sw][r] = len(path) - 1
+            out_ports[sw][r] = g.node[sw]['ports'][path[1]]
+
+    return (distances, out_ports)
+
+# Produce a new graph composing g1 and g2.  Copy dictionary attributes.
+def copy_compose(g1, g2):
+    g = networkx.Graph()
+    for n in g1.nodes() + g2.nodes():
+        g.add_node(n)
+    for (n1, n2) in g1.edges() + g2.edges():
+        g.add_edge(n1, n2)
+    for n in g1:
+        for k in g1.node[n]:
+            if type(g1.node[n][k]) == dict:
+                g.node[n][k] = dict(g1.node[n][k])
+            else:
+                g.node[n][k] = g1.node[n][k]
+    for n in g2:
+        for k in g2.node[n]:
+            if type(g2.node[n][k]) == dict:
+                g.node[n][k] = dict(g2.node[n][k])
+            else:
+                g.node[n][k] = g2.node[n][k]
+    return g
+
+
 # Add a dictionary to each node mapping neighboring nodes to port numbers.
 # Port numbers start at 2.
 def add_ports_to_networkx(g, starting_port):
@@ -417,7 +466,7 @@ class PurdueNetwork:
         self.num_switches_per_lan = args.num_lan_switches
         self.args = args
 
-        self.next_switch = self.num_lans * self.num_hosts_per_lan
+        self.next_id = 1
 
         assert(0 < self.num_hosts_per_lan <= 256)
         assert(1 < self.num_lans <= 16777216)
@@ -429,10 +478,10 @@ class PurdueNetwork:
 
         def mkLAN(lan_num):
             subnet = convert_to_subnet(lan_num)
-            hosts = map(lambda i: mkHost(lan_num, lan_num * self.num_hosts_per_lan + i, lan_num), range(self.num_hosts_per_lan))
-            return LAN(subnet, self.get_next_switch(), [], hosts, lan_num)
+            hosts = map(lambda i: mkHost(lan_num, self.get_next_id(), lan_num), range(self.num_hosts_per_lan))
+            return LAN(subnet, self.get_next_id(), [], hosts, lan_num)
 
-        self.lans = map(mkLAN, range(self.num_lans))
+        self.lans = map(mkLAN, range(1,self.num_lans+1))
         self.subnet_to_lan = {self.lans[i].subnet : i for i in xrange(len(self.lans)) }
 
         # Build ACL.
@@ -455,9 +504,9 @@ class PurdueNetwork:
         parts = ip.split('.')
         return self.lan_of_subnet('%s.%s.%s' % (parts[0], parts[1], parts[2]))
 
-    def get_next_switch(self):
-        rv = self.next_switch
-        self.next_switch += 1
+    def get_next_id(self):
+        rv = self.next_id
+        self.next_id += 1
         return rv
 
 
@@ -499,7 +548,7 @@ class PurdueNetwork:
         return spec_0
 
     def gen_spec_0_1(self):
-        switch = self.get_next_switch()
+        switch = self.get_next_id()
 
         # Local forwarding.
         local_forwarding = []
@@ -668,14 +717,14 @@ class PurdueNetwork:
 
         # Build router-to-router network.
         g = connected_waxman_graph(self.num_routers)
-        relabel = {i:self.get_next_switch() for i in xrange(self.num_routers)}
+        relabel = {i:self.get_next_id() for i in xrange(self.num_routers)}
         for n in g:
             g.node[n]['type'] = 'switch'
         networkx.relabel_nodes(g, relabel, copy=False)
         for lan in self.lans:
             g.add_node(lan.router, type='router')
             g.add_edge(lan.router, relabel[random.randrange(self.num_routers)])
-        add_ports_to_networkx(g, self.next_switch)
+        add_ports_to_networkx(g, self.next_id)
         self.routers = g
 
         router_to_router_preface = []
@@ -714,14 +763,14 @@ class PurdueNetwork:
 
         # Build router-to-router network.
         g = connected_waxman_graph(self.num_routers)
-        relabel = {i:self.get_next_switch() for i in xrange(self.num_routers)}
+        relabel = {i:self.get_next_id() for i in xrange(self.num_routers)}
         for n in g:
             g.node[n]['type'] = 'switch'
         networkx.relabel_nodes(g, relabel, copy=False)
         for lan in self.lans:
             g.add_node(lan.router, type='router')
             g.add_edge(lan.router, relabel[random.randrange(self.num_routers)])
-        add_ports_to_networkx(g, self.next_switch)
+        add_ports_to_networkx(g, self.next_id)
         self.routers = g
 
         router_to_host_preface = []
@@ -762,7 +811,7 @@ class PurdueNetwork:
         # Generate random L2 topologies for each LAN.
         for lan in self.lans:
             g = connected_waxman_graph(self.num_switches_per_lan)
-            relabel = {i:self.get_next_switch() for i in xrange(self.num_switches_per_lan)}
+            relabel = {i:self.get_next_id() for i in xrange(self.num_switches_per_lan)}
             for n in g:
                 g.node[n]['type'] = 'switch'
             networkx.relabel_nodes(g, relabel, copy=False)
@@ -809,7 +858,7 @@ class PurdueNetwork:
         # a distinct MAC address for LAN-facing router ports.
         extra_router_macs = {}
         for lan in self.lans:
-            extra_router_macs[lan.router] = self.get_next_switch()
+            extra_router_macs[lan.router] = self.get_next_id()
         def relabel_macs(mac):
             if mac in extra_router_macs:
                 return extra_router_macs[mac]
@@ -1024,6 +1073,289 @@ class PurdueNetwork:
 
         return spec3
 
+    def export_cocoon(self):
+        out = self.args.export_cocoon
+
+        # FUNCTION cHost
+        out.write('function cHost(hid_t hid): bool =\n')
+        out.write(' or\n'.join(["    hid == 64'd%d" % h.mac for lan in self.lans for h in lan.hosts]))
+        out.write('\n')
+
+        # FUNCTION cVlan
+        out.write('function cVlan(vid_t vid): bool =\n')
+        out.write(' or\n'.join(["    vid == 12'd%d" % lan.vlan for lan in self.lans]))
+        out.write('\n')
+
+        # FUNCTION vidRouterMAC
+        vid_map = ["vid == 12'd%d: 48'h%x;" % (lan.vlan, lan.router)
+                    for lan in self.lans]
+        vid_map = '\n        '.join(vid_map)
+        out.write('''
+function vidRouterMAC(vid_t vid): MAC =
+    case {{
+        {vid_map}
+        default: 48'h0;
+    }}
+'''.format(vid_map = vid_map))
+
+        # FUNCTION ip2vid
+        ip_map = ["ip == 32'h%x: 12'd%d;" % (int_of_ip(h.ip), h.vlan) for lan in self.lans for h in lan.hosts]
+        ip_map = '\n        '.join(ip_map)
+        out.write('''
+function ip2vlan(IP4 ip): vid_t =
+    case {{
+        {ip_map}
+        default: 12'd0;
+    }}
+'''.format(ip_map = ip_map))
+
+        # FUNCTION hid2ip
+        m = ["hid == 64'd%d: 32'h%x;" % (h.mac, int_of_ip(h.ip)) for lan in self.lans for h in lan.hosts]
+        m = '\n        '.join(m)
+        out.write('''
+function hid2ip(hid_t hid): IP4 =
+    case {{
+        {m}
+        default: 32'd0;
+    }}
+'''.format(m = m))
+
+        # FUNCTION ip2hid
+        m = ["ip == 32'h%x: 64'd%d;" % (int_of_ip(h.ip), h.mac) for lan in self.lans for h in lan.hosts]
+        m = '\n        '.join(m)
+        out.write('''
+function ip2hid(IP4 ip): hid_t =
+    case {{
+        {m}
+        default: 32'd0;
+    }}
+'''.format(m = m))
+
+        # FUNCTION acl
+        m = ["(ip.src == 32'h%x and ip.dst == 32'h%x)" % (
+                int_of_ip(src.ip), int_of_ip(dst.ip))
+                for (src, dst) in self.acl_pairs]
+        m = ' or \n    '.join(m)
+        out.write('''
+function acl(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool =
+    {m}
+'''.format(m = m))
+
+        # FUNCTION aclSrc, aclDst (derived)
+        out.write('''
+function aclSrc(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = acl(srcvlan, dstvlan, ip)
+function aclDst(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = true
+''')
+
+        # FUNCTION cZone
+        m = ["zid == 32'd%d" % lan.vlan for lan in self.lans]
+        m = ' or \n    '.join(m)
+        out.write('''
+function cZone(zid_t zid): bool =
+    {m}
+'''.format(m = m))
+
+        # FUNCTION cRouter
+        m = ["rid == 64'd%d" % lan.router for lan in self.lans]
+        m = ' or \n    '.join(m)
+        out.write('''
+function cRouter(hid_t rid): bool =
+    {m}
+'''.format(m = m))
+
+        # FUNCTION nPorts
+        out.write('''
+function nPorts(hid_t hid): uint<16> =
+    case {
+        cHost(hid):     16'd1;
+        cRouter(hid):   16'd2;
+        default: 16'd0;
+    }
+''')
+
+        # FUNCTION portConnected
+        out.write('function portConnected(pid_t pid): bool = true (* assume all ports are connected *)\n')
+
+        # FUNCTION routerPortZone
+        zone_router_ports = []
+        router_router_ports = []
+        for lan in self.lans:
+            zone_router_ports += ["pid == pid_t{64'd%d, 16'd%d}: 32'd%d;" % (
+                lan.router, port, lan.vlan)
+                for port in lan.g.node[lan.router]['ports'].values()]
+            router_router_ports += ["pid == pid_t{64'd%d, 16'd%d}: 32'd%d;" % (
+                lan.router, port, lan.vlan)
+                for port in self.routers.node[lan.router]['ports'].values()]
+        zone_router_ports = '\n        '.join(zone_router_ports)
+        router_router_ports = '\n        '.join(router_router_ports)
+        out.write('''
+function routerPortZone(pid_t pid): zid_t =
+    case {{
+        {zone_router_ports}
+        {router_router_ports}
+        default: 32'd0;
+    }}
+'''.format( zone_router_ports = zone_router_ports
+          , router_router_ports = router_router_ports ))
+
+        # FUNCTION pid2mac
+        hosts = ["pid == pid_t{64'd%d, 16'd1}: 48'h%x;" % ( h.mac, h.mac)
+                 for lan in self.lans for h in lan.hosts]
+        hosts = '\n        '.join(hosts)
+        routers = ["pid == pid_t{64'd%d, 16'd%d}: 48'h%x;" % (lan.router, port, lan.router)
+                    for lan in self.lans for port in lan.g.node[lan.router]['ports'].values()]
+        routers = '\n        '.join(routers)
+        out.write('''
+function pid2mac(pid_t pid): MAC =
+    case {{
+        {hosts}
+        {routers}
+        default: 48'd0;
+    }}
+'''.format(hosts=hosts, routers=routers))
+
+        # FUNCTION mac2pid
+        # Note the following assumptions on gateway routers:
+        # - all gateway routers have exactly two ports
+        # - port 1 connects to the gateway's LAN/Zone
+        # - the other port is > 1 and connects to the router-to-router fabric
+        #   with VLAN 0
+        # TODO: change Leonid's mac2pid implementation to include VLAN or Zone
+        # in domain.
+        out.write('(* TODO: change Cocoon implementation to support mac2pid(MAC, vid_t) *)\n')
+        hosts = ["mac == 48'h%x: pid_t{64'd%d, 16'd1};" % ( h.mac, h.mac)
+                 for lan in self.lans for h in lan.hosts]
+        hosts = '\n        '.join(hosts)
+        routers = []
+        for lan in self.lans:
+            assert(len(self.routers.node[lan.router]['ports']) == 1)
+            routers.append("mac == 48'h%x and vid == 12'd0: pid_t{64'd%d, 16'd%d};" % (
+                lan.router, lan.router, self.routers.node[lan.router]['ports'].values()[0]))
+            routers.append("mac == 48'h%x and vid != 12'd0: pid_t{64'd%d, 16'd1};" % (
+                lan.router, lan.router))
+        routers = '\n        '.join(routers)
+        out.write('''
+function mac2pid(MAC mac, vid_t vid): pid_t =
+    case {{
+        {hosts}
+        {routers}
+        default: pid_t{{64'd0, 16'd0}};
+    }}
+'''.format(hosts=hosts, routers=routers))
+        
+        # FUNCTION l3NextHop
+        m = []
+        for src_lan in self.lans:
+            for dst_lan in self.lans:
+                if src_lan == dst_lan:
+                    continue
+                m.append("rid == 64'd%d and vid == 12'd%d: nexthop_t{48'h%x, 16'd%d};" % (
+                    src_lan.router,
+                    dst_lan.vlan,
+                    dst_lan.router,
+                    self.routers.node[src_lan.router]['ports'].values()[0] ))
+        m = '\n        '.join(m)
+        out.write('''
+function l3NextHop(hid_t rid, vid_t vid): nexthop_t =
+    case {{
+        {m}
+        default: nexthop_t{{48'd0, 16'd0}};
+    }}
+'''.format(m=m))
+
+        # FUNCTION cSwitch
+        local_switches = ["sid == 64'd%d" % n
+                          for lan in self.lans
+                          for n in lan.g
+                          if lan.g.node[n]['type'] == 'switch']
+        router_switches = ["sid == 64'd%d" % n
+                           for n in self.routers
+                           if self.routers.node[n]['type'] == 'switch']
+        switches = ' or\n    '.join(local_switches + router_switches)
+        out.write('''
+function cSwitch(hid_t sid): bool =
+    {switches}
+'''.format( switches=switches ))
+
+        # FUNCTION link
+        local_links = ["pid == pid_t{64'd%d, 16'd%d}: pid_t{64'd%d, 16'd%d};" % (
+            n, lan.g.node[n]['ports'][neighbor], neighbor, lan.g.node[neighbor]['ports'][n])
+            for lan in self.lans for n in lan.g for neighbor in lan.g.node[n]['ports']]
+        local_links = '\n        '.join(local_links)
+        router_links = ["pid == pid_t{64'd%d, 16'd%d}: pid_t{64'd%d, 16'd%d};" % (
+            n, self.routers.node[n]['ports'][neighbor], neighbor, self.routers.node[neighbor]['ports'][n])
+            for n in self.routers for neighbor in self.routers.node[n]['ports']]
+        router_links = '\n        '.join(router_links)
+        out.write('''
+function link(pid_t pid): pid_t =
+    case {{
+        {local_links}
+        {router_links}
+        default: pid{{64'd0, 16'd0}};
+    }}
+'''.format( local_links = local_links
+          , router_links = router_links ))
+
+        # FUNCTION l2distance
+        g = self.routers
+        for lan in self.lans:
+            g = copy_compose(lan.g, g)
+            for n in lan.g:
+                for neighbor in lan.g.node[n]['ports']:
+                    g.node[n]['ports'][neighbor] = lan.g.node[n]['ports'][neighbor]
+
+        distances, out_ports = cocoon_of_networkx(g)
+
+        distances_to_hosts = []
+        ports_to_hosts = []
+        for switch in g:
+            assert(switch in distances)
+            for lan in self.lans:
+                for h in lan.hosts:
+                    if h.mac == switch:
+                        continue
+                    distances_to_hosts += ["hid == 64'd%d and vid == 12'd%d and dstaddr = 48'h%x: 8'd%d;" % (
+                        switch, h.vlan, h.mac, distances[switch][h.mac])]
+                    ports_to_hosts += ["hid == 64'd%d and vid == 12'd%d and dstaddr = 48'h%x: 16'd%d;" % (
+                        switch, h.vlan, h.mac, out_ports[switch][h.mac])]
+        distances_to_hosts = '\n        '.join(distances_to_hosts)
+        ports_to_hosts = '\n        '.join(ports_to_hosts)
+
+        distances_to_routers = []
+        ports_to_routers = []
+        for switch in g:
+            for lan in self.lans:
+                if switch == lan.router:
+                    continue
+                distances_to_routers += ["hid == 64'd%d and vid == 12'd0 and dstaddr = 48'h%x: 8'd%d;" % (
+                    switch, lan.router, distances[switch][lan.router])]
+                ports_to_routers += ["hid == 64'd%d and vid == 12'd0 and dstaddr = 48'h%x: 16'd%d;" % (
+                    switch, lan.router, out_ports[switch][lan.router])]
+        distances_to_routers = '\n        '.join(distances_to_routers)
+        ports_to_routers = '\n        '.join(ports_to_routers)
+
+        out.write('''
+function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
+    case {{
+        {distances_to_hosts}
+        {distances_to_routers}
+        default: 8'd0;
+    }}
+'''.format( distances_to_hosts = distances_to_hosts
+          , distances_to_routers = distances_to_routers ))
+
+
+        # FUNCTION l2NextHop
+        out.write('''
+function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
+    case {{
+        {ports_to_hosts}
+        {ports_to_routers}
+        default: 16'd0;
+    }}
+'''.format( ports_to_hosts = ports_to_hosts
+          , ports_to_routers = ports_to_routers ))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -1083,6 +1415,9 @@ if __name__ == '__main__':
     spec11 = p.gen_spec_1_1()
     spec21 = p.gen_spec_2_1(spec11)
     spec3 = p.gen_spec_3(spec21)
+
+    if args.export_cocoon:
+        p.export_cocoon()
 
     def num_to_spec(n):
         if n == 0:
