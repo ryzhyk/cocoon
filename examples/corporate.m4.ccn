@@ -338,6 +338,9 @@ refine HostOut, RouterOut {
 }
 
 refine {
+
+    include(`corporate.cfg.ccn')
+(*
     function cHost(hid_t hid): bool = hid == 64'd1 or hid == 64'd2
     function cVlan(vid_t vid): bool = vid == 12'd1 or vid == 12'd2
 
@@ -392,7 +395,7 @@ refine {
            default:      16'd0;
         }
 
-    function portConnected(pid_t pid): bool = true (* assume all ports are connected *)
+    function portConnected(pid_t pid): bool = true
     
     function routerPortZone(pid_t pid): zid_t = 
         case { 
@@ -427,12 +430,13 @@ refine {
 
     function l3NextHop(hid_t rid, vid_t vid): nexthop_t = 
         case {
-            rid == 64'd10000001 and vid == 12'd2: nexthop_t{48'hb0b0b0b0b0b0, 16'd1};
+            rid == 64'd10000001 and vid == 12'd2: nexthop_t{48'hb0b0b0b0b0b0, 
+            16'd1};
             rid == 64'd10000002 and vid == 12'd1: nexthop_t{48'ha0a0a0a0a0a0, 16'd1};
             default:                              nexthop_t{48'd0, 16'd0};
         }
 
-    function cSwitch(hid_t sid): bool = cRouter(sid) (* the only switches in this topology are routers *)
+    function cSwitch(hid_t sid): bool = cRouter(sid)
 
     function link(pid_t pid): pid_t = 
         case {
@@ -466,7 +470,8 @@ refine {
             hid == 64'd10000001 and vid == 12'd0 and dstaddr == 48'hb0b0b0b0b0b0: 16'd1;
             hid == 64'd10000002 and vid == 12'd0 and dstaddr == 48'ha0a0a0a0a0a0: 16'd1;
 
-            hid == 64'd10000001 and vid == 12'd1 and dstaddr == 48'hdddddddddddd: 16'd1;
+            hid == 64'd10000001 and vid == 12'd1 and dstaddr == 
+            48'hdddddddddddd: 16'd1;
             hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 16'd0;
             hid == 64'd10000001 and vid == 12'd2 and dstaddr == 48'hbbbbbbbbbbbb: 16'd1;
 
@@ -475,5 +480,7 @@ refine {
             hid == 64'd10000002 and vid == 12'd2 and dstaddr == 48'hcccccccccccc: 16'd1;
 
             default: 16'd0;
-        }
+        }*)
+
+
 }
