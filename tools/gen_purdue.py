@@ -151,7 +151,7 @@ def spp_of_networkx(g, ethDst_of_target=(lambda x: x)):
     return '\n+ '.join(paths)
 
 def cocoon_of_networkx(g):
-    routers = [n for (n, data) in filter(
+    targets = [n for (n, data) in filter(
         lambda (n, data): data['type'] == 'router' or data['type'] == 'host',
         g.nodes(data=True))]
 
@@ -162,9 +162,11 @@ def cocoon_of_networkx(g):
     distances = {}
     out_ports = {}
     for sw in g:
+        if g.node[sw]['type'] == 'host':
+            continue
         distances[sw] = {}
         out_ports[sw] = {}
-        for r in routers:
+        for r in targets:
             if sw == r:
                 continue
 
@@ -1305,6 +1307,8 @@ function link(pid_t pid): pid_t =
         distances_to_hosts = []
         ports_to_hosts = []
         for switch in g:
+            if g.node[switch]['type'] == 'host':
+                continue
             assert(switch in distances)
             for lan in self.lans:
                 for h in lan.hosts:
@@ -1320,6 +1324,8 @@ function link(pid_t pid): pid_t =
         distances_to_routers = []
         ports_to_routers = []
         for switch in g:
+            if g.node[switch]['type'] == 'host':
+                continue
             for lan in self.lans:
                 if switch == lan.router:
                     continue
