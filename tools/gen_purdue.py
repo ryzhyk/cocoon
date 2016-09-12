@@ -1286,7 +1286,7 @@ function link(pid_t pid): pid_t =
     case {{
         {local_links}
         {router_links}
-        default: pid{{64'd0, 16'd0}};
+        default: pid_t{{64'd0, 16'd0}};
     }}
 '''.format( local_links = local_links
           , router_links = router_links ))
