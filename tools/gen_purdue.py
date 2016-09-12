@@ -1352,6 +1352,28 @@ function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
 '''.format( ports_to_hosts = ports_to_hosts
           , ports_to_routers = ports_to_routers ))
 
+        # FUNCTION cPort
+        pids = ["pid == pid_t{64'd%d, 16'd%d}" % (n, port)
+                for n in g
+                for port in g.node[n]['ports'].values()
+                if g.node[n]['type'] == 'host']
+        pids = ' or\n    '.join(pids)
+        out.write('''
+function cHostPort(pid_t pid): bool = 
+    {pids}
+'''.format(pids=pids))
+
+        # FUNCTION cPort
+        pids = ["pid == pid_t{64'd%d, 16'd%d}" % (n, port)
+                for n in g
+                for port in g.node[n]['ports'].values()
+                if g.node[n]['type'] == 'switch' or g.node[n]['type'] == 'router']
+        pids = ' or\n    '.join(pids)
+        out.write('''
+function cSwitchPort(pid_t pid): bool = 
+    {pids}
+'''.format(pids=pids))
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
