@@ -231,7 +231,7 @@ refine HostOut, RouterOut {
 
     function cSwitchPort(pid_t pid): bool
     assume (pid_t pid) cSwitchPort(pid) => cSwitch(pid.hid)
-    assume (pid_t pid) cRouter(pid.hid) => cRouterPort(pid) == cSwitchPort(pid)
+    assume (pid_t pid) cRouterPort(pid) => cSwitchPort(pid)
 
     function cConnectedSwitchPort(pid_t pid): bool = cSwitchPort(pid) and portConnected(pid)
 
@@ -294,7 +294,7 @@ refine HostOut, RouterOut {
         if cHost(srcport.hid) then {
             pkt.vlan.vid := hid2vid(srcport.hid)
         };
-        if cRouter(sid) and 
+        if cRouterPort(pid_t{sid, port}) and 
            pkt.vlan.vid == 12'd0 and 
            pid2mac(pid_t{sid,port}) == pkt.eth.dstAddr then {
             (*if this is a router and this packet is for this router then send it to the router *)
