@@ -1376,6 +1376,29 @@ function cRouterPort(pid_t pid): bool =
     {pids}
 '''.format(pids=pids))
 
+        # FUNCTION mac2hid
+        m = ["mac == 48'h%x: 64'd%d;" % (h.mac, h.mac) for lan in self.lans for h in lan.hosts]
+        m = '\n        '.join(m)
+        out.write('''
+function mac2hid(MAC mac): hid_t =
+    case {{
+        {m}
+        default: 64'd0;
+    }}
+'''.format(m=m))
+
+        # FUNCTION hid2mac
+        m = ["hid == 64'd%d: 48'h%x;" % (h.mac, h.mac) for lan in self.lans for h in lan.hosts]
+        m = '\n        '.join(m)
+        out.write('''
+function hid2mac(hid_t hid): MAC =
+    case {{
+        {m}
+        default: 48'h0;
+    }}
+'''.format(m=m))
+
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
