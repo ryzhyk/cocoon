@@ -17,7 +17,7 @@ for t in ${TESTS[@]}; do
         then
             m4 -I examples examples/${t}.ccn > examples/${t%%.*}.ccn
         fi
-        ${COCOON_PATH} -i examples/${t%%.*}.ccn -b 15 --boogie
+        ${COCOON_PATH} -i examples/${t%%.*}.ccn -b 20 --boogie
         if [ $? -eq 0 ]
         then
             $THISDIR/tools/run_corral.sh examples/${t%%.*}/boogie
