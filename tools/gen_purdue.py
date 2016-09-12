@@ -1077,6 +1077,16 @@ class PurdueNetwork:
 
     def export_cocoon(self):
         out = self.args.export_cocoon
+        
+        # Make a new graph that connects the zones to the router fabric.
+        g = self.routers
+        for lan in self.lans:
+            g = copy_compose(lan.g, g)
+            for n in lan.g:
+                for neighbor in lan.g.node[n]['ports']:
+                    g.node[n]['ports'][neighbor] = lan.g.node[n]['ports'][neighbor]
+
+
 
         # FUNCTION cHost
         out.write('function cHost(hid_t hid): bool =\n')
@@ -1205,7 +1215,7 @@ function routerPortZone(pid_t pid): zid_t =
                  for lan in self.lans for h in lan.hosts]
         hosts = '\n        '.join(hosts)
         routers = ["pid == pid_t{64'd%d, 16'd%d}: 48'h%x;" % (lan.router, port, lan.router)
-                    for lan in self.lans for port in lan.g.node[lan.router]['ports'].values()]
+                    for lan in self.lans for port in g.node[lan.router]['ports'].values()]
         routers = '\n        '.join(routers)
         out.write('''
 function pid2mac(pid_t pid): MAC =
@@ -1295,13 +1305,6 @@ function link(pid_t pid): pid_t =
           , router_links = router_links ))
 
         # FUNCTION l2distance
-        g = self.routers
-        for lan in self.lans:
-            g = copy_compose(lan.g, g)
-            for n in lan.g:
-                for neighbor in lan.g.node[n]['ports']:
-                    g.node[n]['ports'][neighbor] = lan.g.node[n]['ports'][neighbor]
-
         distances, out_ports = cocoon_of_networkx(g)
 
         distances_to_hosts = []
