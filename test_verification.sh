@@ -8,7 +8,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
-TESTS=(nsdi_example corporate.m4 simple-fat-tree vlan_virt.m4 vxlan_virt.m4 
+TESTS=(corporate.m4 nsdi_example simple-fat-tree vlan_virt.m4 vxlan_virt.m4 
 isdx.m4 stags b4 f10)
 
 for t in ${TESTS[@]}; do
