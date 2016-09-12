@@ -1376,7 +1376,7 @@ function cSwitchPort(pid_t pid): bool =
         pids = ["pid == pid_t{64'd%d, 16'd%d}" % (n, port)
                 for n in g
                 for port in g.node[n]['ports'].values()
-                if g.node[n]['type'] == 'router']
+                if g.node[n]['type'] == 'router' and port != 1]
         pids = ' or\n    '.join(pids)
         out.write('''
 function cRouterPort(pid_t pid): bool = 
