@@ -1304,12 +1304,17 @@ function link(pid_t pid): pid_t =
                         switch, h.vlan, h.mac, distances[switch][h.mac])]
                     ports_to_hosts += ["hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 16'd%d;" % (
                         switch, h.vlan, h.mac, out_ports[switch][h.mac])]
+                if switch in lan.g and switch != lan.router:
+                    distances_to_hosts += ["hid == 64'd%d and dstaddr == 48'h%x: 8'd%d;" % (
+                        switch, lan.router, distances[switch][lan.router])]
+                    ports_to_hosts += ["hid == 64'd%d and dstaddr == 48'h%x: 16'd%d;" % (
+                        switch, lan.router, out_ports[switch][lan.router])]
         distances_to_hosts = '\n        '.join(distances_to_hosts)
         ports_to_hosts = '\n        '.join(ports_to_hosts)
 
         distances_to_routers = []
         ports_to_routers = []
-        for switch in g:
+        for switch in self.routers:
             for lan in self.lans:
                 if switch == lan.router or g.node[switch]['type'] == 'host':
                     continue
