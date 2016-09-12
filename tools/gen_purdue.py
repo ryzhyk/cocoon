@@ -1127,7 +1127,7 @@ function hid2ip(hid_t hid): IP4 =
 function ip2hid(IP4 ip): hid_t =
     case {{
         {m}
-        default: 32'd0;
+        default: 64'd0;
     }}
 '''.format(m = m))
 
