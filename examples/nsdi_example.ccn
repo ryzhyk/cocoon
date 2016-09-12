@@ -74,7 +74,7 @@ refine HostOut {
 }
 
 refine RouterCoreOut {
-  role RouterCoreOut[zid_t zid] |cZone(zid)/cHost(pkt.srcIP)=
+  role RouterCoreOut[zid_t zid] | cZone(zid)/cHost(pkt.srcIP)=
       send CoreSwitchIn[zid]
 
   role CoreSwitchIn[uint<16> port] | cZone(port) =
