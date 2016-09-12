@@ -1120,14 +1120,14 @@ function hid2ip(hid_t hid): IP4 =
     }}
 '''.format(m = m))
 
-        # FUNCTION ip2pid
-        m = ["ip == 32'h%x: pid_t{64'd%d, 16'd1};" % (int_of_ip(h.ip), h.mac) for lan in self.lans for h in lan.hosts]
+        # FUNCTION ip2hid
+        m = ["ip == 32'h%x: 64'd%d;" % (int_of_ip(h.ip), h.mac) for lan in self.lans for h in lan.hosts]
         m = '\n        '.join(m)
         out.write('''
-function ip2pid(IP4 ip): pid_t =
+function ip2hid(IP4 ip): hid_t =
     case {{
         {m}
-        default: pid_t{{64'd0, 16'd1}};
+        default: 64'd0;
     }}
 '''.format(m = m))
 
