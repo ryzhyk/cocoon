@@ -1311,7 +1311,7 @@ function link(pid_t pid): pid_t =
         ports_to_routers = []
         for switch in g:
             for lan in self.lans:
-                if switch == lan.router:
+                if switch == lan.router or g.node[switch]['type'] == 'host':
                     continue
                 distances_to_routers += ["hid == 64'd%d and vid == 12'd0 and dstaddr == 48'h%x: 8'd%d;" % (
                     switch, lan.router, distances[switch][lan.router])]
