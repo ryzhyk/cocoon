@@ -1356,17 +1356,6 @@ function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
         pids = ["pid == pid_t{64'd%d, 16'd%d}" % (n, port)
                 for n in g
                 for port in g.node[n]['ports'].values()
-                if g.node[n]['type'] == 'host']
-        pids = ' or\n    '.join(pids)
-        out.write('''
-function cHostPort(pid_t pid): bool = 
-    {pids}
-'''.format(pids=pids))
-
-        # FUNCTION cPort
-        pids = ["pid == pid_t{64'd%d, 16'd%d}" % (n, port)
-                for n in g
-                for port in g.node[n]['ports'].values()
                 if g.node[n]['type'] == 'switch' or g.node[n]['type'] == 'router']
         pids = ' or\n    '.join(pids)
         out.write('''
