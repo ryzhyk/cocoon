@@ -1310,8 +1310,6 @@ function link(pid_t pid): pid_t =
         distances_to_routers = []
         ports_to_routers = []
         for switch in g:
-            if switch not in self.routers:
-                continue
             for lan in self.lans:
                 if switch == lan.router:
                     continue
