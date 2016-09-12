@@ -1398,6 +1398,28 @@ function hid2mac(hid_t hid): MAC =
     }}
 '''.format(m=m))
 
+        # FUNCTION ip2vid
+        m = ["ip == 32'd%d: 12'd%d;" % (int_of_ip(h.ip), h.vlan) for lan in self.lans for h in lan.hosts]
+        m = '\n        '.join(m)
+        out.write('''
+function ip2vid(IP4 ip): vid_t =
+    case {{
+        {m}
+        default: 12'd0;
+    }}
+'''.format(m=m))
+
+        # FUNCTION vidRouter
+        m = ["vid == 12'd%d: 64'd%d;" % (lan.vlan, lan.router) for lan in self.lans]
+        m = '\n        '.join(m)
+        out.write('''
+function vidRouter(vid_t vid): hid_t =
+    case {{
+        {m}
+        default: 64'd0;
+    }}
+'''.format(m=m))
+
 
 
 if __name__ == '__main__':
