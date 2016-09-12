@@ -1175,16 +1175,6 @@ function cRouter(hid_t rid): bool =
     {m}
 '''.format(m = m))
 
-        # FUNCTION nPorts
-        out.write('''
-function nPorts(hid_t hid): uint<16> =
-    case {
-        cHost(hid):     16'd1;
-        cRouter(hid):   16'd2;
-        default: 16'd0;
-    }
-''')
-
         # FUNCTION portConnected
         out.write('function portConnected(pid_t pid): bool = true (* assume all ports are connected *)\n')
 
