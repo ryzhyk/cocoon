@@ -1266,7 +1266,8 @@ function l3NextHop(hid_t rid, vid_t vid): nexthop_t =
         router_switches = ["sid == 64'd%d" % n
                            for n in self.routers
                            if self.routers.node[n]['type'] == 'switch']
-        switches = ' or\n    '.join(local_switches + router_switches)
+        routers = ["sid == 64'd%d" % lan.router for lan in self.lans]
+        switches = ' or\n    '.join(local_switches + router_switches + routers)
         out.write('''
 function cSwitch(hid_t sid): bool =
     {switches}
