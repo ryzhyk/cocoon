@@ -1190,25 +1190,18 @@ function nPorts(hid_t hid): uint<16> =
 
         # FUNCTION routerPortZone
         zone_router_ports = []
-        router_router_ports = []
         for lan in self.lans:
             zone_router_ports += ["pid == pid_t{64'd%d, 16'd%d}: 32'd%d;" % (
                 lan.router, port, lan.vlan)
                 for port in lan.g.node[lan.router]['ports'].values()]
-            router_router_ports += ["pid == pid_t{64'd%d, 16'd%d}: 32'd%d;" % (
-                lan.router, port, lan.vlan)
-                for port in self.routers.node[lan.router]['ports'].values()]
         zone_router_ports = '\n        '.join(zone_router_ports)
-        router_router_ports = '\n        '.join(router_router_ports)
         out.write('''
 function routerPortZone(pid_t pid): zid_t =
     case {{
         {zone_router_ports}
-        {router_router_ports}
         default: 32'd0;
     }}
-'''.format( zone_router_ports = zone_router_ports
-          , router_router_ports = router_router_ports ))
+'''.format( zone_router_ports = zone_router_ports ))
 
         # FUNCTION pid2mac
         hosts = ["pid == pid_t{64'd%d, 16'd1}: 48'h%x;" % ( h.mac, h.mac)
@@ -1327,7 +1320,7 @@ function link(pid_t pid): pid_t =
         distances_to_routers = []
         ports_to_routers = []
         for switch in g:
-            if g.node[switch]['type'] == 'host':
+            if switch not in self.routers:
                 continue
             for lan in self.lans:
                 if switch == lan.router:
