@@ -1,3 +1,28 @@
+typedef uint<32> IP4
+typedef uint<12> vid_t
+typedef struct {
+  vid_t vid,
+  IP4 srcIP,
+  IP4 dstIP
+} Packet
+
+function cHost(IP4 addr): bool
+function cSubnet(vid_t vid): bool
+function acl(Packet p): bool
+function ip2subnet(IP4 ip): vid_t
+assume (IP4 addr) cHost(addr) => cSubnet(ip2subnet(addr))
+
+role HostOut[IP4 addr] | cHost(addr) =
+  let vid_t svid = ip2subnet(pkt.srcIP);
+  let vid_t dvid = ip2subnet(pkt.dstIP);
+  filter pkt.vid == 12'd0;
+  filter addr == pkt.srcIP;
+  filter svid == dvid or acl(pkt);
+  filter cHost(pkt.dstIP);
+  send HostIn[pkt.dstIP]
+
+role HostIn[IP4 addr] | cHost(addr) = filter false
+
 
 (* Introduce dedicated routers for subnets *)
 refine HostOut {
@@ -74,7 +99,7 @@ refine HostOut {
 }
 
 refine RouterCoreOut {
-  role RouterCoreOut[zid_t zid] | cZone(zid)/cHost(pkt.srcIP)=
+  role RouterCoreOut[zid_t zid] |cZone(zid)/cHost(pkt.srcIP)=
       send CoreSwitchIn[zid]
 
   role CoreSwitchIn[uint<16> port] | cZone(port) =
