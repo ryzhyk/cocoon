@@ -1160,7 +1160,7 @@ function aclDst(vid_t srcvlan, vid_t dstvlan, ip4_t ip): bool = true
 ''')
 
         # FUNCTION cZone
-        m = ["zid == 32'd%d" % lan.vlan for lan in self.lans]
+        m = ["zid == 32'd%d" % lan.vlan for lan in self.lans] + ["zid == 32'd0"]
         m = ' or \n    '.join(m)
         out.write('''
 function cZone(zid_t zid): bool =
