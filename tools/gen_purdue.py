@@ -1217,27 +1217,22 @@ function pid2mac(pid_t pid): MAC =
         # FUNCTION mac2pid
         # Note the following assumptions on gateway routers:
         # - all gateway routers have exactly two ports
-        # - port 1 connects to the gateway's LAN/Zone
+        # - port 1 connects to the gateway's zone
         # - the other port is > 1 and connects to the router-to-router fabric
-        #   with VLAN 0
-        # TODO: change Leonid's mac2pid implementation to include VLAN or Zone
-        # in domain.
-        out.write('(* TODO: change Cocoon implementation to support mac2pid(MAC, vid_t) *)\n')
-        hosts = ["mac == 48'h%x: pid_t{64'd%d, 16'd1};" % ( h.mac, h.mac)
-                 for lan in self.lans for h in lan.hosts]
-        hosts = '\n        '.join(hosts)
+        #   (i.e. zone 0)
+
+        # NB: turns out this only needs to be defined for gateway router ports
+        # on the interior router fabric.
+
         routers = []
         for lan in self.lans:
             assert(len(self.routers.node[lan.router]['ports']) == 1)
-            routers.append("mac == 48'h%x and vid == 12'd0: pid_t{64'd%d, 16'd%d};" % (
+            routers.append("mac == 48'h%x: pid_t{64'd%d, 16'd%d};" % (
                 lan.router, lan.router, self.routers.node[lan.router]['ports'].values()[0]))
-            routers.append("mac == 48'h%x and vid != 12'd0: pid_t{64'd%d, 16'd1};" % (
-                lan.router, lan.router))
         routers = '\n        '.join(routers)
         out.write('''
-function mac2pid(MAC mac, vid_t vid): pid_t =
+function mac2pid(MAC mac): pid_t =
     case {{
-        {hosts}
         {routers}
         default: pid_t{{64'd0, 16'd0}};
     }}
