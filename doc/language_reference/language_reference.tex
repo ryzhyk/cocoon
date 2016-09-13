@@ -4,11 +4,19 @@
 \usepackage{color}
 \usepackage[usenames]{xcolor}
 \usepackage{tikz}
+\usepackage{amsmath,amssymb}
 
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{stmaryrd}
 \newcommand\sem[1]{\llbracket #1\rrbracket}
+\newcommand{\pkt}{\ensuremath{pkt}}
+\newcommand{\env}{\ensuremath{env}}
+\newcommand{\args}{\ensuremath{args}}
+\newcommand{\true}{\texttt{true}}
+\newcommand{\false}{\texttt{false}}
+\newcommand{\ERROR}{\texttt{ERROR}}
+
 
 \usepackage[letterpaper, left=25mm, right=25mm]{geometry} 
 
@@ -539,64 +547,77 @@ Things that are not implementable:
 
 \section{Semantics}
 \subsection{Expressions}
-$\sem{e}pkt,env, rec :: value$
+$\sem{e}\pkt,\env, rec :: value$
 
 An $e$ doesn't seem to introduce any nondeterminism.
 
 $rec$ is recipient, only useful to evaluate $.id$ inside a \texttt{?send}.
 Can be \texttt{None} (maybe use an option explicitly?).
 
-To simplify we just write $\sem{e}pkt,env$ when we mean $\sem{e}pkt,env,{\tt None}$
+To simplify we just write $\sem{e}\pkt,\env$ when we mean $\sem{e}\pkt,\env,{\tt None}$
 
-$env$ contains local variables (defined with \texttt{let}), functions, function signatures and
+$\env$ contains local variables (defined with \texttt{let}), functions, function signatures and
 roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 
 \subsection{Statement}
-$\sem{a}pkt,env :: \mathcal{P}(pkt,env)$\qquad(only nondeterminism)
-
-$\sem{\texttt{filter}\ e}pkt,env=\{(pkt,env)\mid\sem{e}pkt,env=\texttt{true}\}$
-\qquad(could be $\emptyset$)
-
-$\sem{e_3:=e_2}pkt,env=\{(pkt[\sem{e_3}\mapsto\sem{e_2}],env)\}$\qquad
-(singleton, TODO be more precise on $\sem{e_3}$)
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\sem{a_1}pkt,env$ if $\sem{e}pkt,env=\texttt{true}$
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\{(pkt,env)\}$ if $\sem{e}pkt,env=\texttt{false}$
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\texttt{ERROR}$ otherwise
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\sem{a_1}pkt,env$ if $\sem{e}pkt,env=\texttt{true}$
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\sem{a_2}pkt,env$ if $\sem{e}pkt,env=\texttt{false}$
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\texttt{ERROR}$ otherwise
-
-$\sem{\texttt{havoc } e}pkt,env=\{pkt[\sem{e}\mapsto v],env\mid\textrm{$v$ can be any value}\}$
-\qquad(Shall we constrain $v$ of being the right type? Usually bad idea to mix typing and
-semantics. TODO be more precise on $\sem{e}$)
-
-$\sem{\texttt{assume}\ e}pkt,env=\{(pkt,env)\mid\sem{e}pkt,env=\texttt{true}\}$
-\qquad(cannot be $\emptyset$. But then WHAT?)
-
-$\sem{\texttt{let}\ id=e}pkt,env=\{(pkt,env[id\mapsto\sem{e}])\}$ if $id\not\in{\sf dom}(env)$
-\qquad($env$ is extended)
+\begin{align*}
+\sem{a}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}(\pkt,\env)) & 
+&\text{outer is nondeterminism, inner is different threads}
+\\
+\sem{\texttt{filter}\ e}(\pkt,\env) & =\{\{(\pkt,\env)\mid\sem{e}(\pkt,\env)=\texttt{true}\}\} &
+&\text{could be $\{\emptyset\}$, cannot be $\emptyset$}
+\\
+\sem{\texttt{assume}\ e}(\pkt,\env) & =\{\{(\pkt,\env)\mid\sem{e}(\pkt,\env)=\texttt{true}\}\} &
+& \text{if $\{(\pkt,\env)\mid\sem{e}\pkt,\env=\texttt{true}\}\neq\emptyset$}
+\\
+\sem{\texttt{assume}\ e}(\pkt,\env) & =\emptyset &
+& \text{otherwise}
+\\& & & \text{can be $\emptyset$, cannot be a set containing $\emptyset$}
+\\
+\sem{e_3:=e_2}(\pkt,\env) & =\{\{(\pkt[\sem{e_3}\mapsto\sem{e_2}],\env)\}\} &
+&\text{singleton, TODO be more precise on $\sem{e_3}$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \sem{a_1}(\pkt,\env) & 
+&\text{ if $\sem{e}(\pkt,\env)=\true$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \{\{(\pkt,\env)\}\} &
+&\text{ if $\sem{e}(\pkt,\env)=\false$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \ERROR &
+&\text{ otherwise}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_1}(\pkt,\env) &
+&\text{ if $\sem{e}(\pkt,\env)=\true$}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_2}(\pkt,\env) &
+&\text{ if $\sem{e}(\pkt,\env)=\false$}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \ERROR &
+&\text{ otherwise}
+\\
+\sem{\texttt{havoc } e}(\pkt,\env) & =\{\{(\pkt[\sem{e}\mapsto v],\env)\}\mid\text{$v$ any value}\} & &
+\text{Constrain $v$ of being the right type? Usually bad idea to mix typing and semantics.}\\
+&&&\text{TODO be more precise on $\sem{e}$}
+\\
+\sem{\texttt{let}\ id=e}(\pkt,\env) & =\{\{(\pkt,\env[id\mapsto\sem{e}])\}\} &
+& \text{if $id\not\in{\sf dom}(\env)$ ($\env$ is extended)}
+\\
+\sem{\texttt{let}\ id=e}(\pkt,\env) & =\ERROR &
+& \text{otherwise}
+\end{align*}
 
 \subsection{Final statement}
-$\sem{f}pkt,env :: \mathcal{P}(\mathcal{P}(pkt,env))$
+Syntactic sugar: $\texttt{?send }id[e]\equiv
+\texttt{let }args=\texttt{havoc};\ \texttt{assume }e;\ \texttt{send }id[args];$
+
+$\sem{f}\pkt,\env :: \mathcal{P}(\mathcal{P}(\pkt,\env))$
 \qquad(both nondeterminism and sending out several packets)
 
-$\sem{\texttt{send }e}(pkt,env)=\sem{e}(pkt,env)$\qquad(role seen as a function)
+$\sem{\texttt{send }e}(\pkt,\env)=\sem{e}(\pkt,\env)$\qquad(role seen as a function)
 
-$\sem{\texttt{?send }id[e]}(pkt,env)=\bigcup\left(\sem{id(args)}(pkt,env)\mid\sem{e}args=\texttt{true}\right)$\qquad(role seen as a function; need to be made more precise)
+$\sem{\texttt{?send }id[e]}(\pkt,\env)=\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}\pkt,\env,args=\texttt{true}\right)$\qquad(role seen as a function; need to be made more precise on $args$ (``of the right type''??))
 
-$\sem{\texttt{fork}}$
+$\sem{\texttt{fork } (args\mid e)\ a}=\bigcup\left(\sem{a}(\pkt,\env[args\mapsto argvals])\mid\sem{e}\pkt,\env[args\mapsto argvals],\texttt{None}=\texttt{true}\right)$
 
 Sending is like calling a function, the function being the role we are sending to.
 
