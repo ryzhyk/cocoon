@@ -253,11 +253,11 @@ refine HostOut, RouterOut {
     assume (hid_t sid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => cConnectedRouterPort(link(pid_t{sid, l2NextHop(sid, 12'd0, dst)}))
     assume (hid_t sid, MAC dst) (l2distance(sid, 12'd0, dst) == 8'd1) => pid2mac(link(pid_t{sid, l2NextHop(sid, 12'd0, dst)})) == dst
 
-    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst == vidRouterMAC(vid)) => cConnectedRouterPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
+    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst == vidRouterMAC(vid)) => cConnectedSwitchPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst == vidRouterMAC(vid)) => link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid == vidRouter(vid)
 
-    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst != vidRouterMAC(vid)) => cHostPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
-    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst != vidRouterMAC(vid)) => hid2mac(link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid) == dst
+    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst != vidRouterMAC(vid) and mac2vid(dst) == vid) => cHostPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
+    assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) == 8'd1 and cVlan(vid) and dst != vidRouterMAC(vid) and mac2vid(dst) == vid) => hid2mac(link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid) == dst
 
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) > 8'd1)  => cConnectedSwitchPort(link(pid_t{sid, l2NextHop(sid, vid, dst)}))
     assume (hid_t sid, vid_t vid, MAC dst) (l2distance(sid, vid, dst) > 8'd1)  => l2distance(link(pid_t{sid, l2NextHop(sid, vid, dst)}).hid, vid, dst) < l2distance(sid, vid, dst) 
