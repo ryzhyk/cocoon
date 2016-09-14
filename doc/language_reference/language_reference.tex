@@ -520,7 +520,7 @@ There are two types of nodes: switches and hosts.
                    &   &   & \mid \texttt{havoc $e$} \mid \texttt{assume $e$} \mid \texttt{let $\tau$ $id$ = $e$} \\
                    & as & = & f \mid a, as \\
 \textrm{final statement} & f & = & \texttt{send $e$} \mid \texttt{?send $id$[$e$]} \mid 
-                            \texttt{fork ($args$ | $e$) $a$}\\
+                            \texttt{fork ($args$ | $e$) $as$}\\
 \textrm{declaration} & d & = & \texttt{typedef}~\tau~id \\
                      &   &   & \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau = e \\
                      &   &   & \mid \texttt{role~$id$\texttt{[}$args$\texttt{]}~$cs$~ = $as$} \\
@@ -607,24 +607,31 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \end{align*}
 
 \subsection{Final statement}
-Syntactic sugar: $\texttt{?send }id[e]\equiv
-\texttt{let }args=\texttt{havoc};\ \texttt{assume }e;\ \texttt{send }id[args];$
+\begin{align*} 
+\texttt{?send }id[e] & \equiv
+\texttt{let }args=\texttt{havoc};\\
+&\quad\ \texttt{assume }e;\ \texttt{send }id[args];&
+& \text{Syntactic sugar}
+\\
+\sem{f}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}(\pkt,\env)) &
+& \text{outer nondeterminism, inner sending out several packets}
+\\
+\sem{\texttt{send }e}(\pkt,\env) & =\sem{e}(\pkt,\textsf{strip}(\env)) &
+& \text{(role seen as a function)}
+\\&&& \text{$env$ should be stripped of all \textrm{let}-defined variables}
+\\
+\sem{\texttt{?send }id[e]}(\pkt,\env) & =\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}(\pkt,\env,args)=\true\right) &
+& \text{TODO check with sugar}
+\\
+\sem{\texttt{fork } (args\mid e)\ as} & =\left\{\bigcup\left(\sem{as}(\pkt,\env[args\mapsto argvals])\mid\sem{e}\pkt,\env[args\mapsto argvals],\texttt{None}=\texttt{true}\right)\right\}
+\end{align*}
 
-$\sem{f}\pkt,\env :: \mathcal{P}(\mathcal{P}(\pkt,\env))$
-\qquad(both nondeterminism and sending out several packets)
+\paragraph{Remark} Sending is like calling a function, the function being the role we are sending to.
 
-$\sem{\texttt{send }e}(\pkt,\env)=\sem{e}(\pkt,\env)$\qquad(role seen as a function)
+\paragraph{Remark} But does the environment set up by the let carry over? No, hence the strip.
 
-$\sem{\texttt{?send }id[e]}(\pkt,\env)=\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}\pkt,\env,args=\texttt{true}\right)$\qquad(role seen as a function; need to be made more precise on $args$ (``of the right type''??))
-
-$\sem{\texttt{fork } (args\mid e)\ a}=\bigcup\left(\sem{a}(\pkt,\env[args\mapsto argvals])\mid\sem{e}\pkt,\env[args\mapsto argvals],\texttt{None}=\texttt{true}\right)$
-
-Sending is like calling a function, the function being the role we are sending to.
-
-Q: But does the environment set up by the let carry over? Probably not.
-
-Q: Do we want the semantics to keep the trace of the nodes the packet has been through?
-Probably not if we want to keep refinement as the inclusion of semantics.
+\paragraph{Remark} Do we want the semantics to keep the trace of the nodes the packet has been through?
+No.
 
 \subsection{Declarations}
 
