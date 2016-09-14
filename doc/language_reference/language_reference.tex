@@ -547,7 +547,7 @@ Things that are not implementable:
 
 \section{Semantics}
 \subsection{Expressions}
-$\sem{e}\pkt,\env, rec :: value$
+$\sem{e}(\pkt,\env, rec) :: value$
 
 An $e$ doesn't seem to introduce any nondeterminism.
 
@@ -560,8 +560,9 @@ $\env$ contains local variables (defined with \texttt{let}), functions, function
 roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 
 \subsection{Statement}
+{\sf Pkt} the set of packets \pkt, and {\sf Env} the set of environments \env
 \begin{align*}
-\sem{a}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}(\pkt,\env)) & 
+\sem{a}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
 &\text{outer is nondeterminism, inner is different threads}
 \\
 \sem{\texttt{filter}\ e}(\pkt,\env) & =\{\{(\pkt,\env)\mid\sem{e}(\pkt,\env)=\texttt{true}\}\} &
@@ -608,23 +609,29 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 
 \subsection{Final statement}
 \begin{align*} 
-\texttt{?send }id[e] & \equiv
-\texttt{let }args=\texttt{havoc};\\
-&\quad\ \texttt{assume }e;\ \texttt{send }id[args];&
-& \text{Syntactic sugar}
-\\
-\sem{f}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}(\pkt,\env)) &
-& \text{outer nondeterminism, inner sending out several packets}
+\sem{f}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
+&\text{outer is nondeterminism, inner is different threads}
 \\
 \sem{\texttt{send }e}(\pkt,\env) & =\sem{e}(\pkt,\textsf{strip}(\env)) &
 & \text{(role seen as a function)}
 \\&&& \text{$env$ should be stripped of all \textrm{let}-defined variables}
 \\
-\sem{\texttt{?send }id[e]}(\pkt,\env) & =\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}(\pkt,\env,args)=\true\right) &
-& \text{TODO check with sugar}
+\texttt{?send }id[e] & \equiv
+\texttt{let }args=\texttt{havoc};\\
+&\quad\ \texttt{assume }e;\ \texttt{send }id[args];&
+& \text{Syntactic sugar}
 \\
-\sem{\texttt{fork } (args\mid e)\ as} & =\left\{\bigcup\left(\sem{as}(\pkt,\env[args\mapsto argvals])\mid\sem{e}\pkt,\env[args\mapsto argvals],\texttt{None}=\texttt{true}\right)\right\}
+\sem{\texttt{?send }id[e]}(\pkt,\env) & \simeq\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}(\pkt,\env[,args])=\true\right) &
+& \text{kind of, except for the calls \texttt{.id}}
+\\
+\sem{\texttt{fork } (args\mid e)\ as} & =\rlap{$\displaystyle\bigotimes\left(\sem{as}(\pkt,\env[args\mapsto vals])\mid\sem{e}(\pkt,\env[args\mapsto vals])=\texttt{true}\right), vals\text{ any value}$}
+\\
+\text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P(\pkt,\env), A_i\in\mathcal P(\mathcal P(\pkt,\env))$}
 \end{align*}
+
+\paragraph{Remark} 
+$\texttt{fork }(a_1,\ldots,a_n\mid e)\ as\equiv
+\texttt{fork }(a_1\mid\true)\ (\texttt{fork } (a_2\mid\true)\ (\ldots\ (\texttt{fork }(a_n\mid e)\ as)\ldots))$
 
 \paragraph{Remark} Sending is like calling a function, the function being the role we are sending to.
 
