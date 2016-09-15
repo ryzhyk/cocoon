@@ -560,7 +560,7 @@ $\env$ contains local variables (defined with \texttt{let}), functions, function
 roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 
 \subsection{Statement}
-{\sf Pkt} the set of packets \pkt, and {\sf Env} the set of environments \env
+{\sf Pkt} the set of packets all \pkt, and {\sf Env} the set of environments all \env
 \begin{align*}
 \sem{a}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
 &\text{outer is nondeterminism, inner is different threads}
@@ -584,7 +584,7 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \{\{(\pkt,\env)\}\} &
 &\text{ if $\sem{e}(\pkt,\env)=\false$}
 \\
-\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \ERROR &
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \ERROR = \emptyset&
 &\text{ otherwise}
 \\
 \sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_1}(\pkt,\env) &
@@ -593,7 +593,7 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_2}(\pkt,\env) &
 &\text{ if $\sem{e}(\pkt,\env)=\false$}
 \\
-\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \ERROR &
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \ERROR=\emptyset &
 &\text{ otherwise}
 \\
 \sem{\texttt{havoc } e}(\pkt,\env) & =\{\{(\pkt[\sem{e}\mapsto v],\env)\}\mid\text{$v$ any value}\} & &
@@ -605,6 +605,7 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \\
 \sem{\texttt{let}\ id=e}(\pkt,\env) & =\ERROR &
 & \text{otherwise}
+\\
 \end{align*}
 
 \subsection{Final statement}
@@ -612,9 +613,11 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \sem{f}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
 &\text{outer is nondeterminism, inner is different threads}
 \\
-\sem{\texttt{send }e}(\pkt,\env) & =\sem{e}(\pkt,\textsf{strip}(\env)) &
+\sem{\texttt{send }e}(\pkt,\env) & =\sem{id[es]}(\pkt,\textsf{strip}(\env))
+\text{ if }\sem{e}(\pkt,\env)=id[es] &
 & \text{(role seen as a function)}
-\\&&& \text{$env$ should be stripped of all \textrm{let}-defined variables}
+\\& = \sem{\sem{e}(\pkt,\env)}(\pkt,\textsf{strip}(\env))
+&& \text{$env$ should be stripped of all \textrm{let}-defined variables}
 \\
 \texttt{?send }id[e] & \equiv
 \texttt{let }args=\texttt{havoc};\\
@@ -626,7 +629,9 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \\
 \sem{\texttt{fork } (args\mid e)\ as} & =\rlap{$\displaystyle\bigotimes\left(\sem{as}(\pkt,\env[args\mapsto vals])\mid\sem{e}(\pkt,\env[args\mapsto vals])=\texttt{true}\right), vals\text{ any value}$}
 \\
-\text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P(\pkt,\env), A_i\in\mathcal P(\mathcal P(\pkt,\env))$}
+\text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P({\sf Pkt}\times{\sf Env}), A_i\in\mathcal P(\mathcal P({\sf Pkt}\times{\sf Env}))$}
+\\
+\sem{a,as}(\pkt,\env) & = \bigcup\left((\sem{as}(\pkt',\env') \mid (\pkt',\env')\right)
 \end{align*}
 
 \paragraph{Remark} 
