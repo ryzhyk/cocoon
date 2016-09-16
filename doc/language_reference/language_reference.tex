@@ -603,7 +603,7 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \sem{\texttt{let}\ id=e}(\pkt,\env) & =\{\{(\pkt,\env[id\mapsto\sem{e}])\}\} &
 & \text{if $id\not\in{\sf dom}(\env)$ ($\env$ is extended)}
 \\
-\sem{\texttt{let}\ id=e}(\pkt,\env) & =\ERROR &
+\sem{\texttt{let}\ id=e}(\pkt,\env) & =\ERROR = \emptyset &
 & \text{otherwise}
 \\
 \end{align*}
@@ -631,12 +631,16 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \\
 \text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P({\sf Pkt}\times{\sf Env}), A_i\in\mathcal P(\mathcal P({\sf Pkt}\times{\sf Env}))$}
 \\
-\sem{a,as}(\pkt,\env) & = \bigcup\left((\sem{as}(\pkt',\env') \mid (\pkt',\env')\right)
+\sem{a,as}(\pkt,\env) & = \bigcup\left(\bigotimes\big(\sem{as}(\pkt',\env') \mid (\pkt',\env')\in A\big)
+\mid A\in\sem{a}(\pkt,\env)\right)
 \end{align*}
 
 \paragraph{Remark} 
 $\texttt{fork }(a_1,\ldots,a_n\mid e)\ as\equiv
 \texttt{fork }(a_1\mid\true)\ (\texttt{fork } (a_2\mid\true)\ (\ldots\ (\texttt{fork }(a_n\mid e)\ as)\ldots))$
+
+\paragraph{Remark} $\displaystyle\bigotimes\{\ldots,\emptyset,\ldots\}=\emptyset$, i.e.,
+if any of the $A_i$ is empty, then their $\displaystyle\bigotimes$ is empty.
 
 \paragraph{Remark} Sending is like calling a function, the function being the role we are sending to.
 
