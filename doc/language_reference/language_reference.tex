@@ -627,6 +627,8 @@ roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 \sem{\texttt{?send }id[e]}(\pkt,\env) & \simeq\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}(\pkt,\env[,args])=\true\right) &
 & \text{kind of, except for the calls \texttt{.id}}
 \\
+\sem{\texttt{drop}} & = \{\emptyset\}
+\\
 \sem{\texttt{fork } (args\mid e)\ as} & =\rlap{$\displaystyle\bigotimes\left(\sem{as}(\pkt,\env[args\mapsto vals])\mid\sem{e}(\pkt,\env[args\mapsto vals])=\texttt{true}\right), vals\text{ any value}$}
 \\
 \text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P({\sf Pkt}\times{\sf Env}), A_i\in\mathcal P(\mathcal P({\sf Pkt}\times{\sf Env}))$}
@@ -641,6 +643,7 @@ $\texttt{fork }(a_1,\ldots,a_n\mid e)\ as\equiv
 
 \paragraph{Remark} $\displaystyle\bigotimes\{\ldots,\emptyset,\ldots\}=\emptyset$, i.e.,
 if any of the $A_i$ is empty, then their $\displaystyle\bigotimes$ is empty.
+Is that what we want?
 
 \paragraph{Remark} Sending is like calling a function, the function being the role we are sending to.
 
@@ -649,6 +652,9 @@ if any of the $A_i$ is empty, then their $\displaystyle\bigotimes$ is empty.
 \paragraph{Remark} Do we want the semantics to keep the trace of the nodes the packet has been through?
 No.
 
+\paragraph{Remark} We should maybe have multisets (bags) as outputs rather than just sets.
+For the multithreading / multicasting. For nondeterminism, sets are fine.
+
 \subsection{Declarations}
 
 Q: What's the entry point of a packet at the beginning? Is it always \texttt{NodeOut} or
@@ -656,6 +662,23 @@ Q: What's the entry point of a packet at the beginning? Is it always \texttt{Nod
 as \texttt{filter false}, i.e., \texttt{drop}.
 
 Should enforce inclusion of semantics.
+
+\begin{align*}
+\texttt{role }id \ [args] & \equiv\texttt{role }id \ [args] \mid\true\ /\ \true\\
+\texttt{role }id \ [args] \mid e& \equiv\texttt{role }id \ [args] \mid e\ /\ \true\\
+\texttt{role }id \ [args] \ /\ e& \equiv\texttt{role }id \ [args] \mid\true\ /\ e\\
+\sem{\texttt{role }id \ [a_1,\ldots,a_n] \mid e_1\ /\ e_2}(\pkt,\env) & = \emptyset &&
+\text{if $\sem{e_1}(?)\neq\true$ or $\sem{e_2}(\pkt,\env)\neq\true$}\\
+&& &\text{TODO $a_i$ should be in scope when evaluating $e_1$ and $e_2$.}\\
+\sem{\texttt{role }id \ [] = as}(funs,roles) & = 
+(funs,roles[id\mapsto semid]) &&
+\text{if $id\not\in{\sf dom}(roles)$}\\
+& = (funs,roles[id\mapsto semid]) &&
+\text{if $\forall(pkt,()),semid(\pkt,())\subseteq roles[id](\pkt,())$ and 
+$id\in{\sf dom}(roles)$ }\\
+& = \ERROR && \text{otherwise}\\
+&\rlap{where $semid=\lambda(\pkt,()).\sem{as}(\pkt,[\ ],funs,roles)$}
+\end{align*}
 
 
 \end{document}
