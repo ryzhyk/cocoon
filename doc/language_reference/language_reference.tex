@@ -547,12 +547,12 @@ Things that are not implementable:
 
 \section{Semantics}
 \subsection{Expressions}
-$\sem{e}(\pkt,\env, rec) :: value$
+$\sem{e}(\pkt,\env) :: value$
 
 An $e$ doesn't seem to introduce any nondeterminism.
 
-$rec$ is recipient, only useful to evaluate $.id$ inside a \texttt{?send}.
-Can be \texttt{None} (maybe use an option explicitly?).
+%$rec$ is recipient, only useful to evaluate $.id$ inside a \texttt{?send}.
+%Can be \texttt{None} (maybe use an option explicitly?).
 
 To simplify we just write $\sem{e}\pkt,\env$ when we mean $\sem{e}\pkt,\env,{\tt None}$
 
@@ -678,7 +678,25 @@ Should enforce inclusion of semantics.
 $id\in{\sf dom}(roles)$ }\\
 & = \ERROR && \text{otherwise}\\
 &\rlap{where $semid=\lambda(\pkt,()).\sem{as}(\pkt,[\ ],funs,roles)$}
+\\
+\sem{\texttt{function }id(args)} & = 
+\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}
+&& 
+\text{(for a declaration only,) semantics is set of all possible functions}\\
+\sem{\texttt{function }id(args)=e} & = 
+\{\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)\}
+&& \text{
+a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
+&&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}
 \end{align*}
 
+\paragraph{Remark} The definition of the semantics of \texttt{role} imposes that the 
+
+\paragraph{Remark} Do we have recursive functions?
+
+\paragraph{Remark} It seems to be that the word \texttt{refine} doesn't really accomplish
+anything. We could basically remove this construct and just have a series of declarations
+\texttt{role}, \texttt{function}, \texttt{assume}, etc. At the end the environment $roles$
+contains all we need.
 
 \end{document}
