@@ -26,23 +26,12 @@ typedef struct {
     arp_t    arp
 } Packet
 
-function p(): uint<8>
-assume () p() < 8'd128 and p() > 8'd2
-
-function k(): uint<8> = p() + p()
-
 function incmodp(uint<8> v): uint<8>
  = 
     case {
         (v + 8'd1) < p(): (v + 8'd1);
         default:          (v + 8'd1) - p();
     }
-(*assume (uint<8> v) (not (incmodp(v) == v)) and (incmodp(v) < p()) *)
-
-function tree(uint<48> addr): bool    = addr[0:0] == 1'd1
-function i1(uint<48> addr): uint<8>   = addr[15:8]
-function i0(uint<48> addr): uint<8>   = addr[23:16]
-function port(uint<48> addr): uint<8> = addr[31:24]
 
 typedef struct {
     bool tree, 
@@ -51,16 +40,20 @@ typedef struct {
     uint<8> h
 } Location
 
-function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = 
-    i1 < p() and i0 < p() and port < p()
+(*assume (uint<8> v) (not (incmodp(v) == v)) and (incmodp(v) < p()) *)
+function p(): uint<8>
+assume () p() < 8'd128 and p() > 8'd2
+function k(): uint<8> = p() + p()
+function tree(uint<48> addr): bool    = addr[0:0] == 1'd1
+function i1(uint<48> addr): uint<8>   = addr[15:8]
+function i0(uint<48> addr): uint<8>   = addr[23:16]
+function port(uint<48> addr): uint<8> = addr[31:24]
 
+function iL0Port(uint<8> i1, uint<8> i0, uint<8> port): bool = i1 < p() and i0 < p() and port < p()
 function goodPacket(Packet p): bool = 
     iL0Port(i1(p.eth.dstAddr), i0(p.eth.dstAddr), port(p.eth.dstAddr))
-
-
 function macEncode(Location loc): uint<48> = 
     16'h0200 ++ loc.h ++ loc.i0 ++ loc.i1 ++ case {loc.tree: 8'd1; default: 8'd2;}
-
 function arpResponse(arp_t arp): arp_t = 
     arp_t { true
           , 16'd2 (* ARP response *)

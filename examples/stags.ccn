@@ -73,24 +73,18 @@ typedef struct {
 (* iXXX() are indicator functions that define sets of instance of a particular type. *)
 (* The set of hosts *)
 function iHost(HostId hst): bool
-
 (* Number of physical ports per host *)
 function nHostPorts(HostId hst): uint<8>
-
 (* The set of host ports *)
 function iHostPort(HostPortId hport): bool = 
     iHost(hport.hst) and hport.port < nHostPorts(hport.hst)
-
 (* The set of currently assigned Eth addresses *)
 function iAddr(Address addr): bool
-
 (* Assigns addresses to host ports *)
 function addrLocation(Address addr): HostPortId
 assume (Address addr) iAddr(addr) => iHostPort(addrLocation(addr))
-
 (* Groups addresses by colors *)
 function addrColor(Address addr): Color
-
 (* Access control list: pairs of colors that can communicate *)
 function canCommunicate(Color col1, Color col2): bool
 (* ACL must be symmetric *)
@@ -100,32 +94,30 @@ assume (Color col1, Color col2) canCommunicate(col1, col2) => canCommunicate(col
  *)
 
 (* Top-level abstract specification *)
-refine {
-    role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
-        (* Only forward packets with vlan tag *)
-        if pkt.vlan.valid then {
-            (* Extract source and destination address from packet *)
-            let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
-            let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
-            (* Vaidity check: 
-               - source and destination addresses exist and 
-               - source address matches address assigned to the given port *)
-            if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
-                (* Security check: souce and destination colors can communicate *)
-                if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
-                    (* Compute destination port *)
-                    let HostPortId dstport = addrLocation(dstAddr);
-                    (* mtag and stag must be remove before delivering the packet *)
-                    pkt.mtag := nomtag();
-                    pkt.stag := nostag();
-                    (* Deliver to destinatin port *)
-                    send HostIn[dstport.hst, dstport.port]
-                }
+role HostOut[HostId hst, uint<8> port] | iHostPort(HostPortId{hst, port}) = 
+    (* Only forward packets with vlan tag *)
+    if pkt.vlan.valid then {
+        (* Extract source and destination address from packet *)
+        let Address srcAddr = Address{pkt.vlan.vid, pkt.eth.srcAddr};
+        let Address dstAddr = Address{pkt.vlan.vid, pkt.eth.dstAddr};
+        (* Vaidity check: 
+           - source and destination addresses exist and 
+           - source address matches address assigned to the given port *)
+        if iAddr(srcAddr) and addrLocation(srcAddr) == HostPortId{hst, port} and iAddr(dstAddr) then {
+            (* Security check: souce and destination colors can communicate *)
+            if canCommunicate(addrColor(srcAddr), addrColor(dstAddr)) then {
+                (* Compute destination port *)
+                let HostPortId dstport = addrLocation(dstAddr);
+                (* mtag and stag must be remove before delivering the packet *)
+                pkt.mtag := nomtag();
+                pkt.stag := nostag();
+                (* Deliver to destinatin port *)
+                send HostIn[dstport.hst, dstport.port]
             }
         }
+    }
 
-    role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
-}
+role HostIn[HostId hst, uint<8> port]  | iHostPort(HostPortId{hst, port}) = filter false
 
 (* Implementation over 3-tier topology *)
 refine HostOut{

@@ -58,18 +58,13 @@ BGP route database encoding
 *)
 
 function nAS(): ASId = 48'd[[[]]]MAXAS
-
 (* Number of ASs connected to exchange *)
 function iAS(ASId as): bool = as < nAS() 
-
 (* Number of SDX-facing ports for each AS *)
 function asNPorts(ASId as): ASPort
-
 function iASPort(ASId as, ASPort port): bool = iAS(as) and port < asNPorts(as)
-
 (* Database of routes advertised via BGP *)
 function prefixMatch(ASId as, IP4 addr): bool
-
 function forwardable(IP4 ip): bool = 
     false[[[]]]forloop([[[i]]], [[[0]]], decr(MAXAS), [[[ or prefixMatch(48'd[[[]]]i, ip)]]])
 
