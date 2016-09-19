@@ -1193,7 +1193,7 @@ function pid2mac(pid_t pid): MAC =
     case {{
         {hosts}
         {routers}
-        default: 48'd0;
+        default: 48'h0;
     }}
 '''.format(hosts=hosts, routers=routers))
 
@@ -1237,7 +1237,7 @@ function mac2pid(MAC mac): pid_t =
 function l3NextHop(hid_t rid, vid_t vid): nexthop_t =
     case {{
         {m}
-        default: nexthop_t{{48'd0, 16'd0}};
+        default: nexthop_t{{48'h0, 16'd0}};
     }}
 '''.format(m=m))
 
@@ -1366,9 +1366,9 @@ function link(pid_t pid): pid_t =
                         # Skip hosts not part of this zone's VLAN.
                         if h.vlan != lan.vlan:
                             continue
-                        d3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'd%d: 8'd%d;" % (
+                        d3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 8'd%d;" % (
                             switch, lan.vlan, h.mac, distances[switch][h.mac]))
-                        f3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'd%d: 16'd%d;" % (
+                        f3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 16'd%d;" % (
                             switch, lan.vlan, h.mac, out_ports[switch][h.mac]))
 
 
@@ -1379,9 +1379,9 @@ function link(pid_t pid): pid_t =
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
-                    d4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'd%d: 8'd%d;" % (
+                    d4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'h%x: 8'd%d;" % (
                         switch, lan.router, distances[switch][lan.router]))
-                    f4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'd%d: 16'd%d;" % (
+                    f4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'h%x: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
 
             # 5. For core switches (and routers), send vlan traffic to vlan
@@ -1405,9 +1405,9 @@ function link(pid_t pid): pid_t =
                 for switch in self.routers:
                     if switch == lan.router:
                         continue
-                    d6.append("hid == 64'd%d and dstaddr == 48'd%x: 8'd%d;" % (
+                    d6.append("hid == 64'd%d and dstaddr == 48'h%x: 8'd%d;" % (
                         switch, lan.router, distances[switch][lan.router]))
-                    f6.append("hid == 64'd%d and dstaddr == 48'd%x: 16'd%d;" % (
+                    f6.append("hid == 64'd%d and dstaddr == 48'h%x: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
  
             out.write('''
