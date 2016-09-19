@@ -1279,6 +1279,7 @@ function link(pid_t pid): pid_t =
         path_lengths = networkx.shortest_path_length(g)
         max_shortest_path = max([path_lengths[src][dst] for src in g for dst in g])
         max_shortest_zone_path = max([path_lengths[lan.router][h.mac] for lan in self.lans for h in lan.hosts])
+        assert(max_shortest_path > max_shortest_zone_path)
 
         distances, out_ports = cocoon_of_networkx(g)
 
@@ -1350,7 +1351,7 @@ function link(pid_t pid): pid_t =
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
                     d2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 8'd%d;" % (
-                        switch, lan.vlan, distances[switch][lan.router] + max_shortest_path))
+                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_path))
                     f2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 16'd%d;" % (
                         switch, lan.vlan, out_ports[switch][lan.router]))
 
@@ -1393,7 +1394,7 @@ function link(pid_t pid): pid_t =
                     if switch == lan.router:
                         continue
                     d5.append("hid == 64'd%d and vid == 12'd%d: 8'd%d;" % (
-                        switch, lan.vlan, distances[switch][lan.router] + max_shortest_zone_path))
+                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_zone_path))
                     f5.append("hid == 64'd%d and vid == 12'd%d: 16'd%d;" % (
                         switch, lan.vlan, out_ports[switch][lan.router]))
                     
@@ -1417,8 +1418,8 @@ function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
         {d2}
         {d3}
         {d4}
-        {d5}
         {d6}
+        {d5}
         default: 8'd0;
     }}
 '''.format( d1='\n        '.join(d1)
@@ -1437,8 +1438,8 @@ function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
         {f2}
         {f3}
         {f4}
-        {f5}
         {f6}
+        {f5}
         default: 16'd0;
     }}
 '''.format( f1='\n        '.join(f1)
