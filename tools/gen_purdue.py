@@ -1414,9 +1414,9 @@ function link(pid_t pid): pid_t =
 function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
     case {{
         {d1}
-        {d4}
         {d2}
         {d3}
+        {d4}
         {d5}
         {d6}
         default: 8'd0;
@@ -1434,9 +1434,9 @@ function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
 function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
     case {{
         {f1}
-        {f4}
         {f2}
         {f3}
+        {f4}
         {f5}
         {f6}
         default: 16'd0;
