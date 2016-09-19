@@ -1409,8 +1409,45 @@ function link(pid_t pid): pid_t =
                         switch, lan.router, distances[switch][lan.router] + max_shortest_zone_path))
                     f6.append("hid == 64'd%d and dstaddr == 48'd%x: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
-              
-       
+ 
+            out.write('''
+function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
+    case {{
+        {d1}
+        {d2}
+        {d3}
+        {d4}
+        {d5}
+        {d6}
+        default: 8'd0;
+    }}
+'''.format( d1='\n        '.join(d1)
+          , d2='\n        '.join(d2)
+          , d3='\n        '.join(d3)
+          , d4='\n        '.join(d4)
+          , d5='\n        '.join(d5)
+          , d6='\n        '.join(d6) ))
+          
+
+            # FUNCTION l2NextHop
+            out.write('''
+function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
+    case {{
+        {f1}
+        {f2}
+        {f3}
+        {f4}
+        {f5}
+        {f6}
+        default: 16'd0;
+    }}
+'''.format( f1='\n        '.join(f1)
+          , f2='\n        '.join(f2)
+          , f3='\n        '.join(f3)
+          , f4='\n        '.join(f4)
+          , f5='\n        '.join(f5)
+          , f6='\n        '.join(f6) ))
+
         else:
             distances_to_hosts = []
             ports_to_hosts = []
