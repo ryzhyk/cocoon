@@ -663,6 +663,9 @@ as \texttt{filter false}, i.e., \texttt{drop}.
 
 Should enforce inclusion of semantics.
 
+NO packet or environment available at this level. Those are just the declarations of 
+functions and roles and assumptions.
+
 \begin{align*}
 \texttt{role }id \ [args] & \equiv\texttt{role }id \ [args] \mid\true\ /\ \true\\
 \texttt{role }id \ [args] \mid e& \equiv\texttt{role }id \ [args] \mid e\ /\ \true\\
@@ -679,18 +682,25 @@ $id\in{\sf dom}(roles)$ }\\
 & = \ERROR && \text{otherwise}\\
 &\rlap{where $semid=\lambda(\pkt,()).\sem{as}(\pkt,[\ ],funs,roles)$}
 \\
-\sem{\texttt{function }id(args)} & = 
-\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}
+\sem{\texttt{function }id(args)}(funs, roles) & = 
+(funs\left[id\mapsto\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}\right],roles)
 && 
 \text{(for a declaration only,) semantics is set of all possible functions}\\
-\sem{\texttt{function }id(args)=e} & = 
-\{\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)\}
+\sem{\texttt{function }id(args)=e}(funs, roles) & = 
+(funs[id\mapsto\{\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)\}],roles)
 && \text{
 a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
 &&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}
+\\
+\sem{\texttt{assume }args\ e}(funs,roles) & = \{(funs,roles)\}\text{ if $\forall args,\sem{e}(?,?,funs,roles)=\true$}
+&&\text{means }\forall args.e\\
+&=\emptyset\text{ otherwise}
 \end{align*}
 
-\paragraph{Remark} The definition of the semantics of \texttt{role} imposes that the 
+\paragraph{Remark} The definition of the semantics of \texttt{role} imposes that if role $A$ is 
+refined into roles $A, B_1,\ldots,B_n$ (with roles $B_1,\ldots,B_n$ new roles),
+then roles $B_1,\ldots,B_n$ need
+to be defined before the refined definition of $A$, since this re-definition uses $B_1,\ldots,B_n$.
 
 \paragraph{Remark} Do we have recursive functions?
 
