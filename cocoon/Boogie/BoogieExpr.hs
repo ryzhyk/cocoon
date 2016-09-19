@@ -133,6 +133,4 @@ mkPktField e =
 
 
 mkCond :: (?p::String, ?mset::MSet, ?locals::Locals, ?r::Refine, ?c::ECtx, ?loc::Doc) => [(Expr,Expr)] -> Expr -> Doc
-mkCond [] d             = mkExpr' d
-mkCond ((cond, e):cs) d = parens $ pp "if" <> (parens $ mkExpr' cond) <+> pp "then" <+> mkExpr' e
-                                                                      <+> pp "else" <+> mkCond cs d
+mkCond cs d = (hsep $ map (\(c,e) -> pp "if" <> (parens $ mkExpr' c) <+> pp "then" <+> mkExpr' e <+> pp "else") cs) <+> mkExpr' d

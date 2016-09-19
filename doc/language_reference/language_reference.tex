@@ -4,11 +4,19 @@
 \usepackage{color}
 \usepackage[usenames]{xcolor}
 \usepackage{tikz}
+\usepackage{amsmath,amssymb}
 
 \usepackage{algorithm}
 \usepackage{algpseudocode}
 \usepackage{stmaryrd}
 \newcommand\sem[1]{\llbracket #1\rrbracket}
+\newcommand{\pkt}{\ensuremath{pkt}}
+\newcommand{\env}{\ensuremath{env}}
+\newcommand{\args}{\ensuremath{args}}
+\newcommand{\true}{\texttt{true}}
+\newcommand{\false}{\texttt{false}}
+\newcommand{\ERROR}{\texttt{ERROR}}
+
 
 \usepackage[letterpaper, left=25mm, right=25mm]{geometry} 
 
@@ -512,7 +520,7 @@ There are two types of nodes: switches and hosts.
                    &   &   & \mid \texttt{havoc $e$} \mid \texttt{assume $e$} \mid \texttt{let $\tau$ $id$ = $e$} \\
                    & as & = & f \mid a, as \\
 \textrm{final statement} & f & = & \texttt{send $e$} \mid \texttt{?send $id$[$e$]} \mid 
-                            \texttt{fork ($args$ | $e$) $a$}\\
+                            \texttt{fork ($args$ | $e$) $as$}\\
 \textrm{declaration} & d & = & \texttt{typedef}~\tau~id \\
                      &   &   & \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau \mid \texttt{function}~id \texttt{(} args \texttt{)} : \tau = e \\
                      &   &   & \mid \texttt{role~$id$\texttt{[}$args$\texttt{]}~$cs$~ = $as$} \\
@@ -539,71 +547,113 @@ Things that are not implementable:
 
 \section{Semantics}
 \subsection{Expressions}
-$\sem{e}pkt,env, rec :: value$
+$\sem{e}(\pkt,\env) :: value$
 
 An $e$ doesn't seem to introduce any nondeterminism.
 
-$rec$ is recipient, only useful to evaluate $.id$ inside a \texttt{?send}.
-Can be \texttt{None} (maybe use an option explicitly?).
+%$rec$ is recipient, only useful to evaluate $.id$ inside a \texttt{?send}.
+%Can be \texttt{None} (maybe use an option explicitly?).
 
-To simplify we just write $\sem{e}pkt,env$ when we mean $\sem{e}pkt,env,{\tt None}$
+To simplify we just write $\sem{e}\pkt,\env$ when we mean $\sem{e}\pkt,\env,{\tt None}$
 
-$env$ contains local variables (defined with \texttt{let}), functions, function signatures and
+$\env$ contains local variables (defined with \texttt{let}), functions, function signatures and
 roles. Roles kinda act as functions. Maybe we'll need to separate eventually.
 
 \subsection{Statement}
-$\sem{a}pkt,env :: \mathcal{P}(pkt,env)$\qquad(only nondeterminism)
-
-$\sem{\texttt{filter}\ e}pkt,env=\{(pkt,env)\mid\sem{e}pkt,env=\texttt{true}\}$
-\qquad(could be $\emptyset$)
-
-$\sem{e_3:=e_2}pkt,env=\{(pkt[\sem{e_3}\mapsto\sem{e_2}],env)\}$\qquad
-(singleton, TODO be more precise on $\sem{e_3}$)
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\sem{a_1}pkt,env$ if $\sem{e}pkt,env=\texttt{true}$
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\{(pkt,env)\}$ if $\sem{e}pkt,env=\texttt{false}$
-
-$\sem{\texttt{if $e$ then $a_1$}}pkt,env=
-\texttt{ERROR}$ otherwise
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\sem{a_1}pkt,env$ if $\sem{e}pkt,env=\texttt{true}$
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\sem{a_2}pkt,env$ if $\sem{e}pkt,env=\texttt{false}$
-
-$\sem{\texttt{if $e$ then $a_1$ else $a_2$}}pkt,env=
-\texttt{ERROR}$ otherwise
-
-$\sem{\texttt{havoc } e}pkt,env=\{pkt[\sem{e}\mapsto v],env\mid\textrm{$v$ can be any value}\}$
-\qquad(Shall we constrain $v$ of being the right type? Usually bad idea to mix typing and
-semantics. TODO be more precise on $\sem{e}$)
-
-$\sem{\texttt{assume}\ e}pkt,env=\{(pkt,env)\mid\sem{e}pkt,env=\texttt{true}\}$
-\qquad(cannot be $\emptyset$. But then WHAT?)
-
-$\sem{\texttt{let}\ id=e}pkt,env=\{(pkt,env[id\mapsto\sem{e}])\}$ if $id\not\in{\sf dom}(env)$
-\qquad($env$ is extended)
+{\sf Pkt} the set of packets all \pkt, and {\sf Env} the set of environments all \env
+\begin{align*}
+\sem{a}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
+&\text{outer is nondeterminism, inner is different threads}
+\\
+\sem{\texttt{filter}\ e}(\pkt,\env) & =\{\{(\pkt,\env)\mid\sem{e}(\pkt,\env)=\texttt{true}\}\} &
+&\text{could be $\{\emptyset\}$, cannot be $\emptyset$}
+\\
+\sem{\texttt{assume}\ e}(\pkt,\env) & =\{\{(\pkt,\env)\mid\sem{e}(\pkt,\env)=\texttt{true}\}\} &
+& \text{if $\{(\pkt,\env)\mid\sem{e}\pkt,\env=\texttt{true}\}\neq\emptyset$}
+\\
+\sem{\texttt{assume}\ e}(\pkt,\env) & =\emptyset &
+& \text{otherwise}
+\\& & & \text{can be $\emptyset$, cannot be a set containing $\emptyset$}
+\\
+\sem{e_3:=e_2}(\pkt,\env) & =\{\{(\pkt[\sem{e_3}\mapsto\sem{e_2}],\env)\}\} &
+&\text{singleton, TODO be more precise on $\sem{e_3}$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \sem{a_1}(\pkt,\env) & 
+&\text{ if $\sem{e}(\pkt,\env)=\true$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \{\{(\pkt,\env)\}\} &
+&\text{ if $\sem{e}(\pkt,\env)=\false$}
+\\
+\sem{\texttt{if $e$ then $a_1$}}(\pkt,\env) & = \ERROR = \emptyset&
+&\text{ otherwise}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_1}(\pkt,\env) &
+&\text{ if $\sem{e}(\pkt,\env)=\true$}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \sem{a_2}(\pkt,\env) &
+&\text{ if $\sem{e}(\pkt,\env)=\false$}
+\\
+\sem{\texttt{if $e$ then $a_1$ else $a_2$}}(\pkt,\env) & = \ERROR=\emptyset &
+&\text{ otherwise}
+\\
+\sem{\texttt{havoc } e}(\pkt,\env) & =\{\{(\pkt[\sem{e}\mapsto v],\env)\}\mid\text{$v$ any value}\} & &
+\text{Constrain $v$ of being the right type? Usually bad idea to mix typing and semantics.}\\
+&&&\text{TODO be more precise on $\sem{e}$}
+\\
+\sem{\texttt{let}\ id=e}(\pkt,\env) & =\{\{(\pkt,\env[id\mapsto\sem{e}])\}\} &
+& \text{if $id\not\in{\sf dom}(\env)$ ($\env$ is extended)}
+\\
+\sem{\texttt{let}\ id=e}(\pkt,\env) & =\ERROR = \emptyset &
+& \text{otherwise}
+\\
+\end{align*}
 
 \subsection{Final statement}
-$\sem{f}pkt,env :: \mathcal{P}(\mathcal{P}(pkt,env))$
-\qquad(both nondeterminism and sending out several packets)
+\begin{align*} 
+\sem{f}(\pkt,\env) & :: \mathcal{P}(\mathcal{P}({\sf Pkt}\times{\sf Env})) &
+&\text{outer is nondeterminism, inner is different threads}
+\\
+\sem{\texttt{send }e}(\pkt,\env) & =\sem{id[es]}(\pkt,\textsf{strip}(\env))
+\text{ if }\sem{e}(\pkt,\env)=id[es] &
+& \text{(role seen as a function)}
+\\& = \sem{\sem{e}(\pkt,\env)}(\pkt,\textsf{strip}(\env))
+&& \text{$env$ should be stripped of all \textrm{let}-defined variables}
+\\
+\texttt{?send }id[e] & \equiv
+\texttt{let }args=\texttt{havoc};\\
+&\quad\ \texttt{assume }e;\ \texttt{send }id[args];&
+& \text{Syntactic sugar}
+\\
+\sem{\texttt{?send }id[e]}(\pkt,\env) & \simeq\bigcup\left(\sem{id[args]}(\pkt,\env)\mid\sem{e}(\pkt,\env[,args])=\true\right) &
+& \text{kind of, except for the calls \texttt{.id}}
+\\
+\sem{\texttt{drop}} & = \{\emptyset\}
+\\
+\sem{\texttt{fork } (args\mid e)\ as} & =\rlap{$\displaystyle\bigotimes\left(\sem{as}(\pkt,\env[args\mapsto vals])\mid\sem{e}(\pkt,\env[args\mapsto vals])=\texttt{true}\right), vals\text{ any value}$}
+\\
+\text{where } & \rlap{$\displaystyle\bigotimes\{A_1,\ldots,A_n\}=\{a_1\cup\ldots\cup a_n\mid a_1\in A_1,\ldots,a_n\in A_n\}, a_i\in\mathcal P({\sf Pkt}\times{\sf Env}), A_i\in\mathcal P(\mathcal P({\sf Pkt}\times{\sf Env}))$}
+\\
+\sem{a,as}(\pkt,\env) & = \bigcup\left(\bigotimes\big(\sem{as}(\pkt',\env') \mid (\pkt',\env')\in A\big)
+\mid A\in\sem{a}(\pkt,\env)\right)
+\end{align*}
 
-$\sem{\texttt{send }e}(pkt,env)=\sem{e}(pkt,env)$\qquad(role seen as a function)
+\paragraph{Remark} 
+$\texttt{fork }(a_1,\ldots,a_n\mid e)\ as\equiv
+\texttt{fork }(a_1\mid\true)\ (\texttt{fork } (a_2\mid\true)\ (\ldots\ (\texttt{fork }(a_n\mid e)\ as)\ldots))$
 
-$\sem{\texttt{?send }id[e]}(pkt,env)=\bigcup\left(\sem{id(args)}(pkt,env)\mid\sem{e}args=\texttt{true}\right)$\qquad(role seen as a function; need to be made more precise)
+\paragraph{Remark} $\displaystyle\bigotimes\{\ldots,\emptyset,\ldots\}=\emptyset$, i.e.,
+if any of the $A_i$ is empty, then their $\displaystyle\bigotimes$ is empty.
+Is that what we want?
 
-$\sem{\texttt{fork}}$
+\paragraph{Remark} Sending is like calling a function, the function being the role we are sending to.
 
-Sending is like calling a function, the function being the role we are sending to.
+\paragraph{Remark} But does the environment set up by the let carry over? No, hence the strip.
 
-Q: But does the environment set up by the let carry over? Probably not.
+\paragraph{Remark} Do we want the semantics to keep the trace of the nodes the packet has been through?
+No.
 
-Q: Do we want the semantics to keep the trace of the nodes the packet has been through?
-Probably not if we want to keep refinement as the inclusion of semantics.
+\paragraph{Remark} We should maybe have multisets (bags) as outputs rather than just sets.
+For the multithreading / multicasting. For nondeterminism, sets are fine.
 
 \subsection{Declarations}
 
@@ -613,5 +663,83 @@ as \texttt{filter false}, i.e., \texttt{drop}.
 
 Should enforce inclusion of semantics.
 
+NO packet or environment available at this level. Those are just the declarations of 
+functions and roles and assumptions.
+
+\begin{align*}
+\sem{d} :: \sem{ds} & :: ({\sf Funs}\times{\sf Roles})\rightarrow ({\sf Funs}\times{\sf Roles})
+\\
+& \text{where }{\sf Funs} = {\sf Id}\rightharpoonup\mathcal{P}\left(\left({\sf Val}^{({\sf Pkt}\times
+{\sf Env})}\right)^{\sf Val}\right)
+&& \text{partial function}\\
+& \text{and }{\sf Roles} = {\sf Id}\rightharpoonup({\sf Pkt}\times{\sf Val^n}\rightarrow{\sf Pkt})
+\\
+\texttt{role }id \ [args] & \equiv\texttt{role }id \ [args] \mid\true\ /\ \true\\
+\texttt{role }id \ [args] \mid e& \equiv\texttt{role }id \ [args] \mid e\ /\ \true\\
+\texttt{role }id \ [args] \ /\ e& \equiv\texttt{role }id \ [args] \mid\true\ /\ e\\
+\sem{\texttt{role }id \ [a_1,\ldots,a_n] \mid e_1\ /\ e_2}(\pkt,\env) & = \emptyset &&
+\text{if $\sem{e_1}(?)\neq\true$ or $\sem{e_2}(\pkt,\env)\neq\true$}\\
+&& &\text{TODO $a_i$ should be in scope when evaluating $e_1$ and $e_2$.}\\
+\sem{\texttt{role }id \ [] = as}(funs,roles) & = 
+(funs,roles[id\mapsto semid]) &&
+\text{if $id\not\in{\sf dom}(roles)$}\\
+& = (funs,roles[id\mapsto semid]) &&
+\text{if $\forall(pkt,()),semid(\pkt,())\subseteq roles[id](\pkt,())$ and 
+$id\in{\sf dom}(roles)$ }\\
+& = \ERROR && \text{otherwise}\\
+&\rlap{where $semid=\lambda(\pkt,()).{\sf fst}(\sem{as}(\pkt,[\ ],funs,roles))$}
+&& \text{only keep first element ($pkt$) of quadruplet}
+\\
+\sem{\texttt{function }id(args)}(funs, roles) & = 
+(funs\left[id\mapsto\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}\right],roles)
+&& 
+\text{(for a declaration only,) semantics is set of all possible functions}\\
+\sem{\texttt{function }id(args)=e}(funs, roles) & = 
+(funs[id\mapsto\{\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)\}],roles)
+&& \text{
+a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
+&&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}
+\\
+\sem{\texttt{assume }args\ e}(funs,roles) & = \{(funs[id\mapsto fset],roles) \}\text{ if }\\
+\text{where }fset & = \{f\in funs[id]\mid 
+\forall args,\sem{e}({\sf emptypkt},[args],funs[id\mapsto\{f\}],[\ ])=\true\}
+&&\text{means }\forall args.e
+\\
+\sem{d,ds}(funs,roles) & = \sem{ds}(\sem{d}(funs,roles))
+\end{align*}
+
+\paragraph{TODO} [semantics of \texttt{assume}] But other function calls in $funs$ can be nondeterministic... Then what?? Might be able to build an intricate counterexample.
+$$\texttt{function }f(x : {\tt int}) : {\tt int};\\
+\texttt{function }g(x : {\tt int}) : {\tt int};\\
+\texttt{assume\,}(x)\ f(x)=g(x);$$
+Then $[f\mapsto\lambda x.x, g\mapsto\lambda x.x]$ and 
+$[f\mapsto\lambda x.x+1, g\mapsto\lambda x.x+1]$ are acceptable, but not
+$[f\mapsto\lambda x.x, g\mapsto\lambda x.x+1]$ or 
+$[f\mapsto\lambda x.x+1, g\mapsto\lambda x.x]$.
+As quantum physicists would say, the definitions of $f$ and $g$ are entangled.
+Currently we can't model that.
+
+\paragraph{Remark} There are basically two ways of dealing with assumptions:
+\begin{itemize}
+\item functions are associated with the set of all possible functions, and then that's 
+cut down when there is an assumption. Assumptions are not collected.
+This is the preferred solution right now.
+\item assumptions are collected and checked against when a function is being declared.
+If an undefined function is called inside a role, we also need to check the assumptions.
+This solution feels less clean.
+\end{itemize}
+
+\paragraph{Remark} The definition of the semantics of \texttt{role} imposes that if role $A$ is 
+refined into roles $A, B_1,\ldots,B_n$ (with roles $B_1,\ldots,B_n$ new roles),
+then roles $B_1,\ldots,B_n$ need
+to be defined before the refined definition of $A$, since this re-definition uses $B_1,\ldots,B_n$.
+
+\paragraph{Remark} Do we have recursive functions?
+
+
+\paragraph{Remark} It seems to be that the word \texttt{refine} doesn't really accomplish
+anything. We could basically remove this construct and just have a series of declarations
+\texttt{role}, \texttt{function}, \texttt{assume}, etc. At the end the environment $roles$
+contains all we need.
 
 \end{document}

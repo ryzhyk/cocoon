@@ -494,7 +494,7 @@ mkAbstStatement _   _    _      nxt s              = error $ "Boogie.mkAbstState
 
 mkNext :: (?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
 mkNext ctx mset locals nxt = case nxt of
-                                  []     -> empty
+                                  []     -> checkDropped
                                   (s:ss) -> mkAbstStatement ctx mset locals ss s
 
 statMSet :: (?r::Refine) => ECtx -> Statement -> Maybe MSet
@@ -564,7 +564,7 @@ mkFuncStatement _   _    _      nxt s              = error $ "Boogie.mkFuncState
 
 mkFuncNext :: (?rmap::RMap, ?r::Refine) => ECtx -> MSet -> Locals -> [Statement] -> Doc
 mkFuncNext ctx mset locals nxt = case nxt of
-                                      []     -> empty
+                                      []     -> isDropped
                                       (s:ss) -> mkFuncStatement ctx mset locals ss s
 
 isDropped :: Doc
