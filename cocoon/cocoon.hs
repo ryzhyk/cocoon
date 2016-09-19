@@ -113,19 +113,25 @@ main = do
     let ps = pairs combined
 
     when (confDoBoogie config) $ do
+        let refinedRoles = intersect (map name $ refineRoles $ head combined) (nub $ concatMap refineTarget combined)
+        let oneBigRefine = (last combined){refineTarget = refinedRoles}
+            (_, oneBigRefineBoogie) = refinementToBoogie (Just $ head combined) oneBigRefine bound
         let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined) bound) :
                           map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2 bound)) ps
             boogiedir = workdir </> "boogie"
         createDirectoryIfMissing False boogiedir
         oldfiles <- listDirectory boogiedir
         mapM_ (removeFile . (boogiedir </>)) oldfiles
+        let writeRefine nm mroles = maybe (return ())
+                                          (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension (nm ++ "_" ++ rl) "bpl") (render b)))
+                                          mroles
         mapIdxM_ (\(_, (asms, mroles)) i -> do -- putStrLn $ "Verifying refinement " ++ show i ++ " with " ++ (show $ length asms) ++ " verifiable assumptions , " ++ (maybe "_" (show . length) mroles) ++ " roles" 
                                                let specN = printf "spec%02d" i
                                                mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension (specN ++ "_asm" ++ show j) "bpl") (render b)) asms
-                                               maybe (return ())
-                                                     (mapM_ (\(rl, b) -> do writeFile (boogiedir </> addExtension (specN ++ "_" ++ rl) "bpl") (render b)))
-                                                     mroles)
+                                               writeRefine specN mroles)
                  boogieSpecs
+        when (length combined > 1) $ do
+            writeRefine "_spec" oneBigRefineBoogie
         putStrLn "Verification condition generation complete"
 
     topology <- case generateTopology final of
