@@ -1349,9 +1349,9 @@ function link(pid_t pid): pid_t =
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
-                    d2.append("hid == 64'd%d and vid != 12'd%d: 8'd%d;" % (
+                    d2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 8'd%d;" % (
                         switch, lan.vlan, distances[switch][lan.router] + max_shortest_path))
-                    f2.append("hid == 64'd%d and vid != 12'd%d: 16'd%d;" % (
+                    f2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 16'd%d;" % (
                         switch, lan.vlan, out_ports[switch][lan.router]))
 
             # 3. For zone switches (and routers), send local (in-zone) traffic
@@ -1379,9 +1379,9 @@ function link(pid_t pid): pid_t =
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
-                    d4.append("hid == 64'd%d and dstaddr == 48'd%d: 8'd%d;" % (
+                    d4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'd%d: 8'd%d;" % (
                         switch, lan.router, distances[switch][lan.router]))
-                    f4.append("hid == 64'd%d and dstaddr == 48'd%d: 16'd%d;" % (
+                    f4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'd%d: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
 
             # 5. For core switches (and routers), send vlan traffic to vlan
