@@ -1380,7 +1380,7 @@ function link(pid_t pid): pid_t =
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
                     d4.append("hid == 64'd%d and dstaddr == 48'd%d: 8'd%d;" % (
-                        switch, lan.router, distances[switch][lan.router] + max_shortest_path))
+                        switch, lan.router, distances[switch][lan.router]))
                     f4.append("hid == 64'd%d and dstaddr == 48'd%d: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
 
@@ -1406,7 +1406,7 @@ function link(pid_t pid): pid_t =
                     if switch == lan.router:
                         continue
                     d6.append("hid == 64'd%d and dstaddr == 48'd%x: 8'd%d;" % (
-                        switch, lan.router, distances[switch][lan.router] + max_shortest_zone_path))
+                        switch, lan.router, distances[switch][lan.router]))
                     f6.append("hid == 64'd%d and dstaddr == 48'd%x: 16'd%d;" % (
                         switch, lan.router, out_ports[switch][lan.router]))
  
@@ -1414,9 +1414,9 @@ function link(pid_t pid): pid_t =
 function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
     case {{
         {d1}
+        {d4}
         {d2}
         {d3}
-        {d4}
         {d5}
         {d6}
         default: 8'd0;
@@ -1434,9 +1434,9 @@ function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
 function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
     case {{
         {f1}
+        {f4}
         {f2}
         {f3}
-        {f4}
         {f5}
         {f6}
         default: 16'd0;
