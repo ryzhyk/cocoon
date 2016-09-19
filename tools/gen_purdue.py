@@ -855,18 +855,6 @@ class PurdueNetwork:
                     sys.stderr.write('%s %d: %s\n' % (d['type'], n, d['ports']))
                 sys.stderr.write('\n')
 
-        # Each gateway router has two ports: One connected to the
-        # router-to-router fabric, and another connected to its LAN.  Generate
-        # a distinct MAC address for LAN-facing router ports.
-        extra_router_macs = {}
-        for lan in self.lans:
-            extra_router_macs[lan.router] = self.get_next_id()
-        def relabel_macs(mac):
-            if mac in extra_router_macs:
-                return extra_router_macs[mac]
-            else:
-                return mac
-
         preface = []
         topo = []
         pol = []
@@ -884,7 +872,7 @@ class PurdueNetwork:
 
             # Generate intra-LAN L2 forwarding.
             t = topology_of_networkx(lan.g)
-            l2 = spp_of_networkx(lan.g, relabel_macs)
+            l2 = spp_of_networkx(lan.g)
             assert(l2)
 
             # Attach VLANs at the hosts.
