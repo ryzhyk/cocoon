@@ -709,6 +709,15 @@ a function semantics is either the whole set or a singleton. Is there a better w
 \end{align*}
 
 \paragraph{TODO} [semantics of \texttt{assume}] But other function calls in $funs$ can be nondeterministic... Then what?? Might be able to build an intricate counterexample.
+$$\texttt{function }f(x : {\tt int}) : {\tt int};\\
+\texttt{function }g(x : {\tt int}) : {\tt int};\\
+\texttt{assume\,}(x)\ f(x)=g(x);$$
+Then $[f\mapsto\lambda x.x, g\mapsto\lambda x.x]$ and 
+$[f\mapsto\lambda x.x+1, g\mapsto\lambda x.x+1]$ are acceptable, but not
+$[f\mapsto\lambda x.x, g\mapsto\lambda x.x+1]$ or 
+$[f\mapsto\lambda x.x+1, g\mapsto\lambda x.x]$.
+As quantum physicists would say, the definitions of $f$ and $g$ are entangled.
+Currently we can't model that.
 
 \paragraph{Remark} There are basically two ways of dealing with assumptions:
 \begin{itemize}
