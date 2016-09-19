@@ -46,6 +46,7 @@ data TOption = CCN String
              | CFG String
              | Bound String
              | DoBoogie
+             | Do1Refinement
              | DoP4
              | DoNetKAT
         
@@ -54,6 +55,7 @@ options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Co
           , Option []    ["cfg"]        (ReqArg CFG "FILE")            "Cocoon config file"
           , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
           , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
+          , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
           , Option []    ["p4"]         (NoArg DoP4)                   "enable P4 backend"
           , Option []    ["netkat"]     (NoArg DoNetKAT)               "enable NetKAT backend"
           ]
@@ -62,6 +64,7 @@ data Config = Config { confCCNFile      :: FilePath
                      , confCfgFile      :: Maybe FilePath
                      , confBound        :: Int
                      , confDoBoogie     :: Bool
+                     , confDo1Refinement:: Bool
                      , confDoP4         :: Bool
                      , confDoNetKAT     :: Bool
                      }
@@ -70,20 +73,22 @@ defaultConfig = Config { confCCNFile      = ""
                        , confCfgFile      = Nothing
                        , confBound        = 15
                        , confDoBoogie     = False
+                       , confDo1Refinement= False
                        , confDoP4         = False
                        , confDoNetKAT     = False
                        }
 
 
 addOption :: TOption -> Config -> Config
-addOption (CCN f)   config = config{ confCCNFile  = f}
-addOption (CFG f)   config = config{ confCfgFile  = Just f}
-addOption (Bound b) config = config{ confBound    = case reads b of
-                                                         []        -> error "invalid bound specified"
-                                                         ((i,_):_) -> i}
-addOption DoBoogie  config = config{ confDoBoogie = True}
-addOption DoP4      config = config{ confDoP4     = True}
-addOption DoNetKAT  config = config{ confDoNetKAT = True}
+addOption (CCN f)       config = config{ confCCNFile  = f}
+addOption (CFG f)       config = config{ confCfgFile  = Just f}
+addOption (Bound b)     config = config{ confBound    = case reads b of
+                                                             []        -> error "invalid bound specified"
+                                                             ((i,_):_) -> i}
+addOption DoBoogie      config = config{ confDoBoogie      = True}
+addOption Do1Refinement config = config{ confDo1Refinement = True}
+addOption DoP4          config = config{ confDoP4          = True}
+addOption DoNetKAT      config = config{ confDoNetKAT      = True}
 
 main = do
     args <- getArgs
@@ -114,7 +119,7 @@ main = do
 
     when (confDoBoogie config) $ do
         let refinedRoles = intersect (map name $ refineRoles $ head combined) (nub $ concatMap refineTarget combined)
-        let oneBigRefine = (last combined){refineTarget = refinedRoles}
+        let oneBigRefine = (last $ filter (not . null . refineTarget) combined){refineTarget = refinedRoles}
             (_, oneBigRefineBoogie) = refinementToBoogie (Just $ head combined) oneBigRefine bound
         let boogieSpecs = (head combined, refinementToBoogie Nothing (head combined) bound) :
                           map (\(r1,r2) -> (r2, refinementToBoogie (Just r1) r2 bound)) ps
@@ -130,7 +135,7 @@ main = do
                                                mapIdxM_ (\(_, b) j -> do writeFile (boogiedir </> addExtension (specN ++ "_asm" ++ show j) "bpl") (render b)) asms
                                                writeRefine specN mroles)
                  boogieSpecs
-        when (length combined > 1) $ do
+        when (length combined > 1 && confDo1Refinement config) $ do
             writeRefine "_spec" oneBigRefineBoogie
         putStrLn "Verification condition generation complete"
 
