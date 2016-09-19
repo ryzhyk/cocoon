@@ -667,6 +667,13 @@ NO packet or environment available at this level. Those are just the declaration
 functions and roles and assumptions.
 
 \begin{align*}
+\sem{d} :: \sem{ds} & :: ({\sf Funs}\times{\sf Roles})\rightarrow ({\sf Funs}\times{\sf Roles})
+\\
+& \text{where }{\sf Funs} = {\sf Id}\rightharpoonup\mathcal{P}\left(\left({\sf Val}^{({\sf Pkt}\times
+{\sf Env})}\right)^{\sf Val}\right)
+&& \text{partial function}\\
+& \text{and }{\sf Roles} = {\sf Id}\rightharpoonup({\sf Pkt}\times{\sf Val^n}\rightarrow{\sf Pkt})
+\\
 \texttt{role }id \ [args] & \equiv\texttt{role }id \ [args] \mid\true\ /\ \true\\
 \texttt{role }id \ [args] \mid e& \equiv\texttt{role }id \ [args] \mid e\ /\ \true\\
 \texttt{role }id \ [args] \ /\ e& \equiv\texttt{role }id \ [args] \mid\true\ /\ e\\
@@ -680,7 +687,8 @@ functions and roles and assumptions.
 \text{if $\forall(pkt,()),semid(\pkt,())\subseteq roles[id](\pkt,())$ and 
 $id\in{\sf dom}(roles)$ }\\
 & = \ERROR && \text{otherwise}\\
-&\rlap{where $semid=\lambda(\pkt,()).\sem{as}(\pkt,[\ ],funs,roles)$}
+&\rlap{where $semid=\lambda(\pkt,()).{\sf fst}(\sem{as}(\pkt,[\ ],funs,roles))$}
+&& \text{only keep first element ($pkt$) of quadruplet}
 \\
 \sem{\texttt{function }id(args)}(funs, roles) & = 
 (funs\left[id\mapsto\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}\right],roles)
@@ -692,10 +700,25 @@ $id\in{\sf dom}(roles)$ }\\
 a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
 &&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}
 \\
-\sem{\texttt{assume }args\ e}(funs,roles) & = \{(funs,roles)\}\text{ if $\forall args,\sem{e}(?,?,funs,roles)=\true$}
-&&\text{means }\forall args.e\\
-&=\emptyset\text{ otherwise}
+\sem{\texttt{assume }args\ e}(funs,roles) & = \{(funs[id\mapsto fset],roles) \}\text{ if }\\
+\text{where }fset & = \{f\in funs[id]\mid 
+\forall args,\sem{e}({\sf emptypkt},[args],funs[id\mapsto\{f\}],[\ ])=\true\}
+&&\text{means }\forall args.e
+\\
+\sem{d,ds}(funs,roles) & = \sem{ds}(\sem{d}(funs,roles))
 \end{align*}
+
+\paragraph{TODO} [semantics of \texttt{assume}] But other function calls in $funs$ can be nondeterministic... Then what?? Might be able to build an intricate counterexample.
+
+\paragraph{Remark} There are basically two ways of dealing with assumptions:
+\begin{itemize}
+\item functions are associated with the set of all possible functions, and then that's 
+cut down when there is an assumption. Assumptions are not collected.
+This is the preferred solution right now.
+\item assumptions are collected and checked against when a function is being declared.
+If an undefined function is called inside a role, we also need to check the assumptions.
+This solution feels less clean.
+\end{itemize}
 
 \paragraph{Remark} The definition of the semantics of \texttt{role} imposes that if role $A$ is 
 refined into roles $A, B_1,\ldots,B_n$ (with roles $B_1,\ldots,B_n$ new roles),
@@ -703,6 +726,7 @@ then roles $B_1,\ldots,B_n$ need
 to be defined before the refined definition of $A$, since this re-definition uses $B_1,\ldots,B_n$.
 
 \paragraph{Remark} Do we have recursive functions?
+
 
 \paragraph{Remark} It seems to be that the word \texttt{refine} doesn't really accomplish
 anything. We could basically remove this construct and just have a series of declarations
