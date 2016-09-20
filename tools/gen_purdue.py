@@ -1576,6 +1576,7 @@ function vidRouter(vid_t vid): hid_t =
 
 
 if __name__ == '__main__':
+    random.seed(0)
     parser = argparse.ArgumentParser()
     parser.add_argument( "num_lans"
                        , help="number of LANs"
