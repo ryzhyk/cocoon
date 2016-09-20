@@ -669,9 +669,11 @@ functions and roles and assumptions.
 \begin{align*}
 \sem{d} :: \sem{ds} & :: ({\sf Funs}\times{\sf Roles})\rightarrow ({\sf Funs}\times{\sf Roles})
 \\
-& \text{where }{\sf Funs} = {\sf Id}\rightharpoonup\mathcal{P}\left(\left({\sf Val}^{({\sf Pkt}\times
-{\sf Env})}\right)^{\sf Val}\right)
+& \text{where }{\sf Funs} = 
+\mathcal{P}\left({\sf Id}\rightharpoonup\left(
+  {\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}\right)
 && \text{partial function}\\
+&&& \text{allows entanglement of functions definitions}\\
 & \text{and }{\sf Roles} = {\sf Id}\rightharpoonup({\sf Pkt}\times{\sf Val^n}\rightarrow{\sf Pkt})
 \\
 \texttt{role }id \ [args] & \equiv\texttt{role }id \ [args] \mid\true\ /\ \true\\
@@ -691,15 +693,16 @@ $id\in{\sf dom}(roles)$ }\\
 && \text{only keep first element ($pkt$) of quadruplet}
 \\
 \sem{\texttt{function }id(args)}(funs, roles) & = 
-(funs\left[id\mapsto\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}\right],roles)
+(\left\{\sigma[id\mapsto f]\mid \sigma\in funs, f\in\left({\sf Val}^{({\sf Pkt}\times{\sf Env})}\right)^{\sf Val}, id\not\in{\sf dom}(\sigma)\right\},roles)
 && 
 \text{(for a declaration only,) semantics is set of all possible functions}\\
+& \text{invariant: all $e\in funs$ have the same domain}\\
 \sem{\texttt{function }id(args)=e}(funs, roles) & = 
-(funs[id\mapsto\{\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)\}],roles)
-&& \text{
-a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
-&&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}
-\\
+(\left\{\sigma\in funs | \sigma(f)=\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env), id\in{\sf dom}(\sigma)\right\}\cup\\
+&\left\{\sigma[id\mapsto\lambda args.\lambda (\pkt,\env).\sem{e}(\pkt,\env)] | \sigma\in funs, id\not\in{\sf dom}(\sigma)\right\}\\
+&,roles)\\
+&& \text{a function semantics is either the whole set or a singleton. Is there a better way to model this?}\\
+&&& \text{no recursion: $id$ should not be in scope of $e$, even if function pre-declared}\\
 \sem{\texttt{assume }args\ e}(funs,roles) & = \{(funs[id\mapsto fset],roles) \}\text{ if }\\
 \text{where }fset & = \{f\in funs[id]\mid 
 \forall args,\sem{e}({\sf emptypkt},[args],funs[id\mapsto\{f\}],[\ ])=\true\}
@@ -736,10 +739,12 @@ to be defined before the refined definition of $A$, since this re-definition use
 
 \paragraph{Remark} Do we have recursive functions?
 
-
 \paragraph{Remark} It seems to be that the word \texttt{refine} doesn't really accomplish
 anything. We could basically remove this construct and just have a series of declarations
 \texttt{role}, \texttt{function}, \texttt{assume}, etc. At the end the environment $roles$
 contains all we need.
+
+\paragraph{Remark} Expressions \emph{are} nondeterministic since functions are
+nondeterministic.
 
 \end{document}
