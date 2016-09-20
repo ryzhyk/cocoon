@@ -1329,8 +1329,7 @@ function link(pid_t pid): pid_t =
         if use_optimized:
             # 1. Do destination L2 routing for all special hosts (i.e. not in
             #    their home zone) for in-VLAN traffic.
-            d1 = []
-            f1 = []
+            df1 = []
 
             # For each host not in the zone associated with its subnet:
             for lan in self.lans:
@@ -1338,27 +1337,21 @@ function link(pid_t pid): pid_t =
                     for switch in g:
                         if g.node[switch]['type'] == 'host':
                             continue
-                        d1.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 8'd%d;" % (
-                            switch, h.vlan, h.mac, distances[switch][h.mac]))
-                        f1.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 16'd%d;" % (
-                            switch, h.vlan, h.mac, out_ports[switch][h.mac]))
+                        df1.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: l2nh_t(8'd%d, 16'd%d);" % (
+                            switch, h.vlan, h.mac, distances[switch][h.mac], out_ports[switch][h.mac]))
 
             # 2. For zone switches, send non-zone traffic to local gateway.
-            d2 = []
-            f2 = []
+            df2 = []
             for lan in self.lans:
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
-                    d2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 8'd%d;" % (
-                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_path))
-                    f2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: 16'd%d;" % (
-                        switch, lan.vlan, out_ports[switch][lan.router]))
+                    df2.append("hid == 64'd%d and vid != 12'd0 and vid != 12'd%d: l2nh_t(8'd%d, 16'd%d);" % (
+                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_path, out_ports[switch][lan.router]))
 
             # 3. For zone switches (and routers), send local (in-zone) traffic
             #    to local host.
-            d3 = []
-            f3 = []
+            df3 = []
             for lan in self.lans:
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] == 'host':
@@ -1367,87 +1360,57 @@ function link(pid_t pid): pid_t =
                         # Skip hosts not part of this zone's VLAN.
                         if h.vlan != lan.vlan:
                             continue
-                        d3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 8'd%d;" % (
-                            switch, lan.vlan, h.mac, distances[switch][h.mac]))
-                        f3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: 16'd%d;" % (
-                            switch, lan.vlan, h.mac, out_ports[switch][h.mac]))
+                        df3.append("hid == 64'd%d and vid == 12'd%d and dstaddr == 48'h%x: l2nh_t(8'd%d, 16'd%d);" % (
+                            switch, lan.vlan, h.mac, distances[switch][h.mac], out_ports[switch][h.mac]))
 
 
             # 4. For zone switches, send router-destined traffic to local gateway.
-            d4 = []
-            f4 = []
+            df4 = []
             for lan in self.lans:
                 for switch in lan.g:
                     if lan.g.node[switch]['type'] != 'switch':
                         continue
-                    d4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'h%x: 8'd%d;" % (
-                        switch, lan.router, distances[switch][lan.router]))
-                    f4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'h%x: 16'd%d;" % (
-                        switch, lan.router, out_ports[switch][lan.router]))
+                    df4.append("hid == 64'd%d and vid != 12'd0 and dstaddr == 48'h%x: l2nh_t(8'd%d, 16'd%d);" % (
+                        switch, lan.router, distances[switch][lan.router], out_ports[switch][lan.router]))
 
             # 5. For core switches (and routers), send vlan traffic to vlan
             #    gateway.
-            d5 = []
-            f5 = []
+            df5 = []
             for lan in self.lans:
                 for switch in self.routers:
                     if switch == lan.router:
                         continue
-                    d5.append("hid == 64'd%d and vid == 12'd%d: 8'd%d;" % (
-                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_zone_path))
-                    f5.append("hid == 64'd%d and vid == 12'd%d: 16'd%d;" % (
-                        switch, lan.vlan, out_ports[switch][lan.router]))
+                    df5.append("hid == 64'd%d and vid == 12'd%d: l2nh_t(8'd%d, 16'd%d);" % (
+                        switch, lan.vlan, distances[switch][lan.router] + 2 * max_shortest_zone_path, out_ports[switch][lan.router]))
                     
             # 6. For core switches (and routers), send router-destined traffic
             #    to router.
-            d6 = []
-            f6 = []
+            df6 = []
             for lan in self.lans:
                 for switch in self.routers:
                     if switch == lan.router:
                         continue
-                    d6.append("hid == 64'd%d and dstaddr == 48'h%x: 8'd%d;" % (
-                        switch, lan.router, distances[switch][lan.router]))
-                    f6.append("hid == 64'd%d and dstaddr == 48'h%x: 16'd%d;" % (
-                        switch, lan.router, out_ports[switch][lan.router]))
+                    df6.append("hid == 64'd%d and dstaddr == 48'h%x: l2nh_t(8'd%d, 16'd%d);" % (
+                        switch, lan.router, distances[switch][lan.router], out_ports[switch][lan.router]))
  
             out.write('''
-function l2distance(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
+function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<8> =
     case {{
-        {d1}
-        {d2}
-        {d3}
-        {d4}
-        {d6}
-        {d5}
+        {df1}
+        {df2}
+        {df3}
+        {df4}
+        {df6}
+        {df5}
         default: 8'd0;
     }}
-'''.format( d1='\n        '.join(d1)
-          , d2='\n        '.join(d2)
-          , d3='\n        '.join(d3)
-          , d4='\n        '.join(d4)
-          , d5='\n        '.join(d5)
-          , d6='\n        '.join(d6) ))
+'''.format( df1='\n        '.join(df1)
+          , df2='\n        '.join(df2)
+          , df3='\n        '.join(df3)
+          , df4='\n        '.join(df4)
+          , df5='\n        '.join(df5)
+          , df6='\n        '.join(df6) ))
           
-
-            # FUNCTION l2NextHop
-            out.write('''
-function l2NextHop(hid_t hid, vid_t vid, MAC dstaddr): uint<16> =
-    case {{
-        {f1}
-        {f2}
-        {f3}
-        {f4}
-        {f6}
-        {f5}
-        default: 16'd0;
-    }}
-'''.format( f1='\n        '.join(f1)
-          , f2='\n        '.join(f2)
-          , f3='\n        '.join(f3)
-          , f4='\n        '.join(f4)
-          , f5='\n        '.join(f5)
-          , f6='\n        '.join(f6) ))
 
         else:
             distances_to_hosts = []
