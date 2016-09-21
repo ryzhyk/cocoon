@@ -5,7 +5,7 @@ GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
 
-for file in $1/*.bpl
+for file in $1
 do
     printf "Verifying $file "
     start=`date +%s`

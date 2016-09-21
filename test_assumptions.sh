@@ -25,8 +25,7 @@ for t in ${TESTS[@]}; do
         ${COCOON_PATH} -i examples/${t%%.*}.ccn -b 100 --boogie $2
         if [ $? -eq 0 ]
         then
-#            $THISDIR/tools/run_corral.sh "examples/${t%%.*}/boogie/*.bpl"
-            $THISDIR/tools/run_corral.sh "examples/${t%%.*}/boogie/*.bpl"
+            $THISDIR/tools/run_corral.sh "examples/${t%%.*}/boogie/*asm*.bpl"
         fi
         printf "\n"
 done
