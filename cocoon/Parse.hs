@@ -157,7 +157,8 @@ role = withPos $ Role nopos <$  reserved "role"
                             <*> (brackets $ commaSep arg) 
                             <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                             <*> (option (EBool nopos True) (reservedOp "/" *> expr))
-                            <*> (reservedOp "=" *> stat)
+                            <*> (reservedOp "=" *> (many $ reserved "var" *> arg))
+                            <*> stat
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (parens $ commaSep arg) <*> expr
 

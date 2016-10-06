@@ -158,10 +158,9 @@ funcValidate r f@Function{..} = do
 
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r role@Role{..} = do
-    uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
-    uniqNames (\v -> "Multiple definitions of local variable " ++ v) $ roleLocals role
-    uniqNames (\v -> "Multiple definitions of fork variable " ++ v) $ roleForkVars role
+    uniqNames (\v -> "Multiple definitions of variable " ++ v) $ roleKeys ++ roleStateVars ++ roleLocals role ++ roleForkVars role 
     mapM_ (typeValidate r . fieldType) roleKeys
+    mapM_ (typeValidate r . fieldType) roleStateVars
     exprValidate r (CtxRole role) [] roleKeyRange
     exprValidate r (CtxRole role) [] rolePktGuard
     _ <- statValidate r (CtxRole role) [] [] roleBody
@@ -346,24 +345,24 @@ exprValidate _ _ _ _ = return ()
 lexprValidate :: (MonadError String me) => Refine -> ECtx -> [Expr] -> [String] -> Expr -> me ()
 lexprValidate r ctx mset vset e = do
     exprValidate r ctx vset e
-    assertR r (isLExpr e) (pos e) "Not an l-value"
+    assertR r (isLExpr ctx e) (pos e) "Not an l-value"
     checkNotModified r ctx mset e
 
-isLExpr :: Expr -> Bool
-isLExpr (EVar _ _)        = False
-isLExpr (EDotVar _ _)     = False
-isLExpr (EPacket _)       = True
-isLExpr (EApply _ _ _)    = False
-isLExpr (EBuiltin _ _ _)  = False
-isLExpr (EField _ s _)    = isLExpr s
-isLExpr (ELocation _ _ _) = False
-isLExpr (EBool _ _)       = False
-isLExpr (EInt _ _ _)      = False
-isLExpr (EStruct _ _ _)   = False
-isLExpr (EBinOp _ _ _ _)  = False
-isLExpr (EUnOp _ _ _)     = False
-isLExpr (ESlice _ _ _ _)  = False -- TODO: allow this
-isLExpr (ECond _ _ _)     = False
+isLExpr :: ECtx -> Expr -> Bool
+isLExpr c (EVar _ n)        = isStateVar c n
+isLExpr _ (EDotVar _ _)     = False
+isLExpr _ (EPacket _)       = True
+isLExpr _ (EApply _ _ _)    = False
+isLExpr _ (EBuiltin _ _ _)  = False
+isLExpr c (EField _ s _)    = isLExpr c s
+isLExpr _ (ELocation _ _ _) = False
+isLExpr _ (EBool _ _)       = False
+isLExpr _ (EInt _ _ _)      = False
+isLExpr _ (EStruct _ _ _)   = False
+isLExpr _ (EBinOp _ _ _ _)  = False
+isLExpr _ (EUnOp _ _ _)     = False
+isLExpr _ (ESlice _ _ _ _)  = False -- TODO: allow this
+isLExpr _ (ECond _ _ _)     = False
 
 -- Checks that no part of lvalue e is in the modified set mset
 checkNotModified :: (MonadError String me) => Refine -> ECtx -> [Expr] -> Expr -> me ()

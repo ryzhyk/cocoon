@@ -116,6 +116,7 @@ data Role = Role { rolePos       :: Pos
                  , roleKeys      :: [Field]
                  , roleKeyRange  :: Expr
                  , rolePktGuard  :: Expr
+                 , roleStateVars :: [Field]
                  , roleBody      :: Statement
                  }
 
@@ -129,6 +130,8 @@ instance WithName Role where
 instance PP Role where
     pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ hcat $ punctuate comma $ map pp roleKeys)
                    <> pp "|" <+> pp roleKeyRange <+> pp "/" <+> pp rolePktGuard <+> pp "=")
+                  $$
+                  (vcat $ map ((pp "var" <+>) . pp) roleStateVars)
                   $$
                   (nest' $ pp roleBody)
 

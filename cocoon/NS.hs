@@ -19,6 +19,7 @@ module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
           lookupLocalVar, checkLocalVar, getLocalVar,
+          lookupStateVar, checkStateVar, getStateVar, isStateVar, 
           lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
@@ -75,7 +76,7 @@ getRole r n = fromJust $ lookupRole r n
 lookupVar :: ECtx -> String -> Maybe Field
 lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
-lookupVar ctx                    n = find ((==n) . name) $ roleKeys rl ++ roleLocals rl ++ ctxForkVars ctx
+lookupVar ctx                    n = find ((==n) . name) $ roleKeys rl ++ roleLocals rl ++ roleStateVars rl ++ ctxForkVars ctx
     where rl = ctxRole ctx
 
 checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
@@ -97,6 +98,21 @@ checkLocalVar p rl n = case lookupLocalVar rl n of
 getLocalVar :: Role -> String -> Field
 getLocalVar rl n = fromJust $ lookupLocalVar rl n
 
+
+lookupStateVar :: Role -> String -> Maybe Field
+lookupStateVar role n = find ((==n) . name) $ roleStateVars role
+
+checkStateVar :: (MonadError String me) => Pos -> Role -> String -> me Field
+checkStateVar p rl n = case lookupStateVar rl n of
+                            Nothing -> err p $ "Unknown state variable: " ++ n
+                            Just v  -> return v
+
+getStateVar :: Role -> String -> Field
+getStateVar rl n = fromJust $ lookupStateVar rl n
+
+isStateVar :: ECtx -> String -> Bool
+isStateVar ctx v | isRoleCtx ctx = isJust $ lookupStateVar (ctxRole ctx) v
+                 | otherwise     = False
 
 lookupKey :: Role -> String -> Maybe Field
 lookupKey rl n = find ((==n) . name) $ roleKeys rl
