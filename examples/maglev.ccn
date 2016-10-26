@@ -1,0 +1,51 @@
+typedef uint<32> rid_t
+typedef uint<32> mid_t
+typedef uint<32> epid_t
+
+function cVIP(IP4 vip): bool
+function cEP(epid_t epid): bool
+function epServesVIP(epid_t epid, IP4 vip): bool
+function ep2ip(epid_t ep): IP4
+function cRouter(rid_t rid): bool
+
+
+var map<flow_t, epid_t> m
+
+update = 
+    // service ep update: cVIP, cEP, epServesVIP, ep2ip
+    filter(m, (\f, x -> cEP(x)))
+
+
+role RouterExtIn[rid_t rid] | cRouter(rid) {
+    packet = 
+        let IP4 vip = pkt.ip4.dst;
+        let flow_t f = flow(pkt);
+        filter cVIP(vip);
+        if not member!(m, f) then {
+            let epid_t x = *;
+            assume(cEP(x) and epServesVIP(x, vip));
+            m := insert!(m, f, x);
+        }
+        (* encapsulate *)
+        pkt.gre := ...;
+        send ServiceEPIn[epServesVIP(select!(m, f), vip)]
+
+    timer =
+
+}
+
+role RouterExtOut[rid_t rid] | cRouter(rid) = filter false
+
+role ServiceEPIn[epid_t epid] | cEP(epid) = filter false
+role ServiceEPOut[epid_t epid] | cEP(epid) = 
+
+refine RouterExtIn {
+    function cMaglev(mid_t mid): bool
+    function maglevServesVIP(mid_t mid, IP4 vip): bool
+    function mid2mac(mid_t mid): MAC
+
+    role RouterIntOut[rid_t rid] | 
+    role MaglevIn[mid_t mid] | cMaglev(mid) = 
+}
+
+
