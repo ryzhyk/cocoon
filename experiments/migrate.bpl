@@ -108,6 +108,7 @@ procedure {:inline} assumeControllerInvariant() {
 
 procedure {:inline} assertControllerInvariant() {
     assert (forall flow: FlowId :: routingTable[flow] == flowmap[flow]);
+    assert (forall server: ServerId, flow: FlowId :: serverBuffer[server, flow] == false);
 }
 
 procedure ConcServer(server: ServerId, packet: Packet) returns (packet': Packet)
@@ -178,6 +179,7 @@ procedure controller()
     call corral_atomic_begin();
     call assumeStateRefinement();
     serverFlows[dst, flow] := flowstate;
+    serverBuffer[dst, flow] := false;
     call assertStateRefinement();
     call corral_atomic_end();
 
