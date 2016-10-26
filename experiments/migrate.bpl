@@ -34,7 +34,7 @@ var absState: AbsState;
 
 var absRes: Packet;
 
-// abstract behavior: yield; apply M()
+// abstract behavior: apply M()
 procedure AbsRole(packet: Packet)
 modifies absState;
 {
@@ -49,50 +49,24 @@ modifies absState;
 
 type ServerId = int;
 
-// concrete state: 
-// - controller state: flow's current location
-var flowmap: [FlowId] ServerId;
+    // concrete state: 
+    // - controller state: flow's current location
+    var flowmap: [FlowId] ServerId;
 
-// - per-flow routing rule
-var routingTable: [FlowId] ServerId;
+    // - per-flow routing rule
+    var routingTable: [FlowId] ServerId;
 
-// - per-flow, per-server state
-var serverFlows: [ServerId, FlowId] MaybeInt;
+    // - per-flow, per-server state
+    var serverFlows: [ServerId, FlowId] MaybeInt;
 
-// - per-flow, per-server forwarding table
-var serverForward: [ServerId, FlowId] MaybeInt;
+    // - per-flow, per-server forwarding table
+    var serverForward: [ServerId, FlowId] MaybeInt;
 
-// - per-flow, per-server buffering flag
-var serverBuffer: [ServerId, FlowId] bool;
+    // - per-flow, per-server buffering flag
+    var serverBuffer: [ServerId, FlowId] bool;
 
 // state invariant:
 // - flow's current location stores its correct state (i.e., equivalent to its abstract state)
-
-
-
-// additional controller invariants (do not hold in the middle of controller execution)
-// - the routing table either stores correct location of the flow
-// - buffering flag is false
-
-// packet thread
-// - start at the switch
-// - forward according to the routing table
-// - at the server: forward or process locally
-var concRes: Packet;
-
-procedure ConcRole(packet: Packet)
-modifies serverFlows;
-{
-    var server: ServerId;
-    call corral_atomic_begin();
-    call assumeStateRefinement();
-    server := routingTable[flow#Packet(packet)];
-    call corral_atomic_end();
-    havoc serverFlows;
-
-    call concRes := ConcServer(server, packet);
-}
-
 procedure {:inline} assumeStateRefinement() {
     assume (forall flow: FlowId :: absState[flow] == serverFlows[flowmap[flow], flow] || serverBuffer[flowmap[flow], flow]);
 }
@@ -101,44 +75,69 @@ procedure {:inline} assertStateRefinement() {
     assert (forall flow: FlowId :: absState[flow] == serverFlows[flowmap[flow], flow] || serverBuffer[flowmap[flow], flow]);
 }
 
+// additional controller invariants (do not hold in the middle of controller execution)
+// - the routing table either stores correct location of the flow
+// - buffering flag is false
+
+    // packet thread
+    // - start at the switch
+    // - forward according to the routing table
+    // - at the server: forward or process locally
+    var concRes: Packet;
+
+    procedure ConcRole(packet: Packet)
+    modifies serverFlows;
+    {
+        var server: ServerId;
+        call corral_atomic_begin();
+        call assumeStateRefinement();
+        server := routingTable[flow#Packet(packet)];
+        call corral_atomic_end();
+
+        call concRes := ConcServer(server, packet);
+    }
+
+    procedure ConcServer(server: ServerId, packet: Packet) returns (packet': Packet)
+    {
+        var server': ServerId;
+        var res: StatePacket;
+
+        call corral_atomic_begin();
+        havoc serverFlows;
+        call assumeStateRefinement();
+
+        assume !serverBuffer[server, flow#Packet(packet)];
+        if (serverForward[server, flow#Packet(packet)] != Nothing()) {
+            server' := v#Just(serverForward[server, flow#Packet(packet)]);
+
+            call corral_atomic_end();
+
+            call packet' := ConcServer(server', packet);
+        } else {
+            if (serverFlows[server, flow#Packet(packet)] == Nothing()) {
+                serverFlows[server, flow#Packet(packet)] := Just(MInitState);
+            } 
+            res := M(v#Just(serverFlows[server, flow#Packet(packet)]), packet);
+            serverFlows[server, flow#Packet(packet)] := Just(state#StatePacket(res));
+            packet' := packet#StatePacket(res);
+            call AbsRole(inpPkt);
+
+            call assertStateRefinement();
+            call corral_atomic_end();
+        }
+    }
+
+// Controller invariants
 procedure {:inline} assumeControllerInvariant() {
     assume (forall flow: FlowId :: routingTable[flow] == flowmap[flow]);
     assume (forall server: ServerId, flow: FlowId :: serverBuffer[server, flow] == false);
+    assume (forall server: ServerId, flow: FlowId :: serverForward[server, flow] == Nothing());
 }
 
 procedure {:inline} assertControllerInvariant() {
     assert (forall flow: FlowId :: routingTable[flow] == flowmap[flow]);
     assert (forall server: ServerId, flow: FlowId :: serverBuffer[server, flow] == false);
-}
-
-procedure ConcServer(server: ServerId, packet: Packet) returns (packet': Packet)
-{
-    var server': ServerId;
-    var res: StatePacket;
-
-    call corral_atomic_begin();
-    call assumeStateRefinement();
-
-    assume !serverBuffer[server, flow#Packet(packet)];
-    if (serverForward[server, flow#Packet(packet)] != Nothing()) {
-        server' := v#Just(serverForward[server, flow#Packet(packet)]);
-
-        call corral_atomic_end();
-        havoc serverFlows;
-
-        call packet' := ConcServer(server', packet);
-    } else {
-        if (serverFlows[server, flow#Packet(packet)] == Nothing()) {
-            serverFlows[server, flow#Packet(packet)] := Just(MInitState);
-        } 
-        res := M(v#Just(serverFlows[server, flow#Packet(packet)]), packet);
-        serverFlows[server, flow#Packet(packet)] := Just(state#StatePacket(res));
-        packet' := packet#StatePacket(res);
-        call AbsRole(inpPkt);
-
-        call assertStateRefinement();
-        call corral_atomic_end();
-    }
+    assert (forall server: ServerId, flow: FlowId :: serverForward[server, flow] == Nothing());
 }
 
 
