@@ -56,7 +56,8 @@ reservedNames = ["and",
                  "then",
                  "true",
                  "typedef",
-                 "uint"]
+                 "uint",
+                 "var"]
 
 
 lexer = T.makeTokenParser (emptyDef {T.commentStart      = "(*"

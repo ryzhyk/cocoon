@@ -19,7 +19,7 @@ syn match  ccnDelimiter         ":="
 syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool case default endrefine filter fork function assume host havoc let not or pkt refine role send struct switch
+syn keyword ccnStatement        and bool case default endrefine filter fork function assume host havoc let not or pkt refine role send struct switch var
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 
