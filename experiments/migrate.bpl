@@ -79,53 +79,55 @@ procedure {:inline} assertStateRefinement() {
 // - the routing table either stores correct location of the flow
 // - buffering flag is false
 
-    // packet thread
-    // - start at the switch
-    // - forward according to the routing table
-    // - at the server: forward or process locally
-    var concRes: Packet;
+// packet thread
+// - start at the switch
+// - forward according to the routing table
+// - at the server: forward or process locally
 
-    procedure ConcRole(packet: Packet)
-    modifies serverFlows;
-    {
-        var server: ServerId;
-        call corral_atomic_begin();
-        call assumeStateRefinement();
-        server := routingTable[flow#Packet(packet)];
+procedure ConcSwitch(packet: Packet)
+modifies serverFlows;
+{
+    var server: ServerId;
+    call corral_atomic_begin();
+    call assumeStateRefinement();
+    server := routingTable[flow#Packet(packet)];
+    call assertStateRefinement();
+    call corral_atomic_end();
+
+    call ConcServer(server, packet);
+}
+
+procedure ConcServer(server: ServerId, packet: Packet)
+{
+    var server': ServerId;
+    var res: StatePacket;
+    var packet': Packet;
+
+    call corral_atomic_begin();
+    havoc serverFlows;
+    call assumeStateRefinement();
+
+    assume !serverBuffer[server, flow#Packet(packet)];
+    if (serverForward[server, flow#Packet(packet)] != Nothing()) {
+        server' := v#Just(serverForward[server, flow#Packet(packet)]);
+        call assertStateRefinement();
         call corral_atomic_end();
 
-        call concRes := ConcServer(server, packet);
+        call ConcServer(server', packet);
+    } else {
+        if (serverFlows[server, flow#Packet(packet)] == Nothing()) {
+            serverFlows[server, flow#Packet(packet)] := Just(MInitState);
+        } 
+        res := M(v#Just(serverFlows[server, flow#Packet(packet)]), packet);
+        serverFlows[server, flow#Packet(packet)] := Just(state#StatePacket(res));
+        packet' := packet#StatePacket(res);
+        call AbsRole(inpPkt);
+
+        call assertStateRefinement();
+        assert absRes == packet';
+        call corral_atomic_end();
     }
-
-    procedure ConcServer(server: ServerId, packet: Packet) returns (packet': Packet)
-    {
-        var server': ServerId;
-        var res: StatePacket;
-
-        call corral_atomic_begin();
-        havoc serverFlows;
-        call assumeStateRefinement();
-
-        assume !serverBuffer[server, flow#Packet(packet)];
-        if (serverForward[server, flow#Packet(packet)] != Nothing()) {
-            server' := v#Just(serverForward[server, flow#Packet(packet)]);
-
-            call corral_atomic_end();
-
-            call packet' := ConcServer(server', packet);
-        } else {
-            if (serverFlows[server, flow#Packet(packet)] == Nothing()) {
-                serverFlows[server, flow#Packet(packet)] := Just(MInitState);
-            } 
-            res := M(v#Just(serverFlows[server, flow#Packet(packet)]), packet);
-            serverFlows[server, flow#Packet(packet)] := Just(state#StatePacket(res));
-            packet' := packet#StatePacket(res);
-            call AbsRole(inpPkt);
-
-            call assertStateRefinement();
-            call corral_atomic_end();
-        }
-    }
+}
 
 // Controller invariants
 procedure {:inline} assumeControllerInvariant() {
@@ -202,14 +204,13 @@ procedure controller()
 }
 
 
-var absJoin: bool;
 var concJoin: bool;
 var concRunning: bool;
 
 procedure conc_thread(p: Packet)
 {
     concRunning := true;
-    call ConcRole(p);
+    call ConcSwitch(p);
     concRunning := false;
     concJoin := true;
 }
@@ -218,21 +219,16 @@ var inpPkt: Packet;
 
 procedure {:entrypoint} main() 
 {
-    var ap': Packet;
-    var cp': Packet;
     havoc inpPkt;
     
     call assumeControllerInvariant();
 
-    //absJoin := false;
     concJoin := false;
     concRunning := false;
     async call conc_thread(inpPkt);
     async call controller();
-    //assume absJoin;
     assume concJoin;
 
     call assertStateRefinement();
-    assert absRes == concRes;
 }
 
