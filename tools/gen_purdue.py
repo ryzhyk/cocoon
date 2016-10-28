@@ -540,7 +540,12 @@ class PurdueNetwork:
         # Build ACL forwarding.
         all_hosts = [h for lan in self.lans for h in lan.hosts]
         acl_forwarding = '\n+ '.join(map(lambda h: 'ip4Dst = %d; sw := %s; port := 1' % (int_of_ip(h.ip), h.mac), all_hosts))
-        acl = ';\n'.join(['~(ip4Src = %d; ip4Dst = %d)' % (int_of_ip(h1.ip), int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
+
+        if self.args.export_hsa:
+            and_sym = ' and'
+        else:
+            and_sym = ';'
+        acl = ';\n'.join(['~(ip4Src = %d%s ip4Dst = %d)' % (int_of_ip(h1.ip), and_sym, int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
 
         spec_0 = Spec0(
             '( %s )' % '\n\n+\n\n'.join(local_forwarding),
@@ -567,14 +572,23 @@ class PurdueNetwork:
         # Non-local forwarding filter.
         nonlocal_predicate = []
         for lan in self.lans:
-            local_pred = '\n+ '.join(map(lambda h: 'port = %d' % h.mac, lan.hosts))
-            local_ip = '\n+ '.join(map(lambda h: 'ip4Dst = %d' % int_of_ip(h.ip), lan.hosts))
+            if self.args.export_hsa:
+                or_sym = ' or '
+            else:
+                or_sym = '\n+ '
+            local_pred = or_sym.join(map(lambda h: 'port = %d' % h.mac, lan.hosts))
+            local_ip = or_sym.join(map(lambda h: 'ip4Dst = %d' % int_of_ip(h.ip), lan.hosts))
+
             nonlocal_predicate.append('sw = %d; (%s); ~(%s)' % (switch, local_pred, local_ip))
 
         # Build ACL forwarding.
         all_hosts = [h for lan in self.lans for h in lan.hosts]
         acl_forwarding = '\n+ '.join(map(lambda h: 'ip4Dst = %d; port := %d' % (int_of_ip(h.ip), h.mac), all_hosts))
-        acl = ';\n'.join(['~(ip4Src = %d; ip4Dst = %d)' % (int_of_ip(h1.ip), int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
+        if self.args.export_hsa:
+            and_sym = ' and'
+        else:
+            and_sym = ';'
+        acl = ';\n'.join(['~(ip4Src = %d%s ip4Dst = %d)' % (int_of_ip(h1.ip), and_sym, int_of_ip(h2.ip)) for (h1, h2) in self.acl_pairs])
 
         spec_0 = Spec0_1(
             '( %s )' % '\n+\n'.join(local_forwarding),
@@ -957,7 +971,11 @@ class PurdueNetwork:
             # router's VLAN, and:
 
             # ... the target host is in this LAN.
-            acl = ';\n '.join(['~(ip4Src = %d; ip4Dst = %d)' % (int_of_ip(src.ip), int_of_ip(dst.ip))
+            if self.args.export_hsa:
+                and_sym = ' and'
+            else:
+                and_sym = ';'
+            acl = ';\n '.join(['~(ip4Src = %d%s ip4Dst = %d)' % (int_of_ip(src.ip), and_sym, int_of_ip(dst.ip))
                         for (src, dst) in filter(lambda (src, dst): dst in vlan_to_hosts[lan.vlan], self.acl_pairs)])
             if acl == '':
                 acl = 'pass'
