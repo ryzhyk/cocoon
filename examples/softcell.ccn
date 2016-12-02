@@ -1,0 +1,49 @@
+role LTE
+    var ueip: [guid] IP;
+    var attachedUEs: [guid] bool;
+
+    event packetFromUE(guid, Packet) {
+        if ueip[guid] != Nothing() and pkt.srcIP == ueip[guid]{
+            
+        }
+    };
+
+    event packetFromPDN() {
+    };
+
+    event attach(guid) | not attachedUEs[guid] {
+        attachedUEs[guid] := true;
+    };
+ 
+    event detach(guid) | attachedUEs[guid] {
+    }
+
+    event requestIP() | attachedUEs[guid] {
+        if ueip[guid] == Nothing() {
+            ueip[guid] := uniqueaddr;
+        }
+        Host[guid].assignIP(ueip[guid]);
+    };
+
+role Host[guid] | true
+    event packet();
+    event assignIP();
+
+refine LTE {
+    event packetFromUE(guid, Packet) = UEAgent[guid].packetFromUE(Packet);
+    event attach(guid) = UEAgent[guid].attach();
+    event detach(guid) = UEAgent[guid].detach();
+    event packetFromPDN() = GW.packetFromPDN();
+
+    role GW[] {
+    }
+
+    role UEAgent[guid] {
+        event packetFromUE(p)
+        event attach();
+        event detach();
+    }
+
+    role eBS[bsid] {
+    }
+}
