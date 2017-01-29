@@ -2,13 +2,13 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                cocoon
-version:             0.1.0.0
+version:             0.2.0.0
 synopsis:            Cocoon compiler
 -- description:         
 -- license:             
 license-file:        LICENSE
 author:              Leonid Ryzhyk
-maintainer:          l.ryzhyk@samsung.com
+maintainer:          lryzhyk@vmware.com
 -- copyright:           
 category:            Language
 build-type:          Simple

@@ -1,18 +1,3 @@
-{-
-Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
--}
 {-# LANGUAGE FlexibleContexts, RecordWildCards #-}
 
 module Syntax( pktVar
@@ -21,8 +6,10 @@ module Syntax( pktVar
              , errR, assertR
              , Field(..)
              , Role(..)
-             , roleLocals
-             , roleForkVars
+             , Relation(..)
+             , Constraint(..)
+             , Constructor(..)
+             , Rule(..)
              , NodeType(..)
              , Node(..)
              , Function(..)
@@ -33,13 +20,8 @@ module Syntax( pktVar
              , UOp(..)
              , Expr(..)
              , ECtx(..)
-             , isRoleCtx
-             , ctxRole
-             , ctxForkVars
              , conj
-             , disj
-             , Statement(..)
-             , statLocals) where
+             , disj) where
 
 import Control.Monad.Except
 import Text.PrettyPrint
@@ -53,13 +35,14 @@ pktVar = "pkt"
 
 data Spec = Spec [Refine]
 
-data Refine = Refine { refinePos     :: Pos
-                     , refineTarget  :: [String]
-                     , refineTypes   :: [TypeDef]
-                     , refineFuncs   :: [Function]
-                     , refineRoles   :: [Role]
-                     , refineAssumes :: [Assume]
-                     , refineNodes   :: [Node]
+data Refine = Refine { refinePos       :: Pos
+                     , refineTarget    :: [String]
+                     , refineTypes     :: [TypeDef]
+                     , refineFunctions :: [Function]
+                     , refineRelations :: [Relation]
+                     , refineAssumes   :: [Assume]
+                     , refineRoles     :: [Role]
+                     , refineNodes     :: [Node]
                      }
 
 instance WithPos Refine where
@@ -71,7 +54,9 @@ instance PP Refine where
                     $$
                     (nest' $ (vcat $ map pp refineTarget)
                              $$
-                             (vcat $ map pp refineFuncs)
+                             (vcat $ map pp refineFunctions)
+                             $$
+                             (vcat $ map pp refineRelations)
                              $$
                              (vcat $ map pp refineAssumes)
                              $$
@@ -95,9 +80,6 @@ data Field = Field { fieldPos  :: Pos
                    , fieldType :: Type
                    }
 
-instance Eq Field where
-    (==) f1 f2 = name f1 == name f2 && fieldType f1 == fieldType f2
-
 instance WithPos Field where
     pos = fieldPos
     atPos f p = f{fieldPos = p}
@@ -116,7 +98,7 @@ data Role = Role { rolePos       :: Pos
                  , roleKeys      :: [Field]
                  , roleKeyRange  :: Expr
                  , rolePktGuard  :: Expr
-                 , roleBody      :: Statement
+                 , roleBody      :: Expr
                  }
 
 instance WithPos Role where
@@ -135,12 +117,6 @@ instance PP Role where
 data NodeType = NodeSwitch
               | NodeHost
               deriving Eq
-
-roleLocals :: Role -> [Field]
-roleLocals role = statLocals $ roleBody role
-
-roleForkVars :: Role -> [Field]
-roleForkVars role = statForkVarsRec $ roleBody role
 
 data Node = Node { nodePos   :: Pos
                  , nodeType  :: NodeType
@@ -162,9 +138,53 @@ instance PP Node where
                   <+>
                   (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
 
+data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [String]}
+                | ForeignKey {constrPos :: Pos, constrArgs :: [String], constrForeign :: String, constrFArgs :: [String]}
+                | Unique     {constrPos :: Pos, constrArgs :: [String]}
+                | Check      {constrPos :: Pos, constrCond :: Expr}
+
+instance WithPos Constraint where
+    pos = constrPos
+    atPos c p = c{constrPos = p}
+
+
+instance PP Constraint where
+    pp (PrimaryKey _ as)       = pp "primary key" <+> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (ForeignKey _ as f fas) = pp "foreign key" <+> (parens $ hsep $ punctuate comma $ map pp as) <+> pp "references" 
+                                 <+> pp f <+> (parens $ hsep $ punctuate comma $ map pp fas)
+    pp (Unique _ as)           = pp "unique" <+> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (Check _ e)             = pp "check" <+> pp e
+   
+
+data Relation = Relation { relPos  :: Pos
+                         , relName :: String
+                         , relArgs :: [Field]
+                         , relConstraints :: [Constraint]
+                         , relDef  :: Maybe [Rule]}
+
+instance WithPos Relation where
+    pos = relPos
+    atPos r p = r{relPos = p}
+
+instance PP Relation where
+    pp Relation{..} = pp "relation" <+> pp relName <+> 
+                      (parens $ hsep $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <+>
+                      (maybe empty (\_ -> pp "=") relDef) $$
+                      (maybe empty (vcat . map (ppRule relName)) relDef)
+
+data Rule = Rule { rulePos :: Pos
+                 , ruleLHS :: [Expr]
+                 , ruleRHS :: [Expr]}
+
+ppRule :: String -> Rule -> Doc
+ppRule rel Rule{..} = pp rel <> (parens $ hsep $ punctuate comma $ map pp ruleLHS) <+> pp ":-" <+> (hsep $ punctuate comma $ map pp ruleRHS)
+
+instance WithPos Rule where
+    pos = rulePos
+    atPos r p = r{rulePos = p}
 
 data Assume = Assume { assPos  :: Pos
-                     , assVars :: [Field]
+                     , assArgs :: [Field]
                      , assExpr :: Expr
                      }
 
@@ -173,7 +193,7 @@ instance WithPos Assume where
     atPos a p = a{assPos = p}
 
 instance PP Assume where 
-    pp Assume{..} = pp "assume" <> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
+    pp Assume{..} = pp "assume" <+> (parens $ hsep $ punctuate comma $ map pp assArgs) <+> pp assExpr
 
 instance Show Assume where
     show = render . pp
@@ -181,17 +201,10 @@ instance Show Assume where
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
                          , funcArgs :: [Field]
-                         , funcType :: Type
+                         , funcType :: Maybe Type
                          , funcDom  :: Expr
-                         , funcDef  :: Maybe Expr
+                         , funcDef  :: Expr
                          }
-
-instance Eq Function where
-    (==) f1 f2 = funcName f1 == funcName f2 &&
-                 funcArgs f1 == funcArgs f2 &&
-                 funcType f1 == funcType f2 &&
-                 funcDom  f1 == funcDom  f2 &&
-                 funcDef  f1 == funcDef  f2
 
 instance WithPos Function where
     pos = funcPos
@@ -201,38 +214,50 @@ instance WithName Function where
     name = funcName
 
 instance PP Function where
-    pp Function{..} = (pp "function" <+> pp funcName <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) <> colon <+> pp funcType <>
-                       maybe empty (\_ -> pp "=") funcDef)
+    pp Function{..} = (pp "function" <+> pp funcName <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
+                      <> (maybe empty ((colon <+>) . pp) funcType) <>
+                       pp "=")
                       $$
-                      maybe empty (nest' . pp) funcDef
+                      (nest' $ pp funcDef)
+
+data Constructor = Constructor { consPos :: Pos
+                               , consName :: String
+                               , consArgs :: [Field] }
+
+instance WithPos Constructor where
+    pos = consPos
+    atPos c p = c{consPos = p}
+
+instance PP Constructor where
+    pp Constructor{..} = pp consName <> (braces $ hsep $ punctuate comma $ map pp consArgs)
+
+instance Show Constructor where
+    show = render . pp
 
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
-          | TUInt     {typePos :: Pos, typeWidth :: Int}
+          | TInt      {typePos :: Pos}
+          | TString   {typePos :: Pos}
+          | TBit      {typePos :: Pos, typeWidth :: Int}
           | TArray    {typePos :: Pos, typeElemType :: Type, typeLength :: Int}
-          | TStruct   {typePos :: Pos, typeFields :: [Field]}
+          | TStruct   {typePos :: Pos, typeCons :: [Constructor]}
+          | TTuple    {typePos :: Pos, typeArgs :: [Type]}
           | TUser     {typePos :: Pos, typeName :: String}
-
-instance Eq Type where
-    (==) (TLocation _)    (TLocation _)    = True
-    (==) (TBool _)        (TBool _)        = True
-    (==) (TUInt _ w1)     (TUInt _ w2)     = w1 == w2
-    (==) (TArray _ t1 l1) (TArray _ t2 l2) = t1 == t2 && l1 == l2
-    (==) (TStruct _ fs1)  (TStruct _ fs2)  = fs1 == fs2
-    (==) (TUser _ n1)     (TUser _ n2)     = n1 == n2
-    (==) _               _                 = False
 
 instance WithPos Type where
     pos = typePos
     atPos t p = t{typePos = p}
 
 instance PP Type where
-    pp (TLocation _)  = pp "Location"
-    pp (TBool _)      = pp "bool"
-    pp (TUInt _ w)    = pp "uint<" <> pp w <> pp ">" 
-    pp (TArray _ t l) = brackets $ pp t <> semi <+> pp l
-    pp (TStruct _ fs) = pp "struct" <> (braces $ hsep $ punctuate comma $ map pp fs)
-    pp (TUser _ n)    = pp n
+    pp (TLocation _)    = pp "Location"
+    pp (TBool _)        = pp "bool"
+    pp (TInt _)         = pp "int" 
+    pp (TString _)      = pp "string" 
+    pp (TBit _ w)       = pp "bit<" <> pp w <> pp ">" 
+    pp (TArray _ t l)   = brackets $ pp t <> semi <+> pp l
+    pp (TStruct _ cons) = vcat $ punctuate (char '|') $ map pp cons
+    pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
+    pp (TUser _ n)      = pp n
 
 instance Show Type where
     show = render . pp
@@ -250,36 +275,29 @@ instance WithName TypeDef where
     name = tdefName
 
 data Expr = EVar      {exprPos :: Pos, exprVar :: String}
-          | EDotVar   {exprPos :: Pos, exprVar :: String}
           | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EBuiltin  {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
           | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}
           | EBool     {exprPos :: Pos, exprBVal :: Bool}
-          | EInt      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
-          | EStruct   {exprPos :: Pos, exprStructName :: String, exprFields :: [Expr]}
+          | EInt      {exprPos :: Pos, exprIVal :: Integer}
+          | EString   {exprPos :: Pos, exprString :: String}
+          | EBit      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
+          | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [Expr]}
+          | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
+          | ESwitch   {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)], exprDefault :: Maybe Expr}
+          | ELet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
+          | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
+          | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
+          | EITE      {exprPos :: Pos, exprCond :: Expr, exprThen :: Expr, exprElse :: Maybe Expr}
+          | ETest     {exprPos :: Pos, exprCond :: Expr}
+          | ESet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
+          | ESend     {exprPos :: Pos, exprDst  :: Expr}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
-          | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
-          | ECond     {exprPos :: Pos, exprCases :: [(Expr, Expr)], exprDefault :: Expr}
-
-instance Eq Expr where
-    (==) (EVar      _ k1)        (EVar      _ k2)        = k1 == k2
-    (==) (EDotVar   _ k1)        (EDotVar   _ k2)        = k1 == k2
-    (==) (EPacket   _)           (EPacket   _)           = True
-    (==) (EApply    _ f1 as1)    (EApply    _ f2 as2)    = (f1 == f2) && (as1 == as2)
-    (==) (EBuiltin  _ f1 as1)    (EBuiltin  _ f2 as2)    = (f1 == f2) && (as1 == as2)
-    (==) (EField    _ s1 f1)     (EField    _ s2 f2)     = (s1 == s2) && (f1 == f2)
-    (==) (ELocation _ r1 as1)    (ELocation _ r2 as2)    = (r1 == r2) && (as1 == as2)
-    (==) (EBool     _ v1)        (EBool     _ v2)        = v1 == v2
-    (==) (EInt      _ w1 v1)     (EInt      _ w2 v2)     = w1 == w2 && v1 == v2
-    (==) (EStruct   _ s1 fs1)    (EStruct   _ s2 fs2)    = (s1 == s2) && (fs1 == fs2)
-    (==) (EBinOp    _ op1 l1 r1) (EBinOp    _ op2 l2 r2) = (op1 == op2) && (l1 == l2) && (r1 == r2)
-    (==) (EUnOp     _ op1 e1)    (EUnOp     _ op2 e2)    = (op1 == op2) && (e1 == e2)
-    (==) (ESlice    _ e1 h1 l1)  (ESlice    _ e2 h2 l2)  = (e1 == e2) && (h1 == h2) && (l1 == l2)
-    (==) (ECond     _ cs1 d1)    (ECond     _ cs2 d2)    = (cs1 == cs2) && (d1 == d2)
-    (==) _                       _                       = False
+          | ENDLet    {exprPos :: Pos, exprLetVars :: [String], exprLetCond :: Expr}
+          | EFork     {exprPos :: Pos, exprFrkVars :: [String], exprFrkCond :: Expr, exprFrkBody :: Expr}
 
 instance WithPos Expr where
     pos = exprPos
@@ -287,7 +305,6 @@ instance WithPos Expr where
 
 instance PP Expr where
     pp (EVar _ v)          = pp v
-    pp (EDotVar _ v)       = char '.' <> pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EBuiltin _ f as)   = pp f <> char '!' <>(parens $ hsep $ punctuate comma $ map pp as)
@@ -295,12 +312,30 @@ instance PP Expr where
     pp (ELocation _ r as)  = pp r <> (brackets $ hsep $ punctuate comma $ map pp as)
     pp (EBool _ True)      = pp "true"
     pp (EBool _ False)     = pp "false"
-    pp (EInt _ w v)        = pp w <> pp "'d" <> pp v
+    pp (EInt _ v)          = pp v
+    pp (EString _ s)       = pp s
+    pp (EBit _ w v)        = pp w <> pp "'d" <> pp v
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
+    pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
+    pp (ESwitch _ e cs d)  = pp "switch" <+> pp e <+> (braces $ vcat 
+                                                       $ punctuate comma 
+                                                       $ (map (\(c,v) -> pp c <> colon <+> pp v) cs) ++ 
+                                                         (maybe [] (\x -> [pp "default" <> colon <+> pp x]) d))
+    pp (ELet _ l r)        = pp "let" <+> pp l <+> pp "=" <+> pp r
+    pp (ESeq _ l r)        = (pp l <> semi) $$ pp r
+    pp (EPar _ l r)        = (pp l <> pp "|" ) $$ pp r
+    pp (EITE _ c t me)     = (pp "if" <+> pp c <+> lbrace)
+                             $$
+                             (nest' $ pp t)
+                             $$
+                             rbrace <+> (maybe empty (\e -> (pp "else" <+> lbrace) $$ (nest' $ pp e) $$ rbrace) me)
+    pp (ETest _ c)         = pp "filter" <+> pp c
+    pp (ESet _ l r)        = pp l <+> pp ":=" <+> pp r
+    pp (ESend  _ e)        = pp "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
-    pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
-    pp (ECond _ cs d)      = pp "case" <+> (braces $ hsep $ (map (\(c,v) -> pp c <> colon <+> pp v <> semi) cs) ++ [pp "default" <> colon <+> pp d <> semi])
+    pp (ENDLet _ vs c)     = pp "let" <+>  (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c
+    pp (EFork _ vs c b)    = (pp "fork" <+> (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c) $$ (nest' $ pp b)
 
 instance Show Expr where
     show = render . pp
@@ -315,99 +350,9 @@ disj []     = EBool nopos False
 disj [e]    = e
 disj (e:es) = EBinOp nopos Or e (disj es)
 
-
-
-data ECtx = CtxAssume Assume
-          | CtxFunc   Function
-          | CtxRole   Role
-          | CtxSend   ECtx Role
-          | CtxFork   ECtx [Field]
-     
-instance Show ECtx where
-    show (CtxAssume a)  = "assume " ++ show a
-    show (CtxFunc f)    = "function " ++ name f
-    show (CtxRole r)    = "role " ++ name r
-    show (CtxSend f t)  = "send " ++ ("(" ++ show f ++ ")") ++ " " ++ name t
-    show (CtxFork c vs) = "fork " ++ ("(" ++ show c ++ ")") ++ " " ++ show vs
-
-isRoleCtx :: ECtx -> Bool
-isRoleCtx (CtxRole _)   = True
-isRoleCtx (CtxSend _ _) = True
-isRoleCtx (CtxFork _ _) = True
-isRoleCtx _             = False
-
-ctxRole :: ECtx -> Role
-ctxRole (CtxRole rl)   = rl
-ctxRole (CtxSend c _)  = ctxRole c
-ctxRole (CtxFork c _)  = ctxRole c
-ctxRole c              = error $ "ctxRole " ++ show c
-
-ctxForkVars :: ECtx -> [Field]
-ctxForkVars (CtxFork c vs) = vs ++ ctxForkVars c
-ctxForkVars (CtxSend c _)  = ctxForkVars c
-ctxForkVars _              = []
-
-data Statement = SSeq    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               | SPar    {statPos :: Pos, statLeft :: Statement, statRight :: Statement}
-               | SITE    {statPos :: Pos, statCond :: Expr, statThen :: Statement, statElse :: Maybe Statement}
-               | STest   {statPos :: Pos, statCond :: Expr}
-               | SSet    {statPos :: Pos, statLVal :: Expr, statRVal :: Expr}
-               | SSend   {statPos :: Pos, statDst  :: Expr}
-               | SSendND {statPos :: Pos, statSndRole :: String, statCond :: Expr}
-               | SHavoc  {statPos :: Pos, statLVal :: Expr}
-               | SAssume {statPos :: Pos, statCond :: Expr}
-               | SLet    {statPos :: Pos, statVType :: Type, statVName :: String, statVal :: Expr}
-               | SFork   {statPos :: Pos, statFrkVars :: [Field], statCond :: Expr, statFrkBody :: Statement}
-
-statLocals :: Statement -> [Field]
-statLocals (SSeq _ l r)      = statLocals l ++ statLocals r
-statLocals (SPar _ l r)      = statLocals l ++ statLocals r
-statLocals (SITE _ _ t me)   = statLocals t ++ maybe [] statLocals me
-statLocals (STest _ _)       = []
-statLocals (SSet _ _ _)      = []
-statLocals (SSend _ _)       = []
-statLocals (SSendND _ _ _)   = []
-statLocals (SHavoc _ _)      = []
-statLocals (SAssume _ _)     = []
-statLocals (SLet p t n _)    = [Field p n t]
-statLocals (SFork _ _ _ _)   = []
-
-statForkVarsRec :: Statement -> [Field]
-statForkVarsRec (SSeq _ l r)      = statForkVarsRec l ++ statForkVarsRec r
-statForkVarsRec (SPar _ l r)      = statForkVarsRec l ++ statForkVarsRec r
-statForkVarsRec (SITE _ _ t me)   = statForkVarsRec t ++ maybe [] statForkVarsRec me
-statForkVarsRec (STest _ _)       = []
-statForkVarsRec (SSet _ _ _)      = []
-statForkVarsRec (SSend _ _)       = []
-statForkVarsRec (SSendND _ _ _)   = []
-statForkVarsRec (SHavoc _ _)      = []
-statForkVarsRec (SAssume _ _)     = []
-statForkVarsRec (SLet _ _ _ _)    = []
-statForkVarsRec (SFork _ vs _ b)  = vs ++ statForkVarsRec b
-
-instance WithPos Statement where
-    pos = statPos
-    atPos s p = s{statPos = p}
-
-instance PP Statement where
-    pp (SSeq _ s1 s2)   = lbrace 
-                          $$ (nest' $ (pp s1 <> semi) $$ pp s2)
-                          $$ rbrace
-    pp (SPar _ s1 s2)   = lbrace 
-                          $$ (nest' $ pp s1 $$ pp "|" $$ pp s2)
-                          $$ rbrace
-    pp (SITE _ c t e)   = (pp "if" <+> pp c <+> pp "then")
-                          $$ (nest' $ pp t)
-                          $$ (maybe empty (\e' -> pp "else" $$ (nest' $ pp e')) e)
-    pp (STest _ c)      = pp "filter" <+> pp c
-    pp (SSet _ l r)     = pp l <+> pp ":=" <+> pp r
-    pp (SSend _ d)      = pp "send" <+> pp d
-    pp (SSendND _ rl c) = pp "?send" <+> pp rl <> (brackets $ pp c)
-    pp (SHavoc _ e)     = pp "havoc" <+> pp e
-    pp (SAssume _ e)    = pp "assume" <+> pp e
-    pp (SLet _ t n v)   = pp "let" <+> pp t <+> pp n <+> pp "=" <+> pp v
-    pp (SFork _ vs c b) = pp "fork" <+> (parens $ (hsep $ punctuate (pp ",") $ map pp vs) <+> pp "|" <+> pp c) <+> pp b
-
-instance Show Statement where
-    show = render . pp
-
+data ECtx = CtxAssume   Assume
+          | CtxRule     Relation Rule
+          | CtxFunc     Function
+          | CtxRole     Role
+          | CtxLet      ECtx [Field]
+          | CtxFork     ECtx [Field]

@@ -1,66 +1,63 @@
-{-
-Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
--}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Parse ( cocoonGrammar
              , cfgGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
+import Control.Monad
 import Text.Parsec hiding ((<|>))
 import Text.Parsec.Expr
 import Text.Parsec.Language
 import qualified Text.Parsec.Token as T
 import Data.Maybe
+import Data.Either
 import Numeric
 
 import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["?", "!", "|", "==", "=", ":=", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
+reservedOpNames = ["?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
 reservedNames = ["and",
                  "assume",
+                 "bit",
                  "bool",
-                 "case",
+                 "check",
+                 "constraint",
                  "default",
                  "else",
                  "false",
                  "filter",
+                 "foreign",
                  "fork",
                  "function",
                  "host",
                  "havoc",
                  "if",
+                 "int",
+                 "key",
                  "let",
+                 "sink",
                  "not",
                  "or",
                  "pkt",
+                 "primary",
+                 "references",
                  "refine",
+                 "relation",
                  "role",
                  "send",
-                 "struct",
+                 "string",
                  "switch",
                  "then",
                  "true",
                  "typedef",
-                 "uint"]
+                 "unique"]
 
 
-lexer = T.makeTokenParser (emptyDef {T.commentStart      = "(*"
-                                    ,T.commentEnd        = "*)"
+lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
+                                    ,T.commentEnd        = "*/"
+                                    ,T.commentLine       = "//"
                                     ,T.nestedComments    = True
                                     ,T.identStart        = letter <|> char '_' 
                                     ,T.identLetter       = alphaNum <|> char '_'
@@ -91,7 +88,7 @@ decimal    = T.decimal lexer
 whiteSpace = T.whiteSpace lexer
 lexeme     = T.lexeme lexer
 dot        = T.dot lexer
---stringLit  = T.stringLiteral lexer
+stringLit  = T.stringLiteral lexer
 --charLit    = T.charLiteral lexer
 
 
@@ -103,19 +100,20 @@ withPos x = (\s a e -> atPos a (s,e)) <$> getPosition <*> x <*> getPosition
 
 
 data SpecItem = SpType         TypeDef
+              | SpRelation     Relation
+              | SpAssume       Assume
               | SpFunc         Function
               | SpRole         Role
-              | SpAssume       Assume
               | SpNode         Node
 
 
 cocoonGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
-cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many func) <* eof)
+cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
 
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs roles assumes nodes
+mkRefine targets items = Refine nopos targets types funcs relations assumes roles nodes
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
@@ -125,6 +123,9 @@ mkRefine targets items = Refine nopos targets types funcs roles assumes nodes
           roles = mapMaybe (\i -> case i of 
                                        SpRole r -> Just r
                                        _        -> Nothing) items
+          relations = mapMaybe (\i -> case i of 
+                                           SpRelation r -> Just r
+                                           _            -> Nothing) items
           assumes = mapMaybe (\i -> case i of 
                                        SpAssume a -> Just a
                                        _          -> Nothing) items
@@ -139,6 +140,7 @@ refine = withPos $ mkRefine <$  reserved "refine"
 decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
+    <|> (SpRelation     <$> relation)
     <|> (SpAssume       <$> assume)
     <|> (SpNode         <$> node)
 
@@ -148,16 +150,38 @@ typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*
 func = withPos $ Function nopos <$  reserved "function" 
                                 <*> identifier 
                                 <*> (parens $ commaSep arg) 
-                                <*> (colon *> typeSpecSimple) 
+                                <*> (colon *> (Just <$> typeSpecSimple) <|> (Nothing <$ reserved "sink"))
                                 <*> (option (EBool nopos True) (reservedOp "|" *> expr))
-                                <*> (optionMaybe (reservedOp "=" *> expr))
+                                <*> (reservedOp "=" *> expr)
+
+relation = withPos $ do reserved "relation" 
+                        n <- identifier
+                        (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
+                        rs <- optionMaybe $ reservedOp "=" *> (many $ withPos $ do 
+                                    rn <- identifier
+                                    when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined in this scope"
+                                    rargs <- parens $ commaSep expr
+                                    reservedOp ":-"
+                                    rhs <- commaSep expr
+                                    return $ Rule nopos rargs rhs)
+                        return $ Relation nopos n as cs rs
+
+argOrConstraint =  (Right <$> constraint)
+               <|> (Left  <$> arg)
+
+constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep identifier)))
+                    <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep identifier)) 
+                                          <*> (reserved "references" *> identifier) <*> (parens $ commaSep identifier))
+                    <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep identifier))
+                    <|> (Check      nopos <$ reserved "check" <*> expr)
+
 
 role = withPos $ Role nopos <$  reserved "role" 
                             <*> identifier 
                             <*> (brackets $ commaSep arg) 
                             <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                             <*> (option (EBool nopos True) (reservedOp "/" *> expr))
-                            <*> (reservedOp "=" *> stat)
+                            <*> (reservedOp "=" *> expr)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (parens $ commaSep arg) <*> expr
 
@@ -169,27 +193,41 @@ arg = withPos $ flip (Field nopos) <$> typeSpecSimple <*> identifier
 
 typeSpec = withPos $ 
             arrType
-        <|> uintType 
+        <|> bitType 
+        <|> intType
+        <|> stringType
         <|> boolType 
         <|> userType 
         <|> structType 
+        <|> tupleType
         
 typeSpecSimple = withPos $ 
                   arrType
-              <|> uintType 
+              <|> bitType 
+              <|> intType
+              <|> stringType
               <|> boolType 
+              <|> tupleType
               <|> userType 
 
-uintType   = TUInt   nopos <$ reserved "uint" <*> (fromIntegral <$> angles decimal)
+bitType    = TBit    nopos <$ reserved "bit" <*> (fromIntegral <$> angles decimal)
+intType    = TInt    nopos <$ reserved "int"
+stringType = TString nopos <$ reserved "string"
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
 arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
-structType = TStruct nopos <$  reserved "struct" <*> (braces $ commaSep1 arg)
+structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|") 
+    where isstruct = try $ lookAhead $ identifier *> symbol "{"
+tupleType  = TTuple  nopos <$> (parens $ commaSep typeSpecSimple)
+
+constructor = withPos $ Constructor nopos <$> identifier <*> (braces $ commaSep arg)
 
 expr =  buildExpressionParser etable term
     <?> "expression"
 
-term  = parens expr <|> term'
+term  =  parens expr 
+     <|> braces expr
+     <|> term'
 term' = withPos $
          estruct
      <|> ebuiltin
@@ -197,10 +235,17 @@ term' = withPos $
      <|> eloc
      <|> eint
      <|> ebool
+     <|> estring
      <|> epacket
      <|> evar
-     <|> edotvar
-     <|> econd
+     <|> eswitch
+     <|> etest
+     <|> eite
+     <|> esend
+     <|> eset
+     <|> elet
+     <|> endlet
+     <|> efork
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
@@ -211,18 +256,27 @@ eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
 evar = EVar nopos <$> identifier
-edotvar = EDotVar nopos <$ reservedOp "." <*> identifier
-econd = (fmap uncurry (ECond nopos <$ reserved "case"))
-               <*> (braces $ (,) <$> (many $ (,) <$> expr <* colon <*> expr <* semi) 
-                                 <*> (reserved "default" *> colon *> expr <* semi))
+eswitch = (fmap uncurry (ESwitch nopos <$ reserved "switch" <*> expr))
+               <*> (braces $ (,) <$> (commaSep1 $ (,) <$> expr <* colon <*> expr) 
+                                 <*> (optionMaybe $ comma *> reserved "default" *> colon *> expr))
 --eint  = EInt nopos <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
+estring = EString nopos <$> stringLit
 estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep1 expr)
     where isstruct = try $ lookAhead $ identifier *> symbol "{"
 
 eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
                                                    v <- sradval
                                                    mkLit w v)
+
+etest   = ETest   nopos <$ reserved "filter" <*> expr
+esend   = ESend   nopos <$ reserved "send" <*> expr
+eset    = ESet    nopos <$> expr <*> (reservedOp ":=" *> expr)
+eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
+elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
+    where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
+endlet  = ENDLet  nopos <$ reserved "let" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr)
+efork   = EFork   nopos <$ reserved "fork" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr) <*> expr
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
 sradval =  ((try $ string "'b") *> parseBin)
@@ -243,9 +297,9 @@ parseHex :: Stream s m Char => ParsecT s u m Integer
 parseHex = (fst . head . readHex) <$> many1 hexDigit
 
 mkLit :: Maybe Int -> Integer -> ParsecT s u m Expr
-mkLit Nothing  v                       = return $ EInt nopos (msb v + 1) v
+mkLit Nothing  v                       = return $ EInt nopos v
 mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width >0"
-                 | msb v < w           = return $ EInt nopos w v
+                 | msb v < w           = return $ EBit nopos w v
                  | otherwise           = fail "Value exceeds specified width"
 
 etable = [[postf $ choice [postSlice, postField]]
@@ -265,8 +319,9 @@ etable = [[postf $ choice [postSlice, postField]]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
          ,[binary "=>" Impl AssocLeft]
+         ,[sbinary ";" ESeq AssocRight]
+         ,[sbinary "|" EPar AssocRight]
          ]
-
 
 pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
@@ -277,39 +332,7 @@ slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (col
 field = dot *> identifier
 
 prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n
-binary n fun = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
+binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
+sbinary n fun = Infix $ (\l  r  -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
 
-stat =  buildExpressionParser stable stat'
-    <?> "statement"
-
-stat' =  braces stat 
-     <|> parens stat 
-     <|> simpleStat
-
-simpleStat = withPos $
-              stest
-          <|> site
-          <|> ssendnd
-          <|> ssend
-          <|> sset
-          <|> shavoc
-          <|> sassume
-          <|> slet
-          <|> sfork
-
-stest   = STest   nopos <$ reserved "filter" <*> expr
-ssendnd = SSendND nopos <$ reservedOp "?" <* reserved "send" <*> identifier <*> (brackets expr)
-ssend   = SSend   nopos <$ reserved "send" <*> expr
-sset    = SSet    nopos <$> expr <*> (reservedOp ":=" *> expr)
-site    = SITE    nopos <$ reserved "if" <*> expr <*> (reserved "then" *> stat') <*> (optionMaybe $ reserved "else" *> stat')
-shavoc  = SHavoc  nopos <$ reserved "havoc" <*> expr
-sassume = SAssume nopos <$ reserved "assume" <*> expr
-slet    = SLet    nopos <$ reserved "let" <*> typeSpec <*> identifier <*> (reservedOp "=" *> expr)
-sfork   = (\(vs,c) st -> SFork nopos vs c st) <$ reserved "fork" <*> (parens $ (,) <$> (commaSep1 arg) <*> (reservedOp "|" *> expr)) <*> stat'
-
-stable = [ [sbinary ";" SSeq AssocRight]
-         , [sbinary "|" SPar AssocRight]
-         ]
-
-sbinary n fun = Infix $ (\l r -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
