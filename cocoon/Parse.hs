@@ -202,8 +202,8 @@ typeSpec = withPos $
         <|> intType
         <|> stringType
         <|> boolType 
-        <|> userType 
         <|> structType 
+        <|> userType 
         <|> tupleType
         
 typeSpecSimple = withPos $ 
@@ -222,15 +222,20 @@ boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
 arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
 structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|") 
-    where isstruct = try $ lookAhead $ identifier *> symbol "{"
-tupleType  = TTuple  nopos <$> (parens $ commaSep typeSpecSimple)
+    where isstruct = try $ lookAhead $ identifier *> (symbol "{" <|> symbol "|")
+tupleType  = (\fs -> case fs of
+                          [f] -> f
+                          _   -> TTuple nopos fs)
+             <$> (parens $ commaSep typeSpecSimple)
 
 constructor = withPos $ Constructor nopos <$> identifier <*> (option [] $ braces $ commaSep arg)
 
 expr =  buildExpressionParser etable term
     <?> "expression"
 
-term  =  parens expr 
+term  =  (withPos $ (\es -> case es of 
+                                 [e] -> e
+                                 _   -> ETuple nopos es) <$> (parens $ commaSep expr))
      <|> braces expr
      <|> term'
 term' = withPos $
