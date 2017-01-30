@@ -1,0 +1,29 @@
+/* OVN (Open Virtual Network) specified using Cocoon  */
+
+typedef uuid_t = bit<128>
+
+relation logical_switch( uuid : uuid_t
+                       , name : string
+                       , primary key uuid)
+
+typedef port_type_t = PortRegular  |
+                      PortRouter   { rport: string} |
+                      PortLocalnet { network_name: string} |
+                      PortVTEP     { vtep_physical_switch: string
+                                   , vtep_logical_switch: uuid_t}
+
+relation logical_port( string name
+                     , uuid_t switch_id
+                     , port_type_t type
+                     , primary key (name)
+                     , foreign key (switch_id) references logical_switch(uuid)
+                     , foreign key (type.rport) references logical_router_port(name)
+                     , foreign key (type.network_name) references local_network(name)
+                     , foreign key (type.vtep_physical_switch) references physical_network(name)
+                     , foreign key (type.vtep_logical_switch) references logical_swith(uuid))
+
+// If a given logical switch has multiple router ports, the Logical_Router_Port rows that 
+// they reference must be all on the same Logical_Router (for different subnets).
+assume logical_port(p1, sw, PortRouter{rport1}) and logical_port(p2, sw, PortRouter{rport2}) and
+       logical_router_port(rport1, lrouter1) and logical_router_port(rport2, lrouter2) 
+       => lrouter1 == lrouter2
