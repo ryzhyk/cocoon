@@ -1,29 +1,172 @@
 /* OVN (Open Virtual Network) specified using Cocoon  */
 
 typedef uuid_t = bit<128>
+typedef vlan_id_t = bit<12>
 
-relation logical_switch( uuid : uuid_t
-                       , name : string
-                       , primary key uuid)
+table logical_switch( uuid : uuid_t
+                    , name : string
+                    , primary key (uuid))
 
-typedef port_type_t = PortRegular  |
-                      PortRouter   { rport: string} |
-                      PortLocalnet { network_name: string} |
-                      PortVTEP     { vtep_physical_switch: string
+typedef port_type_t = PortRegular  
+                    | PortRouter   { rport: string}
+                    | PortLocalnet { network_name: string}
+                    | PortVTEP     { vtep_physical_switch: string
                                    , vtep_logical_switch: uuid_t}
 
-relation logical_port( string name
-                     , uuid_t switch_id
-                     , port_type_t type
-                     , primary key (name)
-                     , foreign key (switch_id) references logical_switch(uuid)
-                     , foreign key (type.rport) references logical_router_port(name)
-                     , foreign key (type.network_name) references local_network(name)
-                     , foreign key (type.vtep_physical_switch) references physical_network(name)
-                     , foreign key (type.vtep_logical_switch) references logical_swith(uuid))
+typedef nested_port_t = NestedPortNone
+                      | NestedPort {parent: string, tag: vlan_id_t}
+
+typedef port_state_t = Port
+
+table logical_port( name      : string
+                  , switch_id : uuid_t
+                  , type      : port_type_t
+                  , nested    : nested_port_t
+                  , enabled   : bool
+                  , primary key (name)
+                  , foreign key (switch_id)                 references logical_switch(uuid)
+                  , foreign key (type.rport)                references logical_router_port(name)
+                  , foreign key (type.network_name)         references local_network(name)
+                  , foreign key (type.vtep_physical_switch) references physical_network(name)
+                  , foreign key (type.vtep_logical_switch)  references logical_switch(uuid)
+                  , foreign key (nested.parent)             references logical_port(name)
+                  , unique (type.parsw, type.tag) /* Siblings must have different tags */)
 
 // If a given logical switch has multiple router ports, the Logical_Router_Port rows that 
 // they reference must be all on the same Logical_Router (for different subnets).
-assume logical_port(p1, sw, PortRouter{rport1}) and logical_port(p2, sw, PortRouter{rport2}) and
-       logical_router_port(rport1, lrouter1) and logical_router_port(rport2, lrouter2) 
-       => lrouter1 == lrouter2
+view logical_switch_router ( switch_id : uuid_t
+                           , router_id : uuid_t
+                           , unique (switch_id))
+logical_switch_router(sw, r) :- logical_port(_, sw, PortRouter{rp}, _, _), logical_router_port(rp, r)
+
+//assume logical_port(p1, sw, PortRouter{rport1}, _, _) and logical_port(p2, sw, PortRouter{rport2}, _, _) and
+//       logical_router_port(rport1, lrouter1) and logical_router_port(rport2, lrouter2) 
+//       => lrouter1 == lrouter2
+
+// router port cannot be connected to both switch and other router
+assume logical_port(p, _, PortRouter{rport}, _, _) => not logical_router_port_peered(rport)
+
+// Disallow >1 layers of nesting
+assume logical_port(_, sw1, _, NestedPort{parsw, _}, _) and logical_port(_, sw2, _, nested2, _) 
+       => sw1 == sw2 and nested2 == NestedPortNone
+
+// This table is populated by ovn-northd, rather than by the CMS plugin as is most of this database
+table logical_port_up( port: string
+                     , up  : bool
+                     , foreign key (port) references logical_ports(name)
+                     , unique (port))
+
+// Addresses owned by the logical port.  Each element in the set must take one 
+// of the following forms:
+//    xx:xx:xx:xx:xx:xx - An Ethernet address owned by the logical 
+//    port.  Like a physical Ethernet NIC, a logical port ordinarily 
+//    has a single fixed Ethernet address. When  a  OVN logical switch 
+//    processes a unicast Ethernet frame whose destination MAC address 
+//    is in a logical port’s addresses column, it delivers it only to                     
+//    that port, as if a MAC learning process had learned that MAC 
+//    address on the port.
+//    xx:xx:xx:xx:xx:xx a.b.c.d - This form has all the effects of the 
+//    previous form.  It also indicates that the logical port owns the 
+//    given IPv4 address. The OVN logical switch uses this information 
+//    to synthesize responses to ARP requests without traversing the 
+//    physical network.  The OVN logical  router  connected to the 
+//    logical switch, if any, uses this information to avoid issuing 
+//    ARP requests for logical switch ports.
+//    unknown -This indicates that the logical port has an unknown set 
+//    of Ethernet addresses.  When an OVN logical switch processes a 
+//    unicast Ethernet frame whose destination MAC address is not in 
+//    any logical port’s addresses column, it delivers it to the port 
+//    (or ports) whose addresses columns include unknown.
+
+typedef port_addr_t = PortAddressUnknown
+                    | PortAddressMAC {mac: mac_addr_t}
+                    | PortAddressMACIP {mac: mac_addr_t, ip: ip4_addr_t}
+
+table logical_port_address( port: string
+                          , addr: port_addr_t
+                          , foreign key (port) references logical_ports(name))
+
+view logical_port_mac( port: string, mac: mac_addr_t)
+logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP{mac, _})
+logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMAC{mac})
+
+// Eth and mac addresses must be unique with logical switch
+view logical_switch_mac( switch_id : uuid_t
+                       , port      : string
+                       , mac       : mac_addr_t
+                       , unique(switch_id, mac))
+logical_switch_mac(sw, port, mac) :- logical_port(p, sw, _, _, _), logical_port_mac(p, mac)
+
+//assume logical_port(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
+//       logical_port_mac(p1, mac) and logical_port_mac(p2, mac) =>
+//       p1 == p2
+
+view logical_switch_ip( switch_id : uuid_t
+                      , mac       : mac_addr_t
+                      , ip        : ip4_addr_t
+                      , unique(switch_id, ip))
+logical_switch_ip(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP{mac,ip})
+
+
+//assume logical_port_address(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
+//       logical_port_address(p1, PortAddressMACIP{mac1, ip}) and logical_port_address(p2, PortAddressMACIP{mac2, ip}) =>
+//       p1 == p2 and mac1 == mac2
+
+// port_security: set of strings
+// A set of L2 (Ethernet) addresses from which the logical port is 
+// allowed to send packets and to which it is allowed to receive 
+// packets.  If this column is empty, all addresses are permitted.  
+// Logical ports are always allowed to receive packets addressed to 
+// multicast and broadcast addresses.
+table logical_port_security( port: string
+                           , mac : mac_addr_t
+                           , foreign key (port) references logical_port(name))
+
+view logical_port_secured(port: string)
+logical_port_secured(p) :- logical_port_security(p, _)
+
+table logical_router( uuid: uuid_t   
+                    , name: string
+                    , default_gw: ip4_addr_t
+                    , primary key (uuid))
+
+typedef netmask_t = NetMask {ip: ip4_addr_t, mask: bit<6>}
+
+typedef router_port_peer_t = PeerSwitch
+                           | PeerRouter {peer_port: string}
+
+table logical_router_port( name    : string
+                         , router  : uuid_t
+                         , network : netmask_t
+                         , mac     : mac_addr_t
+                         , enabled : bool
+                         , peer    : router_port_peer_t
+                         , primary key (name)
+                         , foreign key (router) references logical_router(uuid)
+                         , foreign key (peer.peer_port) references logical_router_port(name))
+
+view logical_router_port_peered(port: string)
+logical_router_port_peered(p) :- logical_router_port(p, _, _, _, _, PeerRouter{_})
+
+assume logical_router_port(p, _, _, _, _, PeerRouter{peer}) => logical_router_port_peered(peer)
+assume logical_router_port(p, _, _, _, _, PeerRouter{peer}) and logical_router_port_peered(peer, _, _, _, _, PeerRouter{ppeer}) 
+       => ppeer == p
+
+typedef acl_direction_t = DirToLPort
+                        | DirFromLPort
+
+typedef acl_action_t = ActionAllow
+                     | ActionAllowRelated
+                     | ActionDrop
+                     | ActionReject // Not implemented--currently treated as drop
+
+table acl( id        : uuid_t
+         , switch_id : uuid_t
+         , priority  : bit<15>
+         , direction : acl_direction_t
+         , action    : acl_action_t 
+         , foreign key (switch_id) references logical_switch (uuid))
+
+table acl_match( acl    : uuid_t
+               , packet : Packet
+               , foreign key (acl) references acl(id))
