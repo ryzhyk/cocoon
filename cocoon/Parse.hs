@@ -44,14 +44,15 @@ reservedNames = ["and",
                  "primary",
                  "references",
                  "refine",
-                 "relation",
                  "role",
                  "send",
                  "string",
                  "switch",
+                 "table",
                  "true",
                  "typedef",
-                 "unique"]
+                 "unique",
+                 "view"]
 
 
 lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
@@ -153,17 +154,22 @@ func = withPos $ Function nopos <$  reserved "function"
                                 <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                                 <*> (reservedOp "=" *> expr)
 
-relation = withPos $ do reserved "relation" 
+relation = withPos $ do reserved "table" 
                         n <- identifier
                         (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
-                        rs <- optionMaybe $ reservedOp "=" *> (many $ withPos $ do 
-                                    rn <- identifier
-                                    when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined in this scope"
-                                    rargs <- parens $ commaSep expr
-                                    reservedOp ":-"
-                                    rhs <- commaSep expr
-                                    return $ Rule nopos rargs rhs)
-                        return $ Relation nopos n as cs rs
+                        return $ Relation nopos n as cs Nothing
+                 <|> do reserved "view" 
+                        n <- identifier
+                        (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
+                        rs <- many1 $ withPos $ do 
+                                      try $ lookAhead $ identifier *> (parens $ commaSep expr) *> reservedOp ":-"
+                                      rn <- identifier
+                                      when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
+                                      rargs <- parens $ commaSep expr
+                                      reservedOp ":-"
+                                      rhs <- commaSep expr
+                                      return $ Rule nopos rargs rhs
+                        return $ Relation nopos n as cs $ Just rs
 
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
@@ -171,7 +177,7 @@ argOrConstraint =  (Right <$> constraint)
 constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep identifier)))
                     <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep expr)) 
                                           <*> (reserved "references" *> identifier) <*> (parens $ commaSep identifier))
-                    <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep identifier))
+                    <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep expr))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
 
@@ -188,7 +194,7 @@ node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost
                             <*> identifier 
                             <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
 
-arg = withPos $ flip (Field nopos) <$> typeSpecSimple <*> identifier
+arg = withPos $ (Field nopos) <$> identifier <*> (colon *> typeSpecSimple)
 
 typeSpec = withPos $ 
             arrType

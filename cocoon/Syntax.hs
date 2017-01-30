@@ -88,7 +88,7 @@ instance WithName Field where
     name = fieldName
 
 instance PP Field where
-    pp (Field _ n t) = pp t <+> pp n
+    pp (Field _ n t) = pp n <> pp ":" <+>pp t
 
 instance Show Field where
     show = render . pp
@@ -140,7 +140,7 @@ instance PP Node where
 
 data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [String]}
                 | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [String]}
-                | Unique     {constrPos :: Pos, constrArgs :: [String]}
+                | Unique     {constrPos :: Pos, constrFields :: [Expr]}
                 | Check      {constrPos :: Pos, constrCond :: Expr}
 
 instance WithPos Constraint where
@@ -285,6 +285,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EString   {exprPos :: Pos, exprString :: String}
           | EBit      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
           | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [Expr]}
+          | ETuple    {exprPos :: Pos, exprFields :: [Expr]}
           | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
           | ESwitch   {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)], exprDefault :: Maybe Expr}
           | ELet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
@@ -317,6 +318,7 @@ instance PP Expr where
     pp (EString _ s)       = pp s
     pp (EBit _ w v)        = pp w <> pp "'d" <> pp v
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
+    pp (ETuple _ fs)       = parens $ hsep $ punctuate comma $ map pp fs
     pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
     pp (ESwitch _ e cs d)  = pp "switch" <+> pp e <+> (braces $ vcat 
                                                        $ punctuate comma 
