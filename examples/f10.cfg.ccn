@@ -1,4 +1,0 @@
-function l1SwitchUp(bool tree, uint<8> i1, uint<8> r): bool = true
-function l2SwitchUp(uint<8> x, uint<8> y): bool = true
-function l1Avoid(bool tree, uint<8> i1, uint<8> r): bool = false
-function hash(eth_t eth): uint<8> = 8'd0
