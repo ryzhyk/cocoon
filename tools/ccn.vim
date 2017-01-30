@@ -11,15 +11,17 @@ syn clear
 
 syn case match
 
-"Comments in LOTOS are between (* and *)
-syn region ccnComment	start="(\*"  end="\*)" contains=ccnTodo
+syn region ccnComment	start="/\*"  end="\*/" contains=ccnTodo
+syn region ccnCommentL  start="//" skip="\\$" end="$" keepend contains=ccnTodo
+
+
 
 "Operators !, |, =, :=, %, +
 syn match  ccnDelimiter         ":="
 syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool case default endrefine filter fork function assume host havoc let not or pkt refine role send struct switch
+syn keyword ccnStatement        and bool default filter fork function assume host let not or pkt refine relation role send switch primary foreign key check unique references
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 
@@ -27,7 +29,7 @@ syn keyword ccnTodo             contained TODO FIXME XXX
 "syn keyword ccnRepeat
 
 "Conditionals
-syn keyword ccnConditional      case if then else
+syn keyword ccnConditional      switch if else
 
 "Constants
 syn keyword ccnConstant         true false pkt
@@ -35,11 +37,11 @@ syn keyword ccnConstant         true false pkt
 "Storage class
 "syn keyword ccnStorageClass
 
-"Operators from the Abstract Data Types in IS8807
+"Operators 
 syn keyword ccnOperator	        default true false 
 
 "Keywords for ADTs
-syn keyword ccnType	        bool uint struct typedef
+syn keyword ccnType	        bool string int struct typedef
 
 syn sync lines=250
 
@@ -53,10 +55,11 @@ syn match ccnNumber "\<[+-]\=[0-9]\+\(\.[0-9]*\|\)\(e[0-9]*\|\)\>"
 
 if !exists("did_ccn_syntax_inits")
   let did_ccn_syntax_inits = 1
-  hi link ccnStatement		Statement
-  hi link ccnOperator		Operator
-  hi link ccnType		Type
-  hi link ccnComment		Comment
+  hi link ccnStatement          Statement
+  hi link ccnOperator           Operator
+  hi link ccnType               Type
+  hi link ccnComment            Comment
+  hi link ccnCommentL           Comment
   hi link ccnDelimiter          String
   hi link ccnConstant           Constant
   hi link ccnRepeat             Repeat
