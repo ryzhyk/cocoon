@@ -17,7 +17,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
+reservedOpNames = ["?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
 reservedNames = ["and",
                  "assume",
                  "bit",
@@ -49,7 +49,6 @@ reservedNames = ["and",
                  "send",
                  "string",
                  "switch",
-                 "then",
                  "true",
                  "typedef",
                  "unique"]
@@ -63,7 +62,7 @@ lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
                                     ,T.identLetter       = alphaNum <|> char '_'
                                     ,T.reservedOpNames   = reservedOpNames
                                     ,T.reservedNames     = reservedNames
-                                    ,T.opLetter          = oneOf ":%*+./=|"
+                                    ,T.opLetter          = oneOf "_!?:%*-+./=|<>"
                                     ,T.caseSensitive     = True})
 
 
@@ -145,7 +144,7 @@ decl =  (SpType         <$> typeDef)
     <|> (SpNode         <$> node)
 
 
-typeDef = withPos $ (flip $ TypeDef nopos) <$ reserved "typedef" <*> typeSpec <*> identifier
+typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (reservedOp "=" *> typeSpec)
 
 func = withPos $ Function nopos <$  reserved "function" 
                                 <*> identifier 
@@ -170,7 +169,7 @@ argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
 
 constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep identifier)))
-                    <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep identifier)) 
+                    <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep expr)) 
                                           <*> (reserved "references" *> identifier) <*> (parens $ commaSep identifier))
                     <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep identifier))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
@@ -183,7 +182,7 @@ role = withPos $ Role nopos <$  reserved "role"
                             <*> (option (EBool nopos True) (reservedOp "/" *> expr))
                             <*> (reservedOp "=" *> expr)
 
-assume = withPos $ Assume nopos <$ reserved "assume" <*> (parens $ commaSep arg) <*> expr
+assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
 
 node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost <$ reserved "host"))
                             <*> identifier 
@@ -220,7 +219,7 @@ structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|")
     where isstruct = try $ lookAhead $ identifier *> symbol "{"
 tupleType  = TTuple  nopos <$> (parens $ commaSep typeSpecSimple)
 
-constructor = withPos $ Constructor nopos <$> identifier <*> (braces $ commaSep arg)
+constructor = withPos $ Constructor nopos <$> identifier <*> (option [] $ braces $ commaSep arg)
 
 expr =  buildExpressionParser etable term
     <?> "expression"
@@ -246,6 +245,7 @@ term' = withPos $
      <|> elet
      <|> endlet
      <|> efork
+     <|> epholder
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
@@ -271,12 +271,14 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
 
 etest   = ETest   nopos <$ reserved "filter" <*> expr
 esend   = ESend   nopos <$ reserved "send" <*> expr
-eset    = ESet    nopos <$> expr <*> (reservedOp ":=" *> expr)
+eset    = ESet    nopos <$ isset <*> expr <*> (reservedOp ":=" *> expr)
+    where isset = try $ lookAhead $ expr *> reservedOp ":="
 eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
 elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
     where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
 endlet  = ENDLet  nopos <$ reserved "let" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr)
 efork   = EFork   nopos <$ reserved "fork" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr) <*> expr
+epholder = EPHolder nopos <$ reservedOp "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
 sradval =  ((try $ string "'b") *> parseBin)

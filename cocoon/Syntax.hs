@@ -139,7 +139,7 @@ instance PP Node where
                   (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
 
 data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [String]}
-                | ForeignKey {constrPos :: Pos, constrArgs :: [String], constrForeign :: String, constrFArgs :: [String]}
+                | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [String]}
                 | Unique     {constrPos :: Pos, constrArgs :: [String]}
                 | Check      {constrPos :: Pos, constrCond :: Expr}
 
@@ -298,6 +298,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
           | ENDLet    {exprPos :: Pos, exprLetVars :: [String], exprLetCond :: Expr}
           | EFork     {exprPos :: Pos, exprFrkVars :: [String], exprFrkCond :: Expr, exprFrkBody :: Expr}
+          | EPHolder  {exprPos :: Pos}
 
 instance WithPos Expr where
     pos = exprPos
@@ -336,6 +337,7 @@ instance PP Expr where
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
     pp (ENDLet _ vs c)     = pp "let" <+>  (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c
     pp (EFork _ vs c b)    = (pp "fork" <+> (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c) $$ (nest' $ pp b)
+    pp (EPHolder _)        = pp "_"
 
 instance Show Expr where
     show = render . pp
