@@ -253,7 +253,6 @@ term' = withPos $
      <|> etest
      <|> eite
      <|> esend
-     <|> eset
      <|> elet
      <|> endlet
      <|> efork
@@ -283,8 +282,6 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
 
 etest   = ETest   nopos <$ reserved "filter" <*> expr
 esend   = ESend   nopos <$ reserved "send" <*> expr
-eset    = ESet    nopos <$ isset <*> expr <*> (reservedOp ":=" *> expr)
-    where isset = try $ lookAhead $ expr *> reservedOp ":="
 eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
 elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
     where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
@@ -333,6 +330,7 @@ etable = [[postf $ choice [postSlice, postField]]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
          ,[binary "=>" Impl AssocLeft]
+         ,[assign AssocLeft]
          ,[sbinary ";" ESeq AssocRight]
          ,[sbinary "|" EPar AssocRight]
          ]
@@ -349,4 +347,5 @@ prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <*
 binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
 sbinary n fun = Infix $ (\l  r  -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
+assign = Infix $ (\l r  -> ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp ":="
 
