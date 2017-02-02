@@ -1,7 +1,86 @@
 /* OVN (Open Virtual Network) specified using Cocoon  */
 
+/* Q: Do parent port ACLs apply to child ports?
+   Q: Are parent port addresses ignored?
+   Q: Does parent port enabled status apply to child ports?
+ */
+
+typedef mac_addr_t = bit<48>
+typedef ip4_addr_t = bit<32>
+typedef ip6_addr_t = bit<128>
+typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
+                   | IPAddr6 {addr6 : ip6_addr_t}
+
+typedef Packet = eth_pkt_t
+
+typedef eth_pkt_t = EtherPacket { src  : mac_addr_t
+                                , dst  : mac_addr_t
+                                , vlan : vlan_t
+                                , l3   : l3_pkt_t}
+
+typedef vlan_t = VLANNone
+               | VLAN { pcp : bit<3>
+                      , dei : bit<1>
+                      , vid : bit<12>}
+
+typedef l3_pkt_t = L3PktIP4   { ct  : ct_flow_state_t
+                              , ip4 : ip4_pkt_t
+                              , l4  : l4_pkt_t}
+                 | L3PktIP6   { ip6 : ip6_pkt_t
+                              , l4  : l4_pkt_t}
+                 | L3PktARP   { arp : arp_pkt_t}
+                 | L3PktOther { ethertype : bit<16>}
+
+typedef ip4_pkt_t = IP4Pkt { dscp : bit<6>
+                           , ecn  : bit<2>
+                           , ttl  : bit<8>
+                           , frag : bit<13>
+                           , mf   : bool
+                           , src  : ip4_addr_t
+                           , dst  : ip4_addr_t}
+
+typedef ip6_pkt_t = IP6Pkt { dscp  : bit<6>
+                           , ecn   : bit<2>
+                           , ttl   : bit<8>
+                           , frag  : bit<13>
+                           , mf    : bool
+                           , label : bit<20>
+                           , src   : ip6_addr_t
+                           , dst   : ip6_addr_t}
+
+typedef arp_op_t = ARPRequest 
+                 | ARPReply
+
+typedef arp_pkt_t = ARPPkt { op  : arp_op_t
+                           , spa : ip4_addr_t
+                           , tpa : ip4_addr_t
+                           , sha : mac_addr_t
+                           , tha : mac_addr_t}
+
+typedef l4_pkt_t = L4PktTCP   { tcp : tcp_pkt_t}
+                 | L4PktUDP   { udp : udp_pkt_t}
+                 | L4PktICMP4 { icmp4 : icmp4_pkt_t}
+                 | L4PktICMP6 { icmp6 : icmp6_pkt_t}
+                 | L4PktOther { protocol : bit<8>}
+
+typedef tcp_pkt_t = TCPPkt { src   : bit<16>
+                           , dst   : bit<16>
+                           , flags : bit<9> }
+
+typedef udp_pkt_t = UDPPkt { src   : bit<16>
+                           , dst   : bit<16> }
+
+typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
+                               , code : bit<8> }
+
 typedef uuid_t = bit<128>
 typedef vlan_id_t = bit<12>
+
+table local_network( name: string
+                   , primary key (name))
 
 table logical_switch( uuid : uuid_t
                     , name : string
@@ -10,13 +89,11 @@ table logical_switch( uuid : uuid_t
 typedef port_type_t = PortRegular  
                     | PortRouter   { rport: string}
                     | PortLocalnet { network_name: string}
-                    | PortVTEP     { vtep_physical_switch: string
-                                   , vtep_logical_switch: uuid_t}
+//                    | PortVTEP     { vtep_physical_switch: string
+//                                   , vtep_logical_switch: uuid_t}
 
 typedef nested_port_t = NestedPortNone
                       | NestedPort {parent: string, tag: vlan_id_t}
-
-typedef port_state_t = Port
 
 table logical_port( name      : string
                   , switch_id : uuid_t
@@ -27,10 +104,25 @@ table logical_port( name      : string
                   , foreign key (switch_id)                 references logical_switch(uuid)
                   , foreign key (type.rport)                references logical_router_port(name)
                   , foreign key (type.network_name)         references local_network(name)
-                  , foreign key (type.vtep_physical_switch) references physical_network(name)
-                  , foreign key (type.vtep_logical_switch)  references logical_switch(uuid)
+//                  , foreign key (type.vtep_physical_switch) references physical_network(name)
+//                  , foreign key (type.vtep_logical_switch)  references logical_switch(uuid)
                   , foreign key (nested.parent)             references logical_port(name)
-                  , unique (type.parsw, type.tag) /* Siblings must have different tags */)
+                  , unique (type.parsw, type.tag) /* Siblings must have different tags */
+                  , check (is_nested(nested) => not is_router(type)))
+
+view parent_port( child_name    : string
+                , child_switch  : switch_id
+                , child_type    : port_type_t
+                , parent_name   : string
+                , parent_switch : switch_id
+                , parent_type   : port_type_t
+                , check child_type == parent_type
+                , check child_switch == parent_switch)
+parent_port(cn, cs, ct, pn, ps, pt) :- logical_port(cn, _, ct, NestedPort{pn, _}, _),
+                                       logical_port(pn, _, pt, _, _)
+   
+view trunk_port(port: string)
+trunk_port(p) :- logical_port(_, _, _, NestedPort{p, _}, _)
 
 // If a given logical switch has multiple router ports, the Logical_Router_Port rows that 
 // they reference must be all on the same Logical_Router (for different subnets).
@@ -53,7 +145,7 @@ assume logical_port(_, sw1, _, NestedPort{parsw, _}, _) and logical_port(_, sw2,
 // This table is populated by ovn-northd, rather than by the CMS plugin as is most of this database
 table logical_port_up( port: string
                      , up  : bool
-                     , foreign key (port) references logical_ports(name)
+                     , foreign key (port) references logical_port(name)
                      , unique (port))
 
 // Addresses owned by the logical port.  Each element in the set must take one 
@@ -80,14 +172,16 @@ table logical_port_up( port: string
 
 typedef port_addr_t = PortAddressUnknown
                     | PortAddressMAC {mac: mac_addr_t}
-                    | PortAddressMACIP {mac: mac_addr_t, ip: ip4_addr_t}
+                    | PortAddressMACIP4 {mac: mac_addr_t, ip: ip4_addr_t}
+                    | PortAddressMACIP6 {mac: mac_addr_t, ip: ip6_addr_t}
 
 table logical_port_address( port: string
                           , addr: port_addr_t
-                          , foreign key (port) references logical_ports(name))
+                          , foreign key (port) references logical_port(name))
 
 view logical_port_mac( port: string, mac: mac_addr_t)
-logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP{mac, _})
+logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP4{mac, _})
+logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP6{mac, _})
 logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMAC{mac})
 
 // Eth and mac addresses must be unique with logical switch
@@ -97,16 +191,25 @@ view logical_switch_mac( switch_id : uuid_t
                        , unique(switch_id, mac))
 logical_switch_mac(sw, port, mac) :- logical_port(p, sw, _, _, _), logical_port_mac(p, mac)
 
+view logical_switch_accepts_unknown( switch_id : uuid_t
+                                   , port      : string)
+logical_switch_accepts_unknown(sw, p) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressUnknown)
+
 //assume logical_port(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
 //       logical_port_mac(p1, mac) and logical_port_mac(p2, mac) =>
 //       p1 == p2
 
-view logical_switch_ip( switch_id : uuid_t
-                      , mac       : mac_addr_t
-                      , ip        : ip4_addr_t
-                      , unique(switch_id, ip))
-logical_switch_ip(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP{mac,ip})
+view logical_switch_ip4_addr( switch_id : uuid_t
+                            , mac       : mac_addr_t
+                            , ip        : ip4_addr_t
+                            , unique(switch_id, ip))
+logical_switch_ip4_addr(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP4{mac,ip})
 
+view logical_switch_ip6_addr( switch_id : uuid_t
+                            , mac       : mac_addr_t
+                            , ip        : ip6_addr_t
+                            , unique(switch_id, ip))
+logical_switch_ip6_addr(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP6{mac,ip})
 
 //assume logical_port_address(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
 //       logical_port_address(p1, PortAddressMACIP{mac1, ip}) and logical_port_address(p2, PortAddressMACIP{mac2, ip}) =>
@@ -127,10 +230,14 @@ logical_port_secured(p) :- logical_port_security(p, _)
 
 table logical_router( uuid: uuid_t   
                     , name: string
-                    , default_gw: ip4_addr_t
+                    , default_gw: ip_addr_t
                     , primary key (uuid))
 
-typedef netmask_t = NetMask {ip: ip4_addr_t, mask: bit<6>}
+typedef netmask_t = NetMask4 {mask4: ip4_netmask_t}
+                  | NetMask6 {mask6: ip6_netmask_t}
+
+typedef ip4_netmask_t = IP4NetMask {ip: ip4_addr_t, mask: bit<6>}
+typedef ip6_netmask_t = IP6NetMask {ip: ip6_addr_t, mask: bit<10>}
 
 typedef router_port_peer_t = PeerSwitch
                            | PeerRouter {peer_port: string}
@@ -160,13 +267,447 @@ typedef acl_action_t = ActionAllow
                      | ActionDrop
                      | ActionReject // Not implemented--currently treated as drop
 
-table acl( id        : uuid_t
-         , switch_id : uuid_t
-         , priority  : bit<15>
-         , direction : acl_direction_t
-         , action    : acl_action_t 
-         , foreign key (switch_id) references logical_switch (uuid))
+table acl_from ( switch_id : uuid_t
+               , port      : string
+               , packet    : Packet
+               , action    : acl_action_t 
+               , foreign key (switch_id) references logical_switch(uuid)
+               , foreign key (port)      references logical_port(name)
+               , unique (switch_id, port, direction, packet))
 
-table acl_match( acl    : uuid_t
-               , packet : Packet
-               , foreign key (acl) references acl(id))
+table acl_to   ( switch_id : uuid_t
+               , port      : string
+               , from      : string
+               , packet    : Packet
+               , action    : acl_action_t 
+               , foreign key (switch_id) references logical_switch(uuid)
+               , foreign key (port)      references logical_port(name)
+               , foreign key (from)      references logical_port(name)
+               , unique (switch_id, port, direction, packet))
+
+
+
+function sourcePort(name: string): string =
+    // trunk port?
+    if trunk_port(name) {
+        filter pkt.vlan != VLANNone;
+        let sname | logical_port(sname, _, _, NestedPort{name, pkt.vlan.vid});
+        pkt.vlan := VLANNone;
+        sname
+    } else {
+        // drop packets with VLAN tags or multicast Ethernet source addresses
+        filter pkt.vlan == VLANNone;
+        name
+    }
+
+// opaque type
+typedef ct_state_t
+
+typedef ct_flow_state_t = CTNew
+                        | CTEstablished
+                        | CTRelated
+                        | CTInvalid
+
+// externally defined functions
+function ct_track_from(inout s: ct_state_t, p: Packet): ct_flow_state_t
+function ct_track_to(inout s: ct_state_t, p: Packet): ct_flow_state_t
+function ct_commit_from(inout s: ct_state_t, p: Packet): ()
+function ct_commit_to(inout s: ct_state_t, p: Packet): ()
+
+state ct_state: map<string, ct_state_t>
+
+role LogicalPortIn[port: string] | logical_port(port, sw, _, NestedPortNone, enabled) = 
+    // drop all packets if port is disabled
+    filter enabled;
+    // drop multicast packets
+    filter ethUnicastAddr(pkt.src);
+    let sport = sourcePort(port);
+    // port security enabled? - check valid eth.src address
+    if logical_port_secured(sport) 
+        filter logical_port_security(sport, pkt.src);
+
+    // send to connection tracker
+    let cts = ct_track_from(ct_state[sport], pkt);
+    // invalid - drop
+    filter cts != CTInvalid;
+    // established | committed -- pass through
+    if cts != CTEstablished and cts != CTRelated {
+        // apply ACL
+        let action | acl_from(sw, sport, pkt, action);
+        match (action) {
+            ActionAllow:        filter true,
+            ActionAllowRelated: ct_commit_from(ct_state[sport], pkt),
+            _:                  filter false
+        }
+    }
+    if ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst) {
+        // multicast | broadcast -- send to all ports
+        fork(dport | logical_port(dport, sw, _, _, _))
+            deliver(dport, sport)
+    } else if knownAddr(sw, pkt.dst) {
+        // unicast to known destination
+        let dport | logical_switch_mac(sw, dport, pkt.dst);
+        deliver(dport, sport)
+    } else {
+        // otherwise, multicast to all ports that accept packets for unknown destinations
+        fork(dport | logical_switch_accepts_unknown(sw, dport))
+            deliver(dport, sport)
+    }
+
+function deliver(port: string, fromport: string): () =
+    select (sw, nested, enabled) | logical_port(port, sw, _, nested, enabled);
+    // send to connection tracker
+    let cts = ct_track_to(ct_state[port], pkt);
+    // invalid - drop
+    filter cts != CTInvalid;
+    // established | committed -- pass through
+    if cts != CTEstablished and cts != CTRelated {
+        // apply ACL
+        let action | acl_to(sw, port, fromport, pkt, action);
+        match (action) {
+            ActionAllow:        filter true,
+            ActionAllowRelated: ct_commit_to(ct_state[port], pkt),
+            _:                  filter false
+        }
+    }
+    // always deliver mcast and bcast packets
+    if (ethUnicastAddr(pkt.dst)) {
+        // port security enabled? - check valid eth.dst address
+        if logical_port_secured(port) 
+            filter logical_port_security(port, pkt.dst)
+    };
+    // add VLAN encapsulation for nested ports
+    match (nested) {
+        NestedPort                 : send LogicalPortOut[port],
+        NestedPortNone{pport, tag} : {
+            pkt.vlan := VLAN{0, 0, tag};
+            send LogicalPortOut[pport]
+        }
+    }
+
+/*
+Logical Switch Datapaths
+
+Ingress Table 0: Admission Control and Ingress Port Security
+
+Ingress table 0 contains these logical flows:
+· Priority 100 flows to drop packets with VLAN tags or multicast 
+Ethernet source addresses.
+· Priority 50 flows that implement ingress port security for each 
+enabled logical port.  For logical ports on which port security is 
+enabled, these match the inport and the valid eth.src address(es) and 
+advance only those packets to the next flow table.  For logical ports 
+on which port security is not enabled, these advance all packets that 
+match the inport.
+
+There are no flows for disabled logical ports because the default-drop 
+behavior of logical flow tables causes packets that ingress from them 
+to be dropped.
+
+Ingress Table 1: from-lport Pre-ACLs
+
+Ingress table 1 prepares flows for possible stateful ACL processing in 
+table 2.  It contains a priority-0 flow that simply moves traffic to 
+table 2.  If stateful ACLs are used in the logical datapath, a 
+priority-100 flow is added that sends IP packets to the connection 
+tracker before advancing to table 2.
+
+Ingress table 2: from-lport ACLs
+
+Logical flows in this table closely reproduce those in the ACL table 
+in the OVN_Northbound database for the from-lport direction.  allow 
+ACLs translate into logical flows with the next; action, allow-related 
+ACLs translate into logical flows with the ct_next; action, other ACLs 
+translate to drop;.  The priority values from the ACL table are used 
+directly.
+
+Ingress  table  2  also  contains  a priority 0 flow with action 
+next;, so that ACLs allow packets by default.  If the logical datapath 
+has a statetful ACL, the following flows will also be added:
+
+· A priority-1 flow to commit IP traffic to the connection tracker.  
+This is needed for the default allow policy because, while the 
+initiater’s direction may not have any stateful rules, the server’s 
+may and then its return traffic would not be known and marked as 
+invalid.
+
+· A priority-65535 flow that allows any traffic that has been 
+committed to the connection tracker (i.e., established flows).
+
+· A  priority-65535 flow that allows any traffic that is considered 
+related to a committed flow in the connection tracker (e.g., an ICMP 
+Port Unreachable from a non-listening UDP port).
+
+· A priority-65535 flow that drops all traffic marked by the 
+connection tracker as invalid.
+
+Ingress Table 3: Destination Lookup
+
+This table implements switching behavior.  It contains these logical 
+flows:
+
+· A priority-100 flow that outputs all packets with an Ethernet 
+broadcast or multicast eth.dst to the MC_FLOOD multicast  group,  
+which ovn-northd populates with all enabled logical ports.
+
+· One priority-50 flow that matches each known Ethernet address 
+against eth.dst and outputs the packet to the single associated output 
+port.
+
+· One  priority-0 fallback flow that matches all packets and outputs 
+them to the MC_UNKNOWN multicast group, which ovn-northd populates 
+with all enabled logical ports that accept unknown destination 
+packets.  As a small optimization, if no logical ports accept unknown 
+destination packets, ovn-northd omits this multicast group and logical 
+flow.
+
+Egress Table 0: to-lport Pre-ACLs
+
+This is similar to ingress table 1 except for to-lport traffic.
+
+Egress Table 1: to-lport ACLs
+
+This is similar to ingress table 2 except for to-lport ACLs.
+
+Egress Table 2: Egress Port Security
+
+This is similar to the ingress port security logic in ingress table 0, 
+but with important differences.  Most obviously, outport and eth.dst 
+are checked instead of inport and eth.src.  Second, packets directed 
+to broadcast or multicast eth.dst are always accepted instead of being 
+subject to the port security rules; this is implemented through a 
+priority-100 flow that matches on eth.mcast with action output;.  
+Finally, to ensure that even broadcast and multicast packets are not 
+delivered to disabled logical ports, a priority-150 flow for each 
+disabled logical outport overrides the priority-100 flow with a drop; 
+action.
+
+Logical Router Datapaths
+Ingress Table 0: L2 Admission Control
+
+This table drops packets that the router shouldn’t see at all based on 
+their Ethernet headers.  It contains the following flows:
+
+· Priority-100 flows to drop packets with VLAN tags or multicast 
+Ethernet source addresses.
+
+· For each enabled router port P with Ethernet address E, a 
+priority-50 flow that matches inport == P && (eth.mcast || eth.dst == 
+E), with action next;.
+
+Other packets are implicitly dropped.
+
+Ingress Table 1: IP Input
+
+This table is the core of the logical router datapath functionality.  
+It contains the following flows to implement very basic IP host 
+functionality.
+
+· L3 admission control: A priority-100 flow drops packets that match 
+any of the following:
+   · ip4.src[28..31] == 0xe (multicast source)
+   · ip4.src == 255.255.255.255 (broadcast source)
+   · ip4.src == 127.0.0.0/8 || ip4.dst == 127.0.0.0/8 (localhost source or destination)
+   · ip4.src == 0.0.0.0/8 || ip4.dst == 0.0.0.0/8 (zero network source or destination)
+   · ip4.src is any IP address owned by the router.
+   · ip4.src is the broadcast address of any IP network known to the 
+router.
+   · ICMP echo reply.  These flows reply to ICMP echo requests 
+received for the router’s IP address.  Let A be an IP address or  
+broadcast address owned by a router port.  Then, for each A, a 
+priority-90 flow matches on ip4.dst == A and icmp4.type == 8 && 
+icmp4.code == 0 (ICMP echo request).  These flows use the                   
+following actions where, if A is unicast, then S is A, and if A is 
+broadcast, S is the router’s IP address in A’s network:
+
+                     ip4.dst = ip4.src;
+                     ip4.src = S;
+                     ip.ttl = 255;
+                     icmp4.type = 0;
+                     inport = ""; // Allow sending out inport.
+                     next;
+
+Similar flows match on ip4.dst == 255.255.255.255 and each individual 
+inport, and use the same actions in which S is a function of inport.
+
+    · ARP reply.  These flows reply to ARP requests for the router’s 
+own IP address.  For each router port P that owns IP address A and 
+Ethernet address E, a priority-90 flow matches inport == P && arp.tpa 
+== A && arp.op == 1 (ARP request) with the following actions:
+
+                     eth.dst = eth.src;
+                     eth.src = E;
+                     arp.op = 2; // ARP reply.
+                     arp.tha = arp.sha;
+                     arp.sha = E;
+                     arp.tpa = arp.spa;
+                     arp.spa = A;
+                     outport = P;
+                     inport = ""; // Allow sending out inport.
+                     output;
+
+    · UDP port unreachable.  Priority-80 flows generate ICMP port 
+unreachable messages in reply to UDP datagrams directed to the 
+router’s IP address.  The logical router doesn’t accept any UDP 
+traffic so it always generates such a reply.
+
+These flows should not match IP fragments with nonzero offset.
+
+Details TBD.  Not yet implemented.
+
+· TCP reset.  Priority-80 flows generate TCP reset messages in reply 
+to TCP datagrams directed to the router’s IP address.  The logical 
+router doesn’t accept any TCP traffic so it always generates such a 
+reply.
+
+These flows should not match IP fragments with nonzero offset.
+
+Details TBD.  Not yet implemented.
+
+· Protocol unreachable.  Priority-70 flows generate ICMP protocol 
+unreachable messages in reply to packets directed to the router’s IP 
+address on IP protocols other than UDP, TCP, and ICMP.
+
+These flows should not match IP fragments with nonzero offset.
+
+Details TBD.  Not yet implemented.
+
+· Drop other IP traffic to this router.  These flows drop any other 
+traffic destined to an IP address of this router that is not already 
+handled by one of the flows  above, which amounts to ICMP (other than 
+echo requests) and fragments with nonzero offsets.  For each IP 
+address A owned by the router, a priority-60 flow matches ip4.dst == A 
+and drops the traffic.
+
+The flows above handle all of the traffic that might be directed to 
+the router itself.  The following flows (with lower priorities) handle 
+the remaining traffic, potentially for forwarding:
+
+· Drop Ethernet local broadcast.  A priority-50 flow with match 
+eth.bcast drops traffic destined to the local Ethernet broadcast 
+address.  By definition this traffic should not be forwarded.
+
+·  Drop IP multicast.  A priority-50 flow with match ip4.mcast drops 
+IP multicast traffic.
+
+· ICMP time exceeded.  For each router port P, whose IP address is A, 
+a priority-40 flow with match inport == P && ip.ttl == {0, 1} && 
+!ip.later_frag matches packets whose TTL has expired, with the 
+following actions to send an ICMP time exceeded reply:
+
+                     icmp4 {
+                         icmp4.type = 11; // Time exceeded. 
+                         icmp4.code = 0;  // TTL exceeded in transit.
+                         ip4.dst = ip4.src;
+                         ip4.src = A;
+                         ip.ttl = 255;
+                         next;
+                     };
+
+Not yet implemented.
+
+· TTL  discard.   A  priority-30  flow with match ip.ttl == {0, 1} and 
+actions drop; drops other packets whose TTL has expired, that should 
+not receive a ICMP error reply (i.e. fragments with nonzero offset).
+
+· Next table.  A priority-0 flows match all packets that aren’t 
+already handled and uses actions next; to feed them to the ingress 
+table for routing.
+
+Ingress Table 2: IP Routing
+
+A packet that arrives at this table is an IP packet that should be 
+routed to the address in ip4.dst.  This table implements IP routing, 
+setting reg0 to the next-hop IP address (leaving ip4.dst, the packet’s 
+final destination, unchanged) and advances to the next table for ARP 
+resolution.
+
+This table contains the following logical flows:
+
+· Routing table. For each route to IPv4 network N with netmask M, a 
+logical flow with match ip4.dst == N/M, whose priority is the number 
+of 1-bits in M, has the following actions:
+
+                     ip.ttl--;
+                     reg0 = G;
+                     next;
+
+(Ingress table 1 already verified that ip.ttl--; will not yield a TTL 
+exceeded error.)
+
+If the route has a gateway, G is the gateway IP address, otherwise it 
+is ip4.dst.
+
+· Destination unreachable.  For each router port P, which owns IP 
+address A, a priority-0 logical flow with match in_port == P && 
+!ip.later_frag && !icmp has the following actions:
+
+                     icmp4 {
+                         icmp4.type = 3; // Destination unreachable. 
+                         icmp4.code = 0; // Network unreachable.
+                         ip4.dst = ip4.src;
+                         ip4.src = A;
+                         ip.ttl = 255;
+                         next(2);
+                     };
+
+(The !icmp check prevents recursion if the destination unreachable 
+message itself cannot be routed.)
+
+These flows are omitted if the logical router has a default route, 
+that is, a route with netmask 0.0.0.0.
+
+Ingress Table 3: ARP Resolution
+
+Any  packet that reaches this table is an IP packet whose next-hop IP 
+address is in reg0.  (ip4.dst is the final destination.)  This table 
+resolves the IP address in reg0 into an output port in outport and an 
+Ethernet address in eth.dst, using the following flows:
+
+· Known MAC bindings.  For each IP address A whose host is known to 
+have Ethernet address HE and reside on router port P with Ethernet 
+address  PE,  a  priority-200 flow with match reg0 == A has the 
+following actions:
+
+                     eth.src = PE;
+                     eth.dst = HE;
+                     outport = P;
+                     output;
+
+MAC  bindings  can  be  known  statically based on data in the 
+OVN_Northbound database.  For router ports connected to logical 
+switches, MAC bindings can be known statically from the addresses 
+column in the Logical_Port table.  For router ports connected to other 
+logical routers, MAC bindings can be known statically from the mac and 
+network column in the Logical_Router_Port table.
+
+· Unknown MAC bindings.  For each non-gateway route to IPv4 network N 
+with netmask M on router port P that owns IP address A and Ethernet 
+address E, a logical flow with match ip4.dst == N/M, whose priority is 
+the number of 1-bits in M, has the following actions:
+
+                     arp {
+                         eth.dst = ff:ff:ff:ff:ff:ff;
+                         eth.src = E;
+                         arp.sha = E;
+                         arp.tha = 00:00:00:00:00:00;
+                         arp.spa = A;
+                         arp.tpa = ip4.dst;
+                         arp.op = 1;  // ARP request. 
+                         outport = P;
+                         output;
+                     };
+
+TBD: How to install MAC bindings when an ARP response comes back.  
+(Implement a "learn" action?)
+
+
+Not yet implemented.
+
+     Egress Table 0: Delivery
+
+Packets that reach this table are ready for delivery.  It contains 
+priority-100 logical flows that match packets on each enabled logical 
+router port, with action output;.
+
+*/
