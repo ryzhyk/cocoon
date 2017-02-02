@@ -12,6 +12,8 @@ module Syntax( pktVar
              , Rule(..)
              , NodeType(..)
              , Node(..)
+             , ArgDirection(..)
+             , FuncArg(..)
              , Function(..)
              , Assume(..)
              , Type(..)
@@ -38,6 +40,7 @@ data Spec = Spec [Refine]
 data Refine = Refine { refinePos       :: Pos
                      , refineTarget    :: [String]
                      , refineTypes     :: [TypeDef]
+                     , refineState     :: [Field]
                      , refineFunctions :: [Function]
                      , refineRelations :: [Relation]
                      , refineAssumes   :: [Assume]
@@ -53,6 +56,8 @@ instance PP Refine where
     pp Refine{..} = (pp "refine" <+> (hcat $ punctuate comma $ map pp refineTarget) <+> lbrace)
                     $$
                     (nest' $ (vcat $ map pp refineTarget)
+                             $$
+                             (vcat $ map ((pp "state" <+>) . pp) refineFunctions)
                              $$
                              (vcat $ map pp refineFunctions)
                              $$
@@ -198,12 +203,21 @@ instance PP Assume where
 instance Show Assume where
     show = render . pp
 
+data ArgDirection = In
+                  | InOut
+
+data FuncArg = FuncArg ArgDirection Field
+
+instance PP FuncArg where
+    pp (FuncArg In f)    = pp f
+    pp (FuncArg InOut f) = pp "inpout" <+> pp f
+
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
-                         , funcArgs :: [Field]
+                         , funcArgs :: [FuncArg]
                          , funcType :: Maybe Type
                          , funcDom  :: Expr
-                         , funcDef  :: Expr
+                         , funcDef  :: Maybe Expr
                          }
 
 instance WithPos Function where
@@ -215,10 +229,10 @@ instance WithName Function where
 
 instance PP Function where
     pp Function{..} = (pp "function" <+> pp funcName <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
-                      <> (maybe empty ((colon <+>) . pp) funcType) <>
-                       pp "=")
+                      <> (maybe empty ((colon <+>) . pp) funcType) 
+                      <+> (maybe empty (\_ -> pp "=") funcDef))
                       $$
-                      (nest' $ pp funcDef)
+                      (maybe empty (nest' . pp) funcDef)
 
 data Constructor = Constructor { consPos :: Pos
                                , consName :: String
@@ -240,8 +254,10 @@ data Type = TLocation {typePos :: Pos}
           | TString   {typePos :: Pos}
           | TBit      {typePos :: Pos, typeWidth :: Int}
           | TArray    {typePos :: Pos, typeElemType :: Type, typeLength :: Int}
+          | TMap      {typePos :: Pos, typeKeyType :: Type, typeElemType :: Type}
           | TStruct   {typePos :: Pos, typeCons :: [Constructor]}
           | TTuple    {typePos :: Pos, typeArgs :: [Type]}
+          | TOpaque   {typePos :: Pos, typeName :: String}
           | TUser     {typePos :: Pos, typeName :: String}
 
 instance WithPos Type where
@@ -255,8 +271,10 @@ instance PP Type where
     pp (TString _)      = pp "string" 
     pp (TBit _ w)       = pp "bit<" <> pp w <> pp ">" 
     pp (TArray _ t l)   = brackets $ pp t <> semi <+> pp l
+    pp (TMap _ k v)     = pp "map" <> pp "<" <> pp k <> comma <> pp v <> pp ">"
     pp (TStruct _ cons) = vcat $ punctuate (char '|') $ map pp cons
     pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
+    pp (TOpaque _ n)    = pp n
     pp (TUser _ n)      = pp n
 
 instance Show Type where
@@ -264,7 +282,7 @@ instance Show Type where
 
 data TypeDef = TypeDef { tdefPos  :: Pos
                        , tdefName :: String
-                       , tdefType :: Type
+                       , tdefType :: Maybe Type
                        }
 
 instance WithPos TypeDef where
@@ -287,7 +305,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [Expr]}
           | ETuple    {exprPos :: Pos, exprFields :: [Expr]}
           | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
-          | EMatch    {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)], exprDefault :: Maybe Expr}
+          | EMatch    {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)]}
           | ELet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
           | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
@@ -320,10 +338,9 @@ instance PP Expr where
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (ETuple _ fs)       = parens $ hsep $ punctuate comma $ map pp fs
     pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
-    pp (EMatch _ e cs d)   = pp "match" <+> pp e <+> (braces $ vcat 
+    pp (EMatch _ e cs)     = pp "match" <+> pp e <+> (braces $ vcat 
                                                        $ punctuate comma 
-                                                       $ (map (\(c,v) -> pp c <> colon <+> pp v) cs) ++ 
-                                                         (maybe [] (\x -> [pp "default" <> colon <+> pp x]) d))
+                                                       $ (map (\(c,v) -> pp c <> colon <+> pp v) cs))
     pp (ELet _ l r)        = pp "let" <+> pp l <+> pp "=" <+> pp r
     pp (ESeq _ l r)        = (pp l <> semi) $$ pp r
     pp (EPar _ l r)        = (pp l <> pp "|" ) $$ pp r

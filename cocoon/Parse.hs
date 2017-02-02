@@ -24,7 +24,6 @@ reservedNames = ["and",
                  "bool",
                  "check",
                  "constraint",
-                 "default",
                  "else",
                  "false",
                  "filter",
@@ -34,6 +33,7 @@ reservedNames = ["and",
                  "host",
                  "havoc",
                  "if",
+                 "inout",
                  "int",
                  "key",
                  "let",
@@ -47,6 +47,7 @@ reservedNames = ["and",
                  "refine",
                  "role",
                  "send",
+                 "state",
                  "string",
                  "switch",
                  "table",
@@ -101,6 +102,7 @@ withPos x = (\s a e -> atPos a (s,e)) <$> getPosition <*> x <*> getPosition
 
 
 data SpecItem = SpType         TypeDef
+              | SpState        Field
               | SpRelation     Relation
               | SpAssume       Assume
               | SpFunc         Function
@@ -114,10 +116,13 @@ cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types funcs relations assumes roles nodes
+mkRefine targets items = Refine nopos targets types state funcs relations assumes roles nodes
     where types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
                                        _        -> Nothing) items
+          state = mapMaybe (\i -> case i of 
+                                       SpState s -> Just s
+                                       _         -> Nothing) items
           funcs = mapMaybe (\i -> case i of 
                                        SpFunc f -> Just f
                                        _        -> Nothing) items
@@ -139,6 +144,7 @@ refine = withPos $ mkRefine <$  reserved "refine"
                             <*> (braces $ many decl)
 
 decl =  (SpType         <$> typeDef)
+    <|> (SpState        <$> stateVar)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
     <|> (SpRelation     <$> relation)
@@ -146,14 +152,18 @@ decl =  (SpType         <$> typeDef)
     <|> (SpNode         <$> node)
 
 
-typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (reservedOp "=" *> typeSpec)
+typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (optionMaybe $ reservedOp "=" *> typeSpec)
+
+stateVar = withPos $ reserved "state" *> arg
 
 func = withPos $ Function nopos <$  reserved "function" 
                                 <*> identifier 
-                                <*> (parens $ commaSep arg) 
+                                <*> (parens $ commaSep farg) 
                                 <*> (colon *> (Just <$> typeSpecSimple) <|> (Nothing <$ reserved "sink"))
                                 <*> (option (EBool nopos True) (reservedOp "|" *> expr))
-                                <*> (reservedOp "=" *> expr)
+                                <*> (optionMaybe $ reservedOp "=" *> expr)
+
+farg = FuncArg <$> (option In $ (\_ -> InOut) <$> reserved "inout") <*> arg
 
 relation = withPos $ do reserved "table" 
                         n <- identifier
@@ -199,6 +209,7 @@ arg = withPos $ (Field nopos) <$> identifier <*> (colon *> typeSpecSimple)
 
 typeSpec = withPos $ 
             arrType
+        <|> mapType
         <|> bitType 
         <|> intType
         <|> stringType
@@ -209,6 +220,7 @@ typeSpec = withPos $
         
 typeSpecSimple = withPos $ 
                   arrType
+              <|> mapType
               <|> bitType 
               <|> intType
               <|> stringType
@@ -222,6 +234,7 @@ stringType = TString nopos <$ reserved "string"
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
 arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
+mapType    = TMap    nopos <$ reserved "map" <*> (symbol "<" *> typeSpecSimple) <*> ((comma *> typeSpecSimple) <* symbol ">")
 structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|") 
     where isstruct = try $ lookAhead $ identifier *> (symbol "{" <|> symbol "|")
 tupleType  = (\fs -> case fs of
@@ -267,9 +280,8 @@ eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
 evar = EVar nopos <$> identifier
-ematch = (fmap uncurry (EMatch nopos <$ reserved "match" <*> expr))
-               <*> (braces $ (,) <$> (commaSep1 $ (,) <$> expr <* colon <*> expr) 
-                                 <*> (optionMaybe $ comma *> reserved "default" *> colon *> expr))
+ematch = EMatch nopos <$ reserved "match" <*> parens expr
+               <*> (braces $ (commaSep1 $ (,) <$> expr <* colon <*> expr))
 --eint  = EInt nopos <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
 estring = EString nopos <$> stringLit
@@ -286,7 +298,10 @@ eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ re
 elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
     where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
 endlet  = ENDLet  nopos <$ reserved "let" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr)
-efork   = EFork   nopos <$ reserved "fork" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr) <*> expr
+efork   = EFork   nopos <$ reserved "fork" 
+                       <*> (symbol "(" *> (commaSep1 identifier)) 
+                       <*> (reservedOp "|" *> expr) 
+                       <*> (symbol ")" *> expr)
 epholder = EPHolder nopos <$ reservedOp "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
@@ -348,4 +363,3 @@ binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re
 sbinary n fun = Infix $ (\l  r  -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
 assign = Infix $ (\l r  -> ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp ":="
-

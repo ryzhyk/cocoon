@@ -21,7 +21,7 @@ syn match  ccnDelimiter         ":="
 syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool default filter fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references
+syn keyword ccnStatement        and bool filter fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references match select state
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 
@@ -41,7 +41,7 @@ syn keyword ccnConstant         true false pkt
 syn keyword ccnOperator	        default true false 
 
 "Keywords for ADTs
-syn keyword ccnType	        bool string int struct typedef
+syn keyword ccnType	        bool string int bit struct typedef map inout
 
 syn sync lines=250
 
