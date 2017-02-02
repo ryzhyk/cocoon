@@ -287,7 +287,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [Expr]}
           | ETuple    {exprPos :: Pos, exprFields :: [Expr]}
           | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
-          | ESwitch   {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)], exprDefault :: Maybe Expr}
+          | EMatch    {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)], exprDefault :: Maybe Expr}
           | ELet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
           | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
@@ -320,7 +320,7 @@ instance PP Expr where
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (ETuple _ fs)       = parens $ hsep $ punctuate comma $ map pp fs
     pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
-    pp (ESwitch _ e cs d)  = pp "switch" <+> pp e <+> (braces $ vcat 
+    pp (EMatch _ e cs d)   = pp "match" <+> pp e <+> (braces $ vcat 
                                                        $ punctuate comma 
                                                        $ (map (\(c,v) -> pp c <> colon <+> pp v) cs) ++ 
                                                          (maybe [] (\x -> [pp "default" <> colon <+> pp x]) d))

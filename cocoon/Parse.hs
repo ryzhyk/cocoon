@@ -37,6 +37,7 @@ reservedNames = ["and",
                  "int",
                  "key",
                  "let",
+                 "match",
                  "sink",
                  "not",
                  "or",
@@ -248,7 +249,7 @@ term' = withPos $
      <|> estring
      <|> epacket
      <|> evar
-     <|> eswitch
+     <|> ematch
      <|> etest
      <|> eite
      <|> esend
@@ -267,7 +268,7 @@ eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
 evar = EVar nopos <$> identifier
-eswitch = (fmap uncurry (ESwitch nopos <$ reserved "switch" <*> expr))
+ematch = (fmap uncurry (EMatch nopos <$ reserved "match" <*> expr))
                <*> (braces $ (,) <$> (commaSep1 $ (,) <$> expr <* colon <*> expr) 
                                  <*> (optionMaybe $ comma *> reserved "default" *> colon *> expr))
 --eint  = EInt nopos <$> (fromIntegral <$> decimal)
