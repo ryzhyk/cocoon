@@ -116,10 +116,12 @@ view parent_port( child_name    : string
                 , parent_name   : string
                 , parent_switch : switch_id
                 , parent_type   : port_type_t
+                , parent_nested : nested_port_t
                 , check child_type == parent_type
-                , check child_switch == parent_switch)
-parent_port(cn, cs, ct, pn, ps, pt) :- logical_port(cn, _, ct, NestedPort{pn, _}, _),
-                                       logical_port(pn, _, pt, _, _)
+                , check child_switch == parent_switch
+                , check parent_nested == NestedPortNone)
+parent_port(cn, cs, ct, pn, ps, pt, pnest) :- logical_port(cn, _, ct, NestedPort{pn, _}, _),
+                                              logical_port(pn, _, pt, pnest, _)
    
 view trunk_port(port: string)
 trunk_port(p) :- logical_port(_, _, _, NestedPort{p, _}, _)
@@ -139,8 +141,8 @@ logical_switch_router(sw, r) :- logical_port(_, sw, PortRouter{rp}, _, _), logic
 assume logical_port(p, _, PortRouter{rport}, _, _) => not logical_router_port_peered(rport)
 
 // Disallow >1 layers of nesting
-assume logical_port(_, sw1, _, NestedPort{parsw, _}, _) and logical_port(_, sw2, _, nested2, _) 
-       => sw1 == sw2 and nested2 == NestedPortNone
+//assume logical_port(_, sw1, _, NestedPort{parsw, _}, _) and logical_port(_, sw2, _, nested2, _) 
+//       => sw1 == sw2 and nested2 == NestedPortNone
 
 // This table is populated by ovn-northd, rather than by the CMS plugin as is most of this database
 table logical_port_up( port: string
@@ -355,7 +357,7 @@ role LogicalPortIn[port: string] | logical_port(port, sw, _, NestedPortNone, ena
     }
 
 function deliver(port: string, fromport: string): () =
-    select (sw, nested, enabled) | logical_port(port, sw, _, nested, enabled);
+    let sw, nested, enabled | logical_port(port, sw, _, nested, enabled);
     // send to connection tracker
     let cts = ct_track_to(ct_state[port], pkt);
     // invalid - drop
