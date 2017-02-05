@@ -14,14 +14,13 @@ syn case match
 syn region ccnComment	start="/\*"  end="\*/" contains=ccnTodo
 syn region ccnCommentL  start="//" skip="\\$" end="$" keepend contains=ccnTodo
 
-
-
-"Operators !, |, =, :=, %, +
 syn match  ccnDelimiter         ":="
+syn match  ccnDelimiter         "->"
+syn match  ccnDelimiter         ":-"
 syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool filter fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references match state
+syn keyword ccnStatement        and bool filter fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references match state where in
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 
@@ -32,13 +31,13 @@ syn keyword ccnTodo             contained TODO FIXME XXX
 syn keyword ccnConditional      switch if else
 
 "Constants
-syn keyword ccnConstant         true false pkt
+syn keyword ccnConstant         true false
 
 "Storage class
 "syn keyword ccnStorageClass
 
 "Operators 
-syn keyword ccnOperator	        default true false 
+syn keyword ccnOperator	        default
 
 "Keywords for ADTs
 syn keyword ccnType	        bool string int bit struct typedef map inout

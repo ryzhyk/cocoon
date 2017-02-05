@@ -295,7 +295,6 @@ instance WithName TypeDef where
 data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EPacket   {exprPos :: Pos}
           | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
-          | EBuiltin  {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
           | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
           | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}
           | EBool     {exprPos :: Pos, exprBVal :: Bool}
@@ -315,9 +314,9 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | ESend     {exprPos :: Pos, exprDst  :: Expr}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
-          | ENDLet    {exprPos :: Pos, exprLetVars :: [String], exprLetCond :: Expr}
-          | EFork     {exprPos :: Pos, exprFrkVars :: [String], exprFrkCond :: Expr, exprFrkBody :: Expr}
+          | EFork     {exprPos :: Pos, exprFrkVar :: Expr, exprFrkExpr :: Expr, exprFrkBody :: Expr}
           | EPHolder  {exprPos :: Pos}
+          | ETyped    {exprPos :: Pos, exprExpr :: Expr, exprType :: Type}
 
 instance WithPos Expr where
     pos = exprPos
@@ -327,7 +326,6 @@ instance PP Expr where
     pp (EVar _ v)          = pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
-    pp (EBuiltin _ f as)   = pp f <> char '!' <>(parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
     pp (ELocation _ r as)  = pp r <> (brackets $ hsep $ punctuate comma $ map pp as)
     pp (EBool _ True)      = pp "true"
@@ -354,9 +352,9 @@ instance PP Expr where
     pp (ESend  _ e)        = pp "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
-    pp (ENDLet _ vs c)     = pp "let" <+>  (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c
-    pp (EFork _ vs c b)    = (pp "fork" <+> (hsep $ punctuate comma $ map pp vs) <+> pp "|" <+> pp c) $$ (nest' $ pp b)
+    pp (EFork _ vs c b)    = (pp "fork" <+> pp vs <+> pp "in" <+> pp c) $$ (nest' $ pp b)
     pp (EPHolder _)        = pp "_"
+    pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
 
 instance Show Expr where
     show = render . pp

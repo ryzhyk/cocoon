@@ -17,7 +17,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = ["?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
+reservedOpNames = [":", "?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
 reservedNames = ["and",
                  "assume",
                  "bit",
@@ -33,6 +33,7 @@ reservedNames = ["and",
                  "host",
                  "havoc",
                  "if",
+                 "in",
                  "inout",
                  "int",
                  "key",
@@ -54,7 +55,8 @@ reservedNames = ["and",
                  "true",
                  "typedef",
                  "unique",
-                 "view"]
+                 "view",
+                 "where"]
 
 
 lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
@@ -192,12 +194,14 @@ constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "k
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
 
-role = withPos $ Role nopos <$  reserved "role" 
-                            <*> identifier 
-                            <*> (brackets $ commaSep arg) 
-                            <*> (option (EBool nopos True) (reservedOp "|" *> expr))
-                            <*> (option (EBool nopos True) (reservedOp "/" *> expr))
-                            <*> (reservedOp "=" *> expr)
+role = withPos $ (\n (as, c, pc) b -> Role nopos n as c pc b) 
+               <$  reserved "role" 
+               <*> identifier 
+               <*> (brackets $ (,,)
+                           <$> commaSep arg
+                           <*> (option (EBool nopos True) (reserved "where" *> expr))
+                           <*> (option (EBool nopos True) (reservedOp "/" *> expr)))
+               <*> (reservedOp "=" *> expr)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
 
@@ -254,7 +258,6 @@ term  =  (withPos $ (\es -> case es of
      <|> term'
 term' = withPos $
          estruct
-     <|> ebuiltin
      <|> eapply
      <|> eloc
      <|> eint
@@ -267,25 +270,22 @@ term' = withPos $
      <|> eite
      <|> esend
      <|> elet
-     <|> endlet
      <|> efork
      <|> epholder
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ identifier *> symbol "("
-ebuiltin = EBuiltin nopos <$ isbuiltin <*> (identifier <* char '!') <*> (parens $ commaSep expr)
-    where isbuiltin = try $ lookAhead $ (identifier *> char '!') *> symbol "("
 eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
     where isloc = try $ lookAhead $ identifier *> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
 evar = EVar nopos <$> identifier
 ematch = EMatch nopos <$ reserved "match" <*> parens expr
-               <*> (braces $ (commaSep1 $ (,) <$> expr <* colon <*> expr))
+               <*> (braces $ (commaSep1 $ (,) <$> expr <* reservedOp "->" <*> expr))
 --eint  = EInt nopos <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
 estring = EString nopos <$> stringLit
-estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep1 expr)
+estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep expr)
     where isstruct = try $ lookAhead $ identifier *> symbol "{"
 
 eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
@@ -297,11 +297,10 @@ esend   = ESend   nopos <$ reserved "send" <*> expr
 eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
 elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
     where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
-endlet  = ENDLet  nopos <$ reserved "let" <*> (commaSep1 identifier) <*> (reservedOp "|" *> expr)
 efork   = EFork   nopos <$ reserved "fork" 
-                       <*> (symbol "(" *> (commaSep1 identifier)) 
-                       <*> (reservedOp "|" *> expr) 
-                       <*> (symbol ")" *> expr)
+                       <*> expr  
+                       <*> (reserved "in" *> expr) 
+                       <*> expr
 epholder = EPHolder nopos <$ reservedOp "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
@@ -328,7 +327,7 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
                  | msb v < w           = return $ EBit nopos w v
                  | otherwise           = fail "Value exceeds specified width"
 
-etable = [[postf $ choice [postSlice, postField]]
+etable = [[postf $ choice [postSlice, postField, postType]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
@@ -345,18 +344,20 @@ etable = [[postf $ choice [postSlice, postField]]
          ,[binary "and" And AssocLeft]
          ,[binary "or" Or AssocLeft]
          ,[binary "=>" Impl AssocLeft]
-         ,[assign AssocLeft]
+         ,[assign AssocNone]
          ,[sbinary ";" ESeq AssocRight]
          ,[sbinary "|" EPar AssocRight]
          ]
 
 pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
-postField  = (\f end e -> EField (fst $ pos e, end) e f) <$> field <*> getPosition
+postField = (\f end e -> EField (fst $ pos e, end) e f) <$> field <*> getPosition
+postType = (\t end e -> ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
 postSlice  = try $ (\(h,l) end e -> ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
 slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
 
 field = dot *> identifier
+etype = reservedOp ":" *> typeSpecSimple
 
 prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n
 binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
