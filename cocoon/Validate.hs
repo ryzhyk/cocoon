@@ -59,9 +59,9 @@ validateFinal r = do
     mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
                         $ exprFuncsRec r roleKeyRange)
           $ refineRoles r
-    case grCycle (funcGraph r) of
-         Nothing -> return ()
-         Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
+    --case grCycle (funcGraph r) of
+    --     Nothing -> return ()
+    --     Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
     mapM_ (roleValidateFinal r) $ refineRoles r
     mapM_ (nodeValidateFinal r) $ refineNodes r
 --    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 

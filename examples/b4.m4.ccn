@@ -79,14 +79,25 @@ refine HostOut {
     typedef uint<16> TunnelId
 
     function tunnel(SiteId src, SiteId dst, FlowId f): TunnelId
-
     function nexthop(TunnelId tun, SiteId site): uint<8>
+
+    function distance(SiteId src, SiteId dst, TunnelId tid): uint<8> = 
+        case { 
+            src == dst: 8'd0;
+            wpConnected(src,nexthop(tid,src)): distance(wanLink(src, nexthop(tid, src)).site, dst, tid) + 8'd1;
+            default: 8'd255;
+        }
+
+    assume (SiteId src, SiteId dst, Packet p)
+           (src != dst and isite(src) and isite(dst)) => distance(src, dst, tunnel(src, dst, flowid(p))) <= 8'd4
+
+(*
     assume(SiteId src, SiteId dst, Packet p, TunnelId tid, SiteId next)
-           (tid == tunnel(src, dst, flowid(p)) and next == wanLink(src, nexthop(tid, src)).site) => 
+           (src != dst and isite(src) and isite(dst) and tid == tunnel(src, dst, flowid(p)) and next == wanLink(src, nexthop(tid, src)).site) => 
            (wpConnected(src,nexthop(tid,src)) and (next == dst or wpConnected(next, nexthop(tid, next)) and wanLink(next, nexthop(tid, next)).site == dst))
+*)
 
     assume(SiteId site, TunnelId tid) isite(site) => iwanPort(site, nexthop(tid, site))
-    assume(SiteId site, TunnelId tid) isite(site) => wpConnected(site, nexthop(tid,site))
 
     assume(IP4 addr) ihost(addr) => isite(hostSite(addr))
 
@@ -305,6 +316,8 @@ refine {
 }
 
 refine {
+
+    include(`b4.cfg.ccn')    
 
     function isite(SiteId site): bool = site == 8'd0 or site == 8'd1 (* or site == 8'd2 *)
 

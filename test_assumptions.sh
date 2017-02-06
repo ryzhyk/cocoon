@@ -10,7 +10,7 @@ NC='\033[0m' # No Color
 
 if [ $# -eq 0 ]
   then
-    TESTS=(corporate.m4 nsdi_example simple-fat-tree vlan_virt.m4 vxlan_virt.m4 isdx.m4 stags b4 f10)
+    TESTS=(corporate.m4 nsdi_example simple-fat-tree vlan_virt.m4 vxlan_virt.m4 isdx.m4 stags b4.m4 f10)
   else
     TESTS=($1)
 fi

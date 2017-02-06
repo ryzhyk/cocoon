@@ -25,6 +25,7 @@ module Expr ( exprIsValidFlag
             , combineCascades) where
 
 import Data.List
+import Control.Monad.State
 
 import Syntax
 import NS
@@ -39,44 +40,55 @@ exprIsValidFlag e = case e of
 
 -- Non-recursively enumerate all functions invoked by the expression
 exprFuncs :: Refine -> Expr -> [String]
-exprFuncs r e = let ?r = r in nub $ exprFuncs' e
+exprFuncs r e = let ?r = r in execState (exprFuncs' e) []
 
-exprFuncs' :: (?r::Refine) => Expr -> [String]
-exprFuncs' (EVar _ _)         = []
-exprFuncs' (EDotVar _ _)      = []
-exprFuncs' (EPacket _)        = []
-exprFuncs' (EApply _ f as)    = f:(concatMap exprFuncs' as)
-exprFuncs' (EBuiltin _ _ as)  = concatMap exprFuncs' as
+exprFuncs' :: (?r::Refine) => Expr -> State [String] ()
+exprFuncs' (EVar _ _)         = return ()
+exprFuncs' (EDotVar _ _)      = return ()
+exprFuncs' (EPacket _)        = return ()
+exprFuncs' (EApply _ f as)    = do found <- get
+                                   mapM_ exprFuncs' as
+                                   when (notElem f found) $ do
+                                       modify (f:)
+exprFuncs' (EBuiltin _ _ as)  = mapM_ exprFuncs' as
 exprFuncs' (EField _ s _)     = exprFuncs' s
-exprFuncs' (ELocation _ _ as) = concatMap exprFuncs' as
-exprFuncs' (EBool _ _)        = []
-exprFuncs' (EInt _ _ _)       = []
-exprFuncs' (EStruct _ _ fs)   = concatMap exprFuncs' fs
-exprFuncs' (EBinOp _ _ l r)   = exprFuncs' l ++ exprFuncs' r
+exprFuncs' (ELocation _ _ as) = mapM_ exprFuncs' as
+exprFuncs' (EBool _ _)        = return ()
+exprFuncs' (EInt _ _ _)       = return ()
+exprFuncs' (EStruct _ _ fs)   = mapM_ exprFuncs' fs
+exprFuncs' (EBinOp _ _ l r)   = do exprFuncs' l 
+                                   exprFuncs' r
 exprFuncs' (EUnOp _ _ e)      = exprFuncs' e
 exprFuncs' (ESlice _ e _ _)   = exprFuncs' e
-exprFuncs' (ECond _ cs d)     = concatMap (\(c,e) -> exprFuncs' c ++ exprFuncs' e) cs ++ exprFuncs' d
-
+exprFuncs' (ECond _ cs d)     = do mapM_ (\(c,e) -> do {exprFuncs' c; exprFuncs' e}) cs
+                                   exprFuncs' d
 
 -- Recursively enumerate all functions invoked by the expression
 exprFuncsRec :: Refine -> Expr -> [String]
-exprFuncsRec r e = let ?r = r in nub $ exprFuncsRec' e
+exprFuncsRec r e = let ?r = r in execState (exprFuncsRec' e) []
 
-exprFuncsRec' :: (?r::Refine) => Expr -> [String]
-exprFuncsRec' (EVar _ _)         = []
-exprFuncsRec' (EDotVar _ _)      = []
-exprFuncsRec' (EPacket _)        = []
-exprFuncsRec' (EApply _ f as)    = f:(concatMap exprFuncsRec' as) ++ maybe [] exprFuncsRec' (funcDef $ getFunc ?r f)
-exprFuncsRec' (EBuiltin _ _ as)  = concatMap exprFuncsRec' as
+exprFuncsRec' :: (?r::Refine) => Expr -> State [String] ()
+exprFuncsRec' (EVar _ _)         = return ()
+exprFuncsRec' (EDotVar _ _)      = return ()
+exprFuncsRec' (EPacket _)        = return ()
+exprFuncsRec' (EApply _ f as)    = do found <- get
+                                      mapM_ exprFuncsRec' as
+                                      when (notElem f found) $ do
+                                           modify (f:)
+                                           maybe (return ()) exprFuncsRec' (funcDef $ getFunc ?r f)
+                --f:(concatMap exprFuncsRec' as) ++ maybe [] exprFuncsRec' (funcDef $ getFunc ?r f)
+exprFuncsRec' (EBuiltin _ _ as)  = mapM_ exprFuncsRec' as
 exprFuncsRec' (EField _ s _)     = exprFuncsRec' s
-exprFuncsRec' (ELocation _ _ as) = concatMap exprFuncsRec' as
-exprFuncsRec' (EBool _ _)        = []
-exprFuncsRec' (EInt _ _ _)       = []
-exprFuncsRec' (EStruct _ _ fs)   = concatMap exprFuncsRec' fs
-exprFuncsRec' (EBinOp _ _ l r)   = exprFuncsRec' l ++ exprFuncsRec' r
+exprFuncsRec' (ELocation _ _ as) = mapM_ exprFuncsRec' as
+exprFuncsRec' (EBool _ _)        = return ()
+exprFuncsRec' (EInt _ _ _)       = return ()
+exprFuncsRec' (EStruct _ _ fs)   = mapM_ exprFuncsRec' fs
+exprFuncsRec' (EBinOp _ _ l r)   = do exprFuncsRec' l 
+                                      exprFuncsRec' r
 exprFuncsRec' (EUnOp _ _ e)      = exprFuncsRec' e
 exprFuncsRec' (ESlice _ e _ _)   = exprFuncsRec' e
-exprFuncsRec' (ECond _ cs d)     = concatMap (\(c,e) -> exprFuncsRec' c ++ exprFuncsRec' e) cs ++ exprFuncsRec' d
+exprFuncsRec' (ECond _ cs d)     = do mapM_ (\(c,e) -> do {exprFuncsRec' c; exprFuncsRec' e}) cs
+                                      exprFuncsRec' d
 
 -- True if e does not refer to any packet fields 
 -- (it may contain function calls and references to other variables)
