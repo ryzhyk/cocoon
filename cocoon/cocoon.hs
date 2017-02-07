@@ -47,6 +47,7 @@ data TOption = CCN String
              | Bound String
              | DoBoogie
              | Do1Refinement
+             | NoTopology
              | DoP4
              | DoNetKAT
         
@@ -56,6 +57,7 @@ options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Co
           , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
           , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
           , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
+          , Option []    ["notopology"] (NoArg NoTopology)             "disable topology generation"
           , Option []    ["p4"]         (NoArg DoP4)                   "enable P4 backend"
           , Option []    ["netkat"]     (NoArg DoNetKAT)               "enable NetKAT backend"
           ]
@@ -66,6 +68,7 @@ data Config = Config { confCCNFile      :: FilePath
                      , confDoBoogie     :: Bool
                      , confDo1Refinement:: Bool
                      , confDoP4         :: Bool
+                     , confNoTopology   :: Bool
                      , confDoNetKAT     :: Bool
                      }
 
@@ -74,6 +77,7 @@ defaultConfig = Config { confCCNFile      = ""
                        , confBound        = 15
                        , confDoBoogie     = False
                        , confDo1Refinement= False
+                       , confNoTopology   = False
                        , confDoP4         = False
                        , confDoNetKAT     = False
                        }
@@ -87,6 +91,7 @@ addOption (Bound b)     config = config{ confBound    = case reads b of
                                                              ((i,_):_) -> i}
 addOption DoBoogie      config = config{ confDoBoogie      = True}
 addOption Do1Refinement config = config{ confDo1Refinement = True}
+addOption NoTopology    config = config{ confNoTopology    = True}
 addOption DoP4          config = config{ confDoP4          = True}
 addOption DoNetKAT      config = config{ confDoNetKAT      = True}
 
@@ -139,33 +144,35 @@ main = do
             writeRefine "_spec" oneBigRefineBoogie
         putStrLn "Verification condition generation complete"
 
-    topology <- case generateTopology final of
-                     Left e  -> fail $ "Error generating network topology: " ++ e
-                     Right t -> return t
-    when (confDoP4 config) $ do
-        let (mntopology, instmap) = generateMininetTopology final topology
-            p4switches = genP4Switches final topology
-        writeFile (workdir </> addExtension basename "mn") mntopology
-        mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap
-                                                writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
-                                                writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
-              p4switches      
-        -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
-        -- end of the compilation phase
-        putStrLn "Network generation complete"
-        hFlush stdout
-        maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
+    when (not $ confNoTopology config) $ do
+        topology <- case generateTopology final of
+                         Left e  -> fail $ "Error generating network topology: " ++ e
+                         Right t -> return t
+        putStrLn "Topology generation complete"
+        when (confDoP4 config) $ do
+            let (mntopology, instmap) = generateMininetTopology final topology
+                p4switches = genP4Switches final topology
+            writeFile (workdir </> addExtension basename "mn") mntopology
+            mapM_ (\(P4Switch descr p4 cmd _) -> do let swname = fromJust $ lookup descr instmap
+                                                    writeFile (workdir </> addExtension (addExtension basename swname) "p4")  (render p4)
+                                                    writeFile (workdir </> addExtension (addExtension basename swname) "txt") (render cmd)) 
+                  p4switches      
+            -- DO NOT MODIFY this string: the run_network.py script uses it to detect the 
+            -- end of the compilation phase
+            putStrLn "Network generation complete"
+            hFlush stdout
+            maybe (return()) (refreshTables workdir basename instmap final Nothing p4switches) cfname
 
-    when (confDoNetKAT config) $ do
-        mapM_ (\f -> when (isNothing $ funcDef f) $ fail $ "Function " ++ name f ++ " is undefined") $ refineFuncs final
-        let mkPhyLinks :: InstanceMap PortLinks -> InstanceMap PhyPortLinks
-            mkPhyLinks (InstanceMap (Left m)) = InstanceMap $ Left $ map (mapSnd mkPhyLinks) m
-            mkPhyLinks (InstanceMap (Right links)) = InstanceMap $ Right $ map (\(p,_,ports) -> (p, map(\(pnum,rport) -> (pnum, pnum, rport)) ports)) links
-        let phytopo = map (mapSnd mkPhyLinks) topology
-        let nkswitches = NK.genSwitches final phytopo
-            policy = foldr (\(InstanceDescr _ ((EInt _ _ swid):_), pol) acc -> NK.NKITE (NK.NKTest $ NK.NKSwitch swid) pol acc) NK.nkdrop nkswitches
-        writeFile (workdir </> "policy.kat") $ render $ pp policy
-        putStrLn "NetKAT generation complete"
+        when (confDoNetKAT config) $ do
+            mapM_ (\f -> when (isNothing $ funcDef f) $ fail $ "Function " ++ name f ++ " is undefined") $ refineFuncs final
+            let mkPhyLinks :: InstanceMap PortLinks -> InstanceMap PhyPortLinks
+                mkPhyLinks (InstanceMap (Left m)) = InstanceMap $ Left $ map (mapSnd mkPhyLinks) m
+                mkPhyLinks (InstanceMap (Right links)) = InstanceMap $ Right $ map (\(p,_,ports) -> (p, map(\(pnum,rport) -> (pnum, pnum, rport)) ports)) links
+            let phytopo = map (mapSnd mkPhyLinks) topology
+            let nkswitches = NK.genSwitches final phytopo
+                policy = foldr (\(InstanceDescr _ ((EInt _ _ swid):_), pol) acc -> NK.NKITE (NK.NKTest $ NK.NKSwitch swid) pol acc) NK.nkdrop nkswitches
+            writeFile (workdir </> "policy.kat") $ render $ pp policy
+            putStrLn "NetKAT generation complete"
 
 pairs :: [a] -> [(a,a)]
 pairs (x:y:xs) = (x,y) : pairs (y:xs)
