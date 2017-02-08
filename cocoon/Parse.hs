@@ -24,9 +24,9 @@ reservedNames = ["and",
                  "bool",
                  "check",
                  "constraint",
+                 "drop",
                  "else",
                  "false",
-                 "filter",
                  "foreign",
                  "fork",
                  "function",
@@ -265,7 +265,7 @@ term' = withPos $
      <|> epacket
      <|> evar
      <|> ematch
-     <|> etest
+     <|> edrop
      <|> eite
      <|> esend
      <|> elet
@@ -291,7 +291,7 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
                                                    v <- sradval
                                                    mkLit w v)
 
-etest   = ETest   nopos <$ reserved "filter" <*> expr
+edrop   = EDrop   nopos <$ reserved "drop"
 esend   = ESend   nopos <$ reserved "send" <*> expr
 eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
 elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)

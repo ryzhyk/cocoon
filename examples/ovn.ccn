@@ -311,13 +311,13 @@ table acl_to   ( switch_id : uuid_t
 function sourcePort(name: port_id_t, p:Packet): port_id_t =
     // trunk port?
     if trunk_port(name) {
-        filter p.vlan != VLANNone;
+        if p.vlan == VLANNone drop;
         let sname = logical_port.where(_.nested == NestedPort{name, p.vlan.vid}).map(_.name).single();
         p.vlan := VLANNone;
         sname
     } else {
         // drop packets with VLAN tags or multicast Ethernet source addresses
-        filter p.vlan == VLANNone;
+        if p.vlan != VLANNone drop;
         name
     }
 
@@ -340,26 +340,26 @@ state ct_state: map<port_id_t, ct_state_t>
 role LogicalPortIn[port: port_id_t | iLogicalPort(port)] = 
     let (sw, enabled) = logical_port.where(_.port == port).map((_.switch_id, _.enabled)).single();
     // drop all packets if port is disabled
-    filter enabled;
+    if not enabled drop;
     // drop multicast packets
-    filter ethUnicastAddr(pkt.src);
+    if not ethUnicastAddr(pkt.src) drop;
     let sport = sourcePort(port);
     // port security enabled? - check valid eth.src address
     if logical_port_secured(sport) 
-        filter logical_port_security(sport, pkt.src);
+        if not logical_port_security(sport, pkt.src) drop;
 
     // send to connection tracker
     let cts = ct_track_from(ct_state[sport], pkt);
     // invalid - drop
-    filter cts != CTInvalid;
+    if cts == CTInvalid drop;
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
         let action = acl_from.where(_.switch_id == sw and _.port==sport and _.packet==pkt).single().action;
         match (action) {
-            ActionAllow        -> filter true,
+            ActionAllow        -> (),
             ActionAllowRelated -> ct_commit_from(ct_state[sport], pkt),
-            _                  -> filter false
+            _                  -> drop
         }
     }
     if ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst) {
@@ -381,23 +381,23 @@ function deliver(port: port_id_t, fromport: port_id_t): () =
     // send to connection tracker
     let cts = ct_track_to(ct_state[port], pkt);
     // invalid - drop
-    filter cts != CTInvalid;
+    if cts == CTInvalid drop;
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
         let action = acl_to.where(_.switch_id == sw and _.port==port and _.from == fromport and _.packet == pkt).single().action;
 
         match (action) {
-            ActionAllow        -> filter true,
+            ActionAllow        -> (),
             ActionAllowRelated -> ct_commit_to(ct_state[port], pkt),
-            _                  -> filter false
+            _                  -> drop
         }
     }
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address
         if logical_port_secured(port) 
-            filter logical_port_security(port, pkt.dst)
+            if not logical_port_security(port, pkt.dst) drop
     };
     // add VLAN encapsulation for nested ports
     match (nested) {
@@ -419,7 +419,7 @@ function lportSendOut(port: port_id_t): () =
 function iLogicalPort(port: port_id_t): bool =
     logical_port(port, _, type, NestedPortNone, _) and (isRegularPort(type) or isLocalnetPort(type))
 
-role LogicalPortOut[port: port_id_t | iLogicalPort(port)] = filter false
+role LogicalPortOut[port: port_id_t | iLogicalPort(port)] = drop
 
 
 /*

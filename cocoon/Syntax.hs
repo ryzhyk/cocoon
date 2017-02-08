@@ -309,7 +309,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EITE      {exprPos :: Pos, exprCond :: Expr, exprThen :: Expr, exprElse :: Maybe Expr}
-          | ETest     {exprPos :: Pos, exprCond :: Expr}
+          | EDrop     {exprPos :: Pos}
           | ESet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
           | ESend     {exprPos :: Pos, exprDst  :: Expr}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
@@ -347,7 +347,7 @@ instance PP Expr where
                              (nest' $ pp t)
                              $$
                              rbrace <+> (maybe empty (\e -> (pp "else" <+> lbrace) $$ (nest' $ pp e) $$ rbrace) me)
-    pp (ETest _ c)         = pp "filter" <+> pp c
+    pp (EDrop _)           = pp "drop"
     pp (ESet _ l r)        = pp l <+> pp ":=" <+> pp r
     pp (ESend  _ e)        = pp "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2

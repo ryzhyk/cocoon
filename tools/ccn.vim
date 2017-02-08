@@ -20,7 +20,7 @@ syn match  ccnDelimiter         ":-"
 syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool filter fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references match state where in
+syn keyword ccnStatement        and bool fork function assume host let not or pkt refine role send switch primary table view foreign key check unique references match state drop in
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 
