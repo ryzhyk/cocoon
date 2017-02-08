@@ -46,8 +46,8 @@ exprFuncs' :: (?r::Refine) => Expr -> State [String] ()
 exprFuncs' (EVar _ _)         = return ()
 exprFuncs' (EDotVar _ _)      = return ()
 exprFuncs' (EPacket _)        = return ()
-exprFuncs' (EApply _ f as)    = do found <- get
-                                   mapM_ exprFuncs' as
+exprFuncs' (EApply _ f as)    = do mapM_ exprFuncs' as
+                                   found <- get
                                    when (notElem f found) $ do
                                        modify (f:)
 exprFuncs' (EBuiltin _ _ as)  = mapM_ exprFuncs' as
@@ -71,8 +71,8 @@ exprFuncsRec' :: (?r::Refine) => Expr -> State [String] ()
 exprFuncsRec' (EVar _ _)         = return ()
 exprFuncsRec' (EDotVar _ _)      = return ()
 exprFuncsRec' (EPacket _)        = return ()
-exprFuncsRec' (EApply _ f as)    = do found <- get
-                                      mapM_ exprFuncsRec' as
+exprFuncsRec' (EApply _ f as)    = do mapM_ exprFuncsRec' as
+                                      found <- get
                                       when (notElem f found) $ do
                                            modify (f:)
                                            maybe (return ()) exprFuncsRec' (funcDef $ getFunc ?r f)
