@@ -337,7 +337,7 @@ function ct_commit_to(inout s: ct_state_t, p: Packet): ()
 
 state ct_state: map<port_id_t, ct_state_t>
 
-role LogicalPortIn[port: port_id_t where iLogicalPort(port)] = 
+role LogicalPortIn[port: port_id_t | iLogicalPort(port)] = 
     let (sw, enabled) = logical_port.where(_.port == port).map((_.switch_id, _.enabled)).single();
     // drop all packets if port is disabled
     filter enabled;
@@ -355,7 +355,7 @@ role LogicalPortIn[port: port_id_t where iLogicalPort(port)] =
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
-        let action = acl_from.where(_.switch_id == sw and _.port==sport, and _.packet==pkt).single().action;
+        let action = acl_from.where(_.switch_id == sw and _.port==sport and _.packet==pkt).single().action;
         match (action) {
             ActionAllow        -> filter true,
             ActionAllowRelated -> ct_commit_from(ct_state[sport], pkt),
@@ -364,7 +364,7 @@ role LogicalPortIn[port: port_id_t where iLogicalPort(port)] =
     }
     if ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst) {
         // multicast | broadcast -- send to all ports
-        fork dport in logical_port(dport, sw, _, _, _))
+        fork dport in logical_port(dport, sw, _, _, _)
             deliver(dport, sport)
     } else if knownAddr(sw, pkt.dst) {
         // unicast to known destination
@@ -419,7 +419,7 @@ function lportSendOut(port: port_id_t): () =
 function iLogicalPort(port: port_id_t): bool =
     logical_port(port, _, type, NestedPortNone, _) and (isRegularPort(type) or isLocalnetPort(type))
 
-role LogicalPortOut[port: port_id_t where iLogicalPort(port)] = filter false
+role LogicalPortOut[port: port_id_t | iLogicalPort(port)] = filter false
 
 
 /*
@@ -804,16 +804,3 @@ Linq join syntax:
 - 
 
 */
-
-
-rel' = map(rel, f)
-rel'(x) :- rel(y) and x = f(y)
-
-rel' = where(rel, f)
-rel'(x) :- rel(x) and f(x)
-
-rel' = rel1 * rel2
-rel'((xdw,y), f1, ) :- rel1(x) and rel2(y)
-
-rel' = c1.join(c2, f1, f2)
-rel'((x,y)) :- c1(x) and c2(y) and f1(x) == f2(y)

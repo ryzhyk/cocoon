@@ -55,8 +55,7 @@ reservedNames = ["and",
                  "true",
                  "typedef",
                  "unique",
-                 "view",
-                 "where"]
+                 "view"]
 
 
 lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
@@ -199,7 +198,7 @@ role = withPos $ (\n (as, c, pc) b -> Role nopos n as c pc b)
                <*> identifier 
                <*> (brackets $ (,,)
                            <$> commaSep arg
-                           <*> (option (EBool nopos True) (reserved "where" *> expr))
+                           <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                            <*> (option (EBool nopos True) (reservedOp "/" *> expr)))
                <*> (reservedOp "=" *> expr)
 
@@ -327,7 +326,7 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
                  | msb v < w           = return $ EBit nopos w v
                  | otherwise           = fail "Value exceeds specified width"
 
-etable = [[postf $ choice [postSlice, postField, postType]]
+etable = [[postf $ choice [postSlice, postApply, postField, postType]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
@@ -352,11 +351,15 @@ etable = [[postf $ choice [postSlice, postField, postType]]
 pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
 postField = (\f end e -> EField (fst $ pos e, end) e f) <$> field <*> getPosition
+postApply = (\(f, args) end e -> EApply (fst $ pos e, end) f (e:args)) <$> dotcall <*> getPosition
 postType = (\t end e -> ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
 postSlice  = try $ (\(h,l) end e -> ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
 slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
 
 field = dot *> identifier
+dotcall = (,) <$ isapply <*> (dot *> identifier) <*> (parens $ commaSep expr)
+    where isapply = try $ lookAhead $ dot *> identifier *> symbol "("
+
 etype = reservedOp ":" *> typeSpecSimple
 
 prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n
