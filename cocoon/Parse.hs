@@ -17,13 +17,14 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = [":", "?", "!", "|", "==", "=", ":=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
+reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
 reservedNames = ["and",
                  "assume",
                  "bit",
                  "bool",
                  "check",
                  "constraint",
+                 "default",
                  "drop",
                  "else",
                  "false",
@@ -34,10 +35,8 @@ reservedNames = ["and",
                  "havoc",
                  "if",
                  "in",
-                 "inout",
                  "int",
                  "key",
-                 "let",
                  "match",
                  "sink",
                  "not",
@@ -55,7 +54,9 @@ reservedNames = ["and",
                  "true",
                  "typedef",
                  "unique",
-                 "view"]
+                 "var",
+                 "view",
+                 "with"]
 
 
 lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
@@ -145,10 +146,10 @@ refine = withPos $ mkRefine <$  reserved "refine"
                             <*> (braces $ many decl)
 
 decl =  (SpType         <$> typeDef)
+    <|> (SpRelation     <$> relation)
     <|> (SpState        <$> stateVar)
     <|> (SpFunc         <$> func)
     <|> (SpRole         <$> role)
-    <|> (SpRelation     <$> relation)
     <|> (SpAssume       <$> assume)
     <|> (SpNode         <$> node)
 
@@ -159,17 +160,17 @@ stateVar = withPos $ reserved "state" *> arg
 
 func = withPos $ Function nopos <$  reserved "function" 
                                 <*> identifier 
-                                <*> (parens $ commaSep farg) 
+                                <*> (parens $ commaSep arg) 
                                 <*> (colon *> (Just <$> typeSpecSimple) <|> (Nothing <$ reserved "sink"))
                                 <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                                 <*> (optionMaybe $ reservedOp "=" *> expr)
 
-farg = FuncArg <$> (option In $ (\_ -> InOut) <$> reserved "inout") <*> arg
-
-relation = withPos $ do reserved "table" 
+relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
+                                   <|>
+                                   (False <$ reserved "table")
                         n <- identifier
                         (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
-                        return $ Relation nopos n as cs Nothing
+                        return $ Relation nopos mutable n as cs Nothing
                  <|> do reserved "view" 
                         n <- identifier
                         (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
@@ -181,7 +182,7 @@ relation = withPos $ do reserved "table"
                                       reservedOp ":-"
                                       rhs <- commaSep expr
                                       return $ Rule nopos rargs rhs
-                        return $ Relation nopos n as cs $ Just rs
+                        return $ Relation nopos False n as cs $ Just rs
 
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
@@ -193,11 +194,12 @@ constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "k
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
 
-role = withPos $ (\n (as, c, pc) b -> Role nopos n as c pc b) 
+role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b) 
                <$  reserved "role" 
                <*> identifier 
-               <*> (brackets $ (,,)
-                           <$> commaSep arg
+               <*> (brackets $ (,,,)
+                           <$> identifier
+                           <*> (reserved "in" *> identifier)
                            <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                            <*> (option (EBool nopos True) (reservedOp "/" *> expr)))
                <*> (reservedOp "=" *> expr)
@@ -212,7 +214,6 @@ arg = withPos $ (Field nopos) <$> identifier <*> (colon *> typeSpecSimple)
 
 typeSpec = withPos $ 
             arrType
-        <|> mapType
         <|> bitType 
         <|> intType
         <|> stringType
@@ -223,7 +224,6 @@ typeSpec = withPos $
         
 typeSpecSimple = withPos $ 
                   arrType
-              <|> mapType
               <|> bitType 
               <|> intType
               <|> stringType
@@ -237,7 +237,6 @@ stringType = TString nopos <$ reserved "string"
 boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
 arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
-mapType    = TMap    nopos <$ reserved "map" <*> (symbol "<" *> typeSpecSimple) <*> ((comma *> typeSpecSimple) <* symbol ">")
 structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|") 
     where isstruct = try $ lookAhead $ identifier *> (symbol "{" <|> symbol "|")
 tupleType  = (\fs -> case fs of
@@ -268,8 +267,9 @@ term' = withPos $
      <|> edrop
      <|> eite
      <|> esend
-     <|> elet
+     <|> evardcl
      <|> efork
+     <|> ewith
      <|> epholder
 
 eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
@@ -291,15 +291,21 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
                                                    v <- sradval
                                                    mkLit w v)
 
-edrop   = EDrop   nopos <$ reserved "drop"
-esend   = ESend   nopos <$ reserved "send" <*> expr
-eite    = EITE    nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
-elet    = ELet    nopos <$ islet <*> (reserved "let" *> expr) <*> (reservedOp "=" *> expr)
-    where islet = try $ lookAhead $ reserved "let" *> expr *> reservedOp "="
-efork   = EFork   nopos <$ reserved "fork" 
-                       <*> expr  
-                       <*> (reserved "in" *> expr) 
-                       <*> expr
+edrop   = EDrop    nopos <$ reserved "drop"
+esend   = ESend    nopos <$ reserved "send" <*> expr
+eite    = EITE     nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
+evardcl = EVarDecl nopos <$ reserved "var" <*> identifier
+efork   = EFork    nopos <$ reserved "fork" 
+                        <*> (symbol "(" *> identifier)
+                        <*> (reserved "in" *> identifier) 
+                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
+                        <*> expr
+ewith   = EWith    nopos <$ reserved "with" 
+                        <*> (symbol "(" *> identifier)
+                        <*> (reserved "in" *> identifier) 
+                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
+                        <*> expr
+                        <*> (optionMaybe $ reserved "default" *> expr)
 epholder = EPHolder nopos <$ reservedOp "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
@@ -366,4 +372,4 @@ prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <*
 binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
 sbinary n fun = Infix $ (\l  r  -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
-assign = Infix $ (\l r  -> ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp ":="
+assign = Infix $ (\l r  -> ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="

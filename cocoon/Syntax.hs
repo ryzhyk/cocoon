@@ -12,8 +12,6 @@ module Syntax( pktVar
              , Rule(..)
              , NodeType(..)
              , Node(..)
-             , ArgDirection(..)
-             , FuncArg(..)
              , Function(..)
              , Assume(..)
              , Type(..)
@@ -28,6 +26,7 @@ module Syntax( pktVar
 import Control.Monad.Except
 import Text.PrettyPrint
 
+import Util
 import Pos
 import Name
 import Ops
@@ -57,7 +56,7 @@ instance PP Refine where
                     $$
                     (nest' $ (vcat $ map pp refineTarget)
                              $$
-                             (vcat $ map ((pp "state" <+>) . pp) refineFunctions)
+                             (vcat $ map ((pp "state" <+>) . pp) refineState)
                              $$
                              (vcat $ map pp refineFunctions)
                              $$
@@ -100,8 +99,9 @@ instance Show Field where
 
 data Role = Role { rolePos       :: Pos
                  , roleName      :: String
-                 , roleKeys      :: [Field]
-                 , roleKeyRange  :: Expr
+                 , roleKey       :: String
+                 , roleTable     :: String
+                 , roleCond      :: Expr
                  , rolePktGuard  :: Expr
                  , roleBody      :: Expr
                  }
@@ -114,8 +114,7 @@ instance WithName Role where
     name = roleName
 
 instance PP Role where
-    pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ hcat $ punctuate comma $ map pp roleKeys)
-                   <> pp "|" <+> pp roleKeyRange <+> pp "/" <+> pp rolePktGuard <+> pp "=")
+    pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ pp roleKey <+> pp "in" <+> pp roleTable <+> pp "|" <+> pp roleCond <+> pp "/" <+> pp rolePktGuard <+> pp "="))
                   $$
                   (nest' $ pp roleBody)
 
@@ -161,18 +160,20 @@ instance PP Constraint where
     pp (Check _ e)             = pp "check" <+> pp e
    
 
-data Relation = Relation { relPos  :: Pos
-                         , relName :: String
-                         , relArgs :: [Field]
+data Relation = Relation { relPos     :: Pos
+                         , relMutable :: Bool
+                         , relName    :: String
+                         , relArgs    :: [Field]
                          , relConstraints :: [Constraint]
-                         , relDef  :: Maybe [Rule]}
+                         , relDef     :: Maybe [Rule]}
 
 instance WithPos Relation where
     pos = relPos
     atPos r p = r{relPos = p}
 
 instance PP Relation where
-    pp Relation{..} = pp "relation" <+> pp relName <+> 
+    pp Relation{..} = if' relMutable (pp "state") empty <+>
+                      (maybe (pp "table") (\_ -> pp "view") relDef) <+> pp relName <+> 
                       (parens $ hsep $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <+>
                       (maybe empty (\_ -> pp "=") relDef) $$
                       (maybe empty (vcat . map (ppRule relName)) relDef)
@@ -203,18 +204,9 @@ instance PP Assume where
 instance Show Assume where
     show = render . pp
 
-data ArgDirection = In
-                  | InOut
-
-data FuncArg = FuncArg ArgDirection Field
-
-instance PP FuncArg where
-    pp (FuncArg In f)    = pp f
-    pp (FuncArg InOut f) = pp "inpout" <+> pp f
-
 data Function = Function { funcPos  :: Pos
                          , funcName :: String
-                         , funcArgs :: [FuncArg]
+                         , funcArgs :: [Field]
                          , funcType :: Maybe Type
                          , funcDom  :: Expr
                          , funcDef  :: Maybe Expr
@@ -254,7 +246,6 @@ data Type = TLocation {typePos :: Pos}
           | TString   {typePos :: Pos}
           | TBit      {typePos :: Pos, typeWidth :: Int}
           | TArray    {typePos :: Pos, typeElemType :: Type, typeLength :: Int}
-          | TMap      {typePos :: Pos, typeKeyType :: Type, typeElemType :: Type}
           | TStruct   {typePos :: Pos, typeCons :: [Constructor]}
           | TTuple    {typePos :: Pos, typeArgs :: [Type]}
           | TOpaque   {typePos :: Pos, typeName :: String}
@@ -271,7 +262,6 @@ instance PP Type where
     pp (TString _)      = pp "string" 
     pp (TBit _ w)       = pp "bit<" <> pp w <> pp ">" 
     pp (TArray _ t l)   = brackets $ pp t <> semi <+> pp l
-    pp (TMap _ k v)     = pp "map" <> pp "<" <> pp k <> comma <> pp v <> pp ">"
     pp (TStruct _ cons) = vcat $ punctuate (char '|') $ map pp cons
     pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
     pp (TOpaque _ n)    = pp n
@@ -305,7 +295,7 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | ETuple    {exprPos :: Pos, exprFields :: [Expr]}
           | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
           | EMatch    {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)]}
-          | ELet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
+          | EVarDecl  {exprPos :: Pos, exprVName :: String}
           | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
           | EITE      {exprPos :: Pos, exprCond :: Expr, exprThen :: Expr, exprElse :: Maybe Expr}
@@ -314,7 +304,8 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | ESend     {exprPos :: Pos, exprDst  :: Expr}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
-          | EFork     {exprPos :: Pos, exprFrkVar :: Expr, exprFrkExpr :: Expr, exprFrkBody :: Expr}
+          | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: Expr, exprFrkBody :: Expr}
+          | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprFrkBody :: Expr, exprDef :: Maybe Expr}
           | EPHolder  {exprPos :: Pos}
           | ETyped    {exprPos :: Pos, exprExpr :: Expr, exprType :: Type}
 
@@ -339,7 +330,7 @@ instance PP Expr where
     pp (EMatch _ e cs)     = pp "match" <+> pp e <+> (braces $ vcat 
                                                        $ punctuate comma 
                                                        $ (map (\(c,v) -> pp c <> colon <+> pp v) cs))
-    pp (ELet _ l r)        = pp "let" <+> pp l <+> pp "=" <+> pp r
+    pp (EVarDecl _ v)      = pp "var" <+> pp v
     pp (ESeq _ l r)        = (pp l <> semi) $$ pp r
     pp (EPar _ l r)        = (pp l <> pp "|" ) $$ pp r
     pp (EITE _ c t me)     = (pp "if" <+> pp c <+> lbrace)
@@ -348,11 +339,14 @@ instance PP Expr where
                              $$
                              rbrace <+> (maybe empty (\e -> (pp "else" <+> lbrace) $$ (nest' $ pp e) $$ rbrace) me)
     pp (EDrop _)           = pp "drop"
-    pp (ESet _ l r)        = pp l <+> pp ":=" <+> pp r
+    pp (ESet _ l r)        = pp l <+> pp "=" <+> pp r
     pp (ESend  _ e)        = pp "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
-    pp (EFork _ vs c b)    = (pp "fork" <+> pp vs <+> pp "in" <+> pp c) $$ (nest' $ pp b)
+    pp (EFork _ v t c b)   = (pp "fork" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
+    pp (EWith _ v t c b d) = (pp "with" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
+                             $$ (nest' $ pp b)
+                             $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
     pp (EPHolder _)        = pp "_"
     pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
 
@@ -373,5 +367,4 @@ data ECtx = CtxAssume   Assume
           | CtxRule     Relation Rule
           | CtxFunc     Function
           | CtxRole     Role
-          | CtxLet      ECtx [Field]
           | CtxFork     ECtx [Field]
