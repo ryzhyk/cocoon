@@ -59,42 +59,54 @@ reservedNames = ["and",
                  "with"]
 
 
-lexer = T.makeTokenParser (emptyDef {T.commentStart      = "/*"
-                                    ,T.commentEnd        = "*/"
-                                    ,T.commentLine       = "//"
-                                    ,T.nestedComments    = True
-                                    ,T.identStart        = letter <|> char '_' 
-                                    ,T.identLetter       = alphaNum <|> char '_'
-                                    ,T.reservedOpNames   = reservedOpNames
-                                    ,T.reservedNames     = reservedNames
-                                    ,T.opLetter          = oneOf "_!?:%*-+./=|<>"
-                                    ,T.caseSensitive     = True})
+ccnDef = emptyDef { T.commentStart      = "/*"
+                  , T.commentEnd        = "*/"
+                  , T.commentLine       = "//"
+                  , T.nestedComments    = True
+                  , T.identStart        = letter <|> char '_' 
+                  , T.identLetter       = alphaNum <|> char '_'
+                  , T.reservedOpNames   = reservedOpNames
+                  , T.reservedNames     = reservedNames
+                  , T.opLetter          = oneOf "_!?:%*-+./=|<>"
+                  , T.caseSensitive     = True}
 
+ccnLCDef = ccnDef{T.identStart = lower <|> char '_'}
+ccnUCDef = ccnDef{T.identStart = upper}
 
-reservedOp = T.reservedOp lexer
-reserved   = T.reserved lexer
-identifier = T.identifier lexer
+lexer   = T.makeTokenParser ccnDef
+lcLexer = T.makeTokenParser ccnLCDef
+ucLexer = T.makeTokenParser ccnUCDef
+
+reservedOp   = T.reservedOp lexer
+reserved     = T.reserved lexer
+identifier   = T.identifier lexer
+lcIdentifier = T.identifier lcLexer
+ucIdentifier = T.identifier ucLexer
 --semiSep    = T.semiSep lexer
 --semiSep1   = T.semiSep1 lexer
-colon      = T.colon lexer
-commaSep   = T.commaSep lexer
-commaSep1  = T.commaSep1 lexer
-symbol     = T.symbol lexer
-semi       = T.semi lexer
-comma      = T.comma lexer
-braces     = T.braces lexer
-parens     = T.parens lexer
-angles     = T.angles lexer
-brackets   = T.brackets lexer
-natural    = T.natural lexer
-decimal    = T.decimal lexer
+colon        = T.colon lexer
+commaSep     = T.commaSep lexer
+commaSep1    = T.commaSep1 lexer
+symbol       = T.symbol lexer
+semi         = T.semi lexer
+comma        = T.comma lexer
+braces       = T.braces lexer
+parens       = T.parens lexer
+angles       = T.angles lexer
+brackets     = T.brackets lexer
+natural      = T.natural lexer
+decimal      = T.decimal lexer
 --integer    = T.integer lexer
-whiteSpace = T.whiteSpace lexer
-lexeme     = T.lexeme lexer
-dot        = T.dot lexer
-stringLit  = T.stringLiteral lexer
+whiteSpace   = T.whiteSpace lexer
+lexeme       = T.lexeme lexer
+dot          = T.dot lexer
+stringLit    = T.stringLiteral lexer
 --charLit    = T.charLiteral lexer
 
+roleIdent = ucIdentifier
+consIdent = ucIdentifier
+varIdent  = lcIdentifier
+funcIdent = lcIdentifier
 
 removeTabs = do s <- getInput
                 let s' = map (\c -> if c == '\t' then ' ' else c ) s 
@@ -142,7 +154,7 @@ mkRefine targets items = Refine nopos targets types state funcs relations assume
                                        _        -> Nothing) items
 
 refine = withPos $ mkRefine <$  reserved "refine" 
-                            <*> (commaSep identifier)
+                            <*> (commaSep roleIdent)
                             <*> (braces $ many decl)
 
 decl =  (SpType         <$> typeDef)
@@ -159,7 +171,7 @@ typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (op
 stateVar = withPos $ reserved "state" *> arg
 
 func = withPos $ Function nopos <$  reserved "function" 
-                                <*> identifier 
+                                <*> funcIdent
                                 <*> (parens $ commaSep arg) 
                                 <*> (colon *> (Just <$> typeSpecSimple) <|> (Nothing <$ reserved "sink"))
                                 <*> (option (EBool nopos True) (reservedOp "|" *> expr))
@@ -187,18 +199,18 @@ relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state"
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
 
-constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep identifier)))
+constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep expr)))
                     <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep expr)) 
-                                          <*> (reserved "references" *> identifier) <*> (parens $ commaSep identifier))
+                                          <*> (reserved "references" *> identifier) <*> (parens $ commaSep expr))
                     <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep expr))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
 
 role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b) 
                <$  reserved "role" 
-               <*> identifier 
+               <*> roleIdent 
                <*> (brackets $ (,,,)
-                           <$> identifier
+                           <$> varIdent
                            <*> (reserved "in" *> identifier)
                            <*> (option (EBool nopos True) (reservedOp "|" *> expr))
                            <*> (option (EBool nopos True) (reservedOp "/" *> expr)))
@@ -208,9 +220,9 @@ assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ c
 
 node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost <$ reserved "host"))
                             <*> identifier 
-                            <*> (parens $ commaSep1 $ parens $ (,) <$> identifier <* comma <*> identifier)
+                            <*> (parens $ commaSep1 $ parens $ (,) <$> roleIdent <* comma <*> roleIdent)
 
-arg = withPos $ (Field nopos) <$> identifier <*> (colon *> typeSpecSimple)
+arg = withPos $ (Field nopos) <$> varIdent <*> (colon *> typeSpecSimple)
 
 typeSpec = withPos $ 
             arrType
@@ -238,13 +250,13 @@ boolType   = TBool   nopos <$ reserved "bool"
 userType   = TUser   nopos <$> identifier
 arrType    = brackets $ TArray nopos <$> typeSpecSimple <* semi <*> (fromIntegral <$> decimal)
 structType = TStruct nopos <$ isstruct <*> sepBy1 constructor (reservedOp "|") 
-    where isstruct = try $ lookAhead $ identifier *> (symbol "{" <|> symbol "|")
+    where isstruct = try $ lookAhead $ consIdent *> (symbol "{" <|> symbol "|")
 tupleType  = (\fs -> case fs of
                           [f] -> f
                           _   -> TTuple nopos fs)
              <$> (parens $ commaSep typeSpecSimple)
 
-constructor = withPos $ Constructor nopos <$> identifier <*> (option [] $ braces $ commaSep arg)
+constructor = withPos $ Constructor nopos <$> consIdent <*> (option [] $ braces $ commaSep arg)
 
 expr =  buildExpressionParser etable term
     <?> "expression"
@@ -255,9 +267,9 @@ term  =  (withPos $ (\es -> case es of
      <|> braces expr
      <|> term'
 term' = withPos $
-         estruct
-     <|> eapply
+         eapply
      <|> eloc
+     <|> estruct
      <|> eint
      <|> ebool
      <|> estring
@@ -272,20 +284,19 @@ term' = withPos $
      <|> ewith
      <|> epholder
 
-eapply = EApply nopos <$ isapply <*> identifier <*> (parens $ commaSep expr)
-    where isapply = try $ lookAhead $ identifier *> symbol "("
-eloc = ELocation nopos <$ isloc <*> identifier <*> (brackets $ commaSep expr)
-    where isloc = try $ lookAhead $ identifier *> (brackets $ commaSep expr)
+eapply = EApply nopos <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
+    where isapply = try $ lookAhead $ funcIdent *> symbol "("
+eloc = ELocation nopos <$ isloc <*> roleIdent <*> (brackets $ commaSep expr)
+    where isloc = try $ lookAhead $ roleIdent *> (brackets $ commaSep expr)
 ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = EPacket nopos <$ reserved "pkt"
-evar = EVar nopos <$> identifier
+evar = EVar nopos <$> varIdent
 ematch = EMatch nopos <$ reserved "match" <*> parens expr
                <*> (braces $ (commaSep1 $ (,) <$> expr <* reservedOp "->" <*> expr))
 --eint  = EInt nopos <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
 estring = EString nopos <$> stringLit
-estruct = EStruct nopos <$ isstruct <*> identifier <*> (braces $ commaSep expr)
-    where isstruct = try $ lookAhead $ identifier *> symbol "{"
+estruct = EStruct nopos <$> consIdent <*> (option [] $ braces $ commaSep expr)
 
 eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
                                                    v <- sradval
@@ -294,14 +305,14 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
 edrop   = EDrop    nopos <$ reserved "drop"
 esend   = ESend    nopos <$ reserved "send" <*> expr
 eite    = EITE     nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
-evardcl = EVarDecl nopos <$ reserved "var" <*> identifier
+evardcl = EVarDecl nopos <$ reserved "var" <*> varIdent
 efork   = EFork    nopos <$ reserved "fork" 
-                        <*> (symbol "(" *> identifier)
+                        <*> (symbol "(" *> varIdent)
                         <*> (reserved "in" *> identifier) 
                         <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
                         <*> expr
 ewith   = EWith    nopos <$ reserved "with" 
-                        <*> (symbol "(" *> identifier)
+                        <*> (symbol "(" *> varIdent)
                         <*> (reserved "in" *> identifier) 
                         <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
                         <*> expr
@@ -362,9 +373,9 @@ postType = (\t end e -> ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
 postSlice  = try $ (\(h,l) end e -> ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
 slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
 
-field = dot *> identifier
-dotcall = (,) <$ isapply <*> (dot *> identifier) <*> (parens $ commaSep expr)
-    where isapply = try $ lookAhead $ dot *> identifier *> symbol "("
+field = dot *> varIdent
+dotcall = (,) <$ isapply <*> (dot *> funcIdent) <*> (parens $ commaSep expr)
+    where isapply = try $ lookAhead $ dot *> funcIdent *> symbol "("
 
 etype = reservedOp ":" *> typeSpecSimple
 

@@ -142,8 +142,8 @@ instance PP Node where
                   <+>
                   (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
 
-data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [String]}
-                | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [String]}
+data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [Expr]}
+                | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [Expr]}
                 | Unique     {constrPos :: Pos, constrFields :: [Expr]}
                 | Check      {constrPos :: Pos, constrCond :: Expr}
 
