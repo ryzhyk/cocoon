@@ -15,8 +15,7 @@ limitations under the License.
 -}
 {-# LANGUAGE RecordWildCards, FlexibleContexts #-}
 
-module Validate ( validate
-                , validateConfig) where
+module Validate (validate) where
 
 import Control.Monad.Except
 import qualified Data.Graph.Inductive as G
@@ -31,8 +30,8 @@ import Pos
 import Name
 import Expr
 import Refine
-import Statement
-import Builtins
+--import Statement
+--import Builtins
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -44,21 +43,12 @@ validate (Spec (r:rs)) = do
     validateFinal $ last combined
     return combined
 
--- Validate configuration applied on top of a base spec
-validateConfig :: (MonadError String me) => Refine -> [Function] -> me Refine
-validateConfig base cfg = do
-    combined <- combine base (Refine nopos [] [] cfg [] [] [])
-    validate1 combined
-    -- All functions are defined
-    mapM_ (\f -> assertR combined (isJust $ funcDef f) (pos f) $ "Function " ++ name f ++ " is undefined") $ refineFuncs combined
-    return combined
-
 -- Validate final refinement before generating topology from it
 validateFinal :: (MonadError String me) => Refine -> me ()
 validateFinal r = do
-    mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
+    {-mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
                         $ exprFuncsRec r roleKeyRange)
-          $ refineRoles r
+          $ refineRoles r-}
     case grCycle (funcGraph r) of
          Nothing -> return ()
          Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
@@ -76,22 +66,23 @@ combine prev new = do
                                           $ "Role " ++ role ++ " is undefined in this context"
                                   assertR r (isJust $ find ((==role) . roleName) (refineRoles new)) (pos new) 
                                           $ "Role " ++ role ++ " is not re-defined by the refinement"
-                                  assertR r ((roleKeyRange $ getRole prev role) == (roleKeyRange $ getRole new role)) (pos new) 
-                                          $ "Role " ++ role ++ " is re-defined with a different key range"
-                                  assertR r ((rolePktGuard $ getRole prev role) == (rolePktGuard $ getRole new role)) (pos new) 
+                                  assertR r ((roleKey $ getRole prev role) == (roleKey $ getRole new role)) (pos new) 
+                                          $ "Role " ++ role ++ " is re-defined with a different key"
+                                  assertR r ((roleTable $ getRole prev role) == (roleTable $ getRole new role)) (pos new) 
+                                          $ "Role " ++ role ++ " is re-defined over a different table"
+                                  assertR r ((roleCond $ getRole prev role) == (roleCond $ getRole new role)) (pos new) 
                                           $ "Role " ++ role ++ " is re-defined with a different guard"
+                                  assertR r ((rolePktGuard $ getRole prev role) == (rolePktGuard $ getRole new role)) (pos new) 
+                                          $ "Role " ++ role ++ " is re-defined with a different packet guard"
                                   return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
-    mapM_ (\rlname -> do assertR new ((not $ refineIsMulticast (Just prev) new rlname) || refineIsDeterministic (Just prev) new rlname) (pos new) $
-                                     "Refined role " ++ rlname ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
-          $ refineTarget new
-    let types   = refineTypes prev'   ++ refineTypes new
-        roles   = refineRoles prev'   ++ refineRoles new
-        assumes = refineAssumes prev' ++ refineAssumes new 
-        nodes   = refineNodes prev'   ++ refineNodes new 
+    let types   = refineTypes prev'     ++ refineTypes new
+        roles   = refineRoles prev'     ++ refineRoles new
+        assumes = refineAssumes prev'   ++ refineAssumes new 
+        nodes   = refineNodes prev'     ++ refineNodes new 
+        stvars  = refineState prev'     ++ refineState new
+        rels    = refineRels prev'      ++ refineRels new
     funcs <- mergeFuncs $ refineFuncs prev'  ++ refineFuncs new
-    let combined = Refine (pos new) (refineTarget new) types funcs roles assumes nodes
-
-    return combined 
+    return $ Refine (pos new) (refineTarget new) types stvars funcs rels assumes roles nodes
 
 mergeFuncs :: (MonadError String me) => [Function] -> me [Function]
 mergeFuncs []     = return []
@@ -123,27 +114,38 @@ validate1 r@Refine{..} = do
     mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
                                 "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
           refineRoles
-    mapM_ (typeValidate r . tdefType) refineTypes
+    mapM_ (maybe (return ()) (typeValidate r) . tdefType) refineTypes
+    uniqNames (\c -> "Multiple definitions of constructor " ++ c) $ concatMap typeCons $ refineStructs r
     -- each role occurs at most once as a port
     uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . nodePorts) refineNodes
     -- TODO: check for cycles in the types graph - catch recursive type definitions
 --    case grCycle (typeGraph r) of
 --         Nothing -> return ()
 --         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
-
-    mapM_ (funcValidate r) refineFuncs
-    mapM_ (roleValidate r) refineRoles
+    mapM_ (relValidate r)    refineRels
+    mapM_ (stateValidate r)  refineState
+    mapM_ (funcValidate r)   refineFuncs
+    mapM_ (roleValidate r)   refineRoles
     mapM_ (assumeValidate r) refineAssumes
     -- TODO: check for cycles in the locations graph
-    mapM_ (nodeValidate r) refineNodes
+    mapM_ (nodeValidate r)   refineNodes
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
-typeValidate _ (TUInt p w)    = assert (w>0) p "Integer width must be greater than 0"
-typeValidate r (TStruct _ fs) = do uniqNames (\f -> "Multiple definitions of field " ++ f) fs
-                                   mapM_ (typeValidate r . fieldType) fs
+typeValidate _ (TBit p w)     = assert (w>0) p "Integer width must be greater than 0"
+typeValidate r (TStruct _ cs) = do uniqNames (\c -> "Multiple definitions of constructor " ++ c) cs
+                                   mapM_ (consValidate r) cs
+                                   mapM_ (\as -> mapM_ (\(a1, a2) -> assertR r (fieldType a1 == fieldType a2) (pos a2) $
+                                                                     "Argument " ++ name a1 ++ " is re-declared with a different types. Previous declaration: " ++ (show $ pos a1)) 
+                                                       $ zip as $ tail as) 
+                                         $ sortAndGroup name $ concatMap consArgs cs
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
+
+consValidate :: (MonadError String me) => Refine -> Constructor -> me ()
+consValidate r Constructor{..} = do
+    uniqNames (\a -> "Multiple definitions of argument " ++ a) consArgs
+    mapM_ (typeValidate r . fieldType) $ consArgs
 
 funcValidate :: (MonadError String me) => Refine -> Function -> me ()
 funcValidate r f@Function{..} = do
@@ -156,7 +158,17 @@ funcValidate r f@Function{..} = do
          Just def -> do exprValidate r (CtxFunc f) [] def
                         matchType r (CtxFunc f) funcType def 
 
+
+relValidate :: (MonadError String me) => Refine -> Relation -> me ()
+relValidate = error "relValidate is undefined"
+
+stateValidate :: (MonadError String me) => Refine -> Field -> me ()
+stateValidate = error "stateValidate is undefined"
+
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
+roleValidate = error "roleValidate is undefined"
+
+{-
 roleValidate r role@Role{..} = do
     uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
     uniqNames (\v -> "Multiple definitions of local variable " ++ v) $ roleLocals role
@@ -166,21 +178,27 @@ roleValidate r role@Role{..} = do
     exprValidate r (CtxRole role) [] rolePktGuard
     _ <- statValidate r (CtxRole role) [] [] roleBody
     return ()
+-}
 
 roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
-roleValidateFinal _ Role{..} = do
-    assert (statIsDeterministic roleBody) (pos roleBody) "Cannot synthesize non-deterministic behavior"
+roleValidateFinal r Role{..} = do
+    assert (exprIsDeterministic r roleBody) (pos roleBody) "Cannot synthesize non-deterministic behavior"
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
+assumeValidate = error "assumeValidate is undefined"
+{-
 assumeValidate r a@Assume{..} = do
     uniqNames (\v -> "Multiple definitions of variable " ++ v) assVars
     mapM_ (typeValidate r . fieldType) assVars
     exprValidate r (CtxAssume a) [] assExpr
     assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a Boolean expression"
     return ()
+-}
 
 nodeValidate :: (MonadError String me) => Refine -> Node -> me ()
+nodeValidate = error "nodeValidate is undefined"
+{-
 nodeValidate r nd@Node{..} = do
     nodeRole <- checkRole (pos nd) r nodeName
     -- for each port 
@@ -197,6 +215,7 @@ nodeValidate r nd@Node{..} = do
                           validateR r1
                           validateR r2)
           nodePorts
+-}
 
 nodeValidateFinal :: (MonadError String me) => Refine -> Node -> me ()
 nodeValidateFinal r nd@Node{..} = do
@@ -204,53 +223,33 @@ nodeValidateFinal r nd@Node{..} = do
     mapM_ (\(p1,p2) -> do r1 <- checkRole (pos nd) r p1
                           r2 <- checkRole (pos nd) r p2
                           -- input ports can only send to output ports of the same node
-                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) && 
-                                                                    (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)) 
-                                         $ statSendsTo (roleBody r1)) (pos nd)
+                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) {-&& 
+                                                                    (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)-})
+                                         $ exprSendsTo (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
-                          assertR r (not $ any (\rl -> elem rl (map snd nodePorts)) $ statSendsToRoles (roleBody r2)) (pos nd)
+                          assertR r (not $ any (\rl -> elem rl (map snd nodePorts)) $ exprSendsToRoles r (roleBody r2)) (pos nd)
                                  $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports"
-                          checkLinkSt $ roleBody r2)
+                          checkLinkExpr r $ roleBody r2)
           nodePorts
 
 
+checkLinkExpr :: (MonadError String me) => Refine -> Expr -> me ()
+checkLinkExpr r e = do checkLinkExpr' e
+                       mapM_ (maybe return () checkLinkExpr' . funcDef) $ exprFuncsRec r e
 
-checkLinkSt :: (MonadError String me) => Statement -> me ()
-checkLinkSt (SSeq _ s1 s2)  = do checkLinkSt s1
-                                 checkLinkSt s2
-checkLinkSt (SPar p _  _)   = err p "Parallel composition not allowed in output port body" 
-checkLinkSt (SFork p _ _ _) = err p "Fork not allowed in output port body" 
-checkLinkSt (SITE _ c t e)  = do checkLinkExpr c
-                                 checkLinkSt t
-                                 maybe (return ()) checkLinkSt e
-checkLinkSt (STest _ e)     = checkLinkExpr e
-checkLinkSt (SSet p _ _)    = err p "Output port may not modify packets"
-checkLinkSt (SSend _ e)     = checkLinkExpr e
-checkLinkSt (SSendND _ _ _) = error "Validate.checkLinkSt SSendND" 
-checkLinkSt (SHavoc _ _)    = error "Validate.checkLinkSt SHavoc" 
-checkLinkSt (SAssume _ _)   = error "Validate.checkLinkSt SAssume" 
-checkLinkSt (SLet _ _ _ v)  = checkLinkExpr v
 
-checkLinkExpr :: (MonadError String me) => Expr -> me ()
-checkLinkExpr (EVar    _ _)       = return ()
-checkLinkExpr (EDotVar    _ _)    = return ()
-checkLinkExpr (EPacket p)         = err p "Output port body may not inspect packet headers"
-checkLinkExpr (EApply  _ _ as)    = mapM_ checkLinkExpr as
-checkLinkExpr (EBuiltin  _ _ as)  = mapM_ checkLinkExpr as
-checkLinkExpr (EField _ s _)      = checkLinkExpr s
-checkLinkExpr (ELocation _ _ es)  = mapM_ checkLinkExpr es
-checkLinkExpr (EBool _ _)         = return ()
-checkLinkExpr (EInt _ _ _)        = return ()
-checkLinkExpr (EStruct _ _ fs)    = mapM_ checkLinkExpr fs
-checkLinkExpr (EBinOp _ _ e1 e2)  = do checkLinkExpr e1
-                                       checkLinkExpr e2
-checkLinkExpr (EUnOp _ _ e)       = checkLinkExpr e
-checkLinkExpr (ESlice _ e _ _)     = checkLinkExpr e
-checkLinkExpr (ECond _ cs d)      = do mapM_ (\(c,v) -> do checkLinkExpr c
-                                                           checkLinkExpr v) cs
-                                       checkLinkExpr d
+checkLinkExpr' :: (MonadError String me) => Expr -> me ()
+checkLinkExpr' e = exprFoldDFM (\_ e' -> case e' of
+                                                 EPar p _ _      -> err p "Parallel composition not allowed in output port body"
+                                                 EFork p _ _ _ _ -> err p "Fork not allowed in output port body"
+                                                 ESet p _ _      -> err p "Assignment not allowed in output port body"
+                                                 EPacket p       -> err p "Output port body may not inspect packet headers"
+                                                 _               -> return ()) () e
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> [String] -> Expr -> me ()
+exprValidate = error "exprValidate is undefined"
+
+{-
 exprValidate r ctx vset (EVar p v) | isRoleCtx ctx =
     if elem v vset
        then return ()
@@ -459,3 +458,5 @@ statValidate r ctx mset vset (SFork p vs c b) = do
     assertR r (isBool r ctx' c) (pos c) "Fork condition must be a Boolean expression"
     (_, mset', vset') <- statValidate r ctx' mset vset b
     return (True, mset', vset')
+
+-}

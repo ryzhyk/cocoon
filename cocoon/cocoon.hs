@@ -22,6 +22,7 @@ import System.Directory
 import System.Console.GetOpt
 
 import Parse
+import Validate
 
 data TOption = CCN String
              | Bound String

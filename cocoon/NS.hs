@@ -17,12 +17,11 @@ limitations under the License.
 
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
-          lookupVar, checkVar, getVar,
+          --lookupVar, checkVar, getVar,
           lookupLocalVar, checkLocalVar, getLocalVar,
-          lookupKey, checkKey, getKey,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
-          lookupBuiltin, checkBuiltin, getBuiltin,
+          --lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
 import Data.List
@@ -33,7 +32,7 @@ import Syntax
 import Name
 import Util
 import Pos
-import {-# SOURCE #-}Builtins
+--import {-# SOURCE #-}Builtins
 
 packetTypeName = "Packet"
 
@@ -72,10 +71,11 @@ checkRole p r n = case lookupRole r n of
 getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
+{-
 lookupVar :: ECtx -> String -> Maybe Field
 lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
 lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
-lookupVar ctx                    n = find ((==n) . name) $ roleKeys rl ++ roleLocals rl ++ ctxForkVars ctx
+lookupVar ctx                    n = find ((==n) . name) $ [roleKey rl] ++ roleLocals rl ++ ctxForkVars ctx
     where rl = ctxRole ctx
 
 checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
@@ -85,6 +85,7 @@ checkVar p c n = case lookupVar c n of
 
 getVar :: ECtx -> String -> Field
 getVar c n = fromJust $ lookupVar c n
+-}
 
 lookupLocalVar :: Role -> String -> Maybe Field
 lookupLocalVar role n = find ((==n) . name) $ roleLocals role
@@ -97,7 +98,7 @@ checkLocalVar p rl n = case lookupLocalVar rl n of
 getLocalVar :: Role -> String -> Field
 getLocalVar rl n = fromJust $ lookupLocalVar rl n
 
-
+{-
 lookupKey :: Role -> String -> Maybe Field
 lookupKey rl n = find ((==n) . name) $ roleKeys rl
 
@@ -108,6 +109,8 @@ checkKey p rl n = case lookupKey rl n of
 
 getKey :: Role -> String -> Field
 getKey rl n = fromJust $ lookupKey rl n
+-}
+
 
 lookupNode :: Refine -> String -> Maybe Node
 lookupNode Refine{..} n = find ((==n) . name) refineNodes
@@ -120,6 +123,7 @@ checkNode p r n = case lookupNode r n of
 getNode :: Refine -> String -> Node
 getNode r n = fromJust $ lookupNode r n
 
+{-
 lookupBuiltin :: String -> Maybe Builtin
 lookupBuiltin n = find ((==n) . name) builtins
 
@@ -130,3 +134,4 @@ checkBuiltin p n = case lookupBuiltin n of
 
 getBuiltin :: String -> Builtin
 getBuiltin n = fromJust $ lookupBuiltin n
+-}

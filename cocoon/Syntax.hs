@@ -6,25 +6,33 @@ module Syntax( pktVar
              , errR, assertR
              , Field(..)
              , Role(..)
+             , roleLocals
              , Relation(..)
              , Constraint(..)
              , Constructor(..)
+             , consType
              , Rule(..)
              , NodeType(..)
              , Node(..)
              , Function(..)
              , Assume(..)
              , Type(..)
+             , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink
+             , structGetField
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
              , Expr(..)
              , ECtx(..)
+             , ctxForkVars
+             , ctxRole
              , conj
              , disj) where
 
 import Control.Monad.Except
 import Text.PrettyPrint
+import Data.Maybe
+import Data.List
 
 import Util
 import Pos
@@ -40,8 +48,8 @@ data Refine = Refine { refinePos       :: Pos
                      , refineTarget    :: [String]
                      , refineTypes     :: [TypeDef]
                      , refineState     :: [Field]
-                     , refineFunctions :: [Function]
-                     , refineRelations :: [Relation]
+                     , refineFuncs     :: [Function]
+                     , refineRels      :: [Relation]
                      , refineAssumes   :: [Assume]
                      , refineRoles     :: [Role]
                      , refineNodes     :: [Node]
@@ -58,9 +66,9 @@ instance PP Refine where
                              $$
                              (vcat $ map ((pp "state" <+>) . pp) refineState)
                              $$
-                             (vcat $ map pp refineFunctions)
+                             (vcat $ map pp refineFuncs)
                              $$
-                             (vcat $ map pp refineRelations)
+                             (vcat $ map pp refineRels)
                              $$
                              (vcat $ map pp refineAssumes)
                              $$
@@ -83,6 +91,9 @@ data Field = Field { fieldPos  :: Pos
                    , fieldName :: String 
                    , fieldType :: Type
                    }
+
+instance Eq Field where
+    (==) (Field _ n1 t1) (Field _ n2 t2) = n1 == n2 && t1 == t2
 
 instance WithPos Field where
     pos = fieldPos
@@ -117,6 +128,9 @@ instance PP Role where
     pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ pp roleKey <+> pp "in" <+> pp roleTable <+> pp "|" <+> pp roleCond <+> pp "/" <+> pp rolePktGuard <+> pp "="))
                   $$
                   (nest' $ pp roleBody)
+
+roleLocals :: Role -> [Field]
+roleLocals = error "roleLocals is undefined"
 
 data NodeType = NodeSwitch
               | NodeHost
@@ -190,7 +204,7 @@ instance WithPos Rule where
     atPos r p = r{rulePos = p}
 
 data Assume = Assume { assPos  :: Pos
-                     , assArgs :: [Field]
+                     , assVars :: [Field]
                      , assExpr :: Expr
                      }
 
@@ -199,15 +213,16 @@ instance WithPos Assume where
     atPos a p = a{assPos = p}
 
 instance PP Assume where 
-    pp Assume{..} = pp "assume" <+> (parens $ hsep $ punctuate comma $ map pp assArgs) <+> pp assExpr
+    pp Assume{..} = pp "assume" <+> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
 
 instance Show Assume where
     show = render . pp
 
 data Function = Function { funcPos  :: Pos
+                         , funcPure :: Bool
                          , funcName :: String
                          , funcArgs :: [Field]
-                         , funcType :: Maybe Type
+                         , funcType :: Type
                          , funcDom  :: Expr
                          , funcDef  :: Maybe Expr
                          }
@@ -220,15 +235,22 @@ instance WithName Function where
     name = funcName
 
 instance PP Function where
-    pp Function{..} = (pp "function" <+> pp funcName <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
-                      <> (maybe empty ((colon <+>) . pp) funcType) 
-                      <+> (maybe empty (\_ -> pp "=") funcDef))
+    pp Function{..} = ((if' funcPure (pp "function") (pp "procedure")) <+> pp funcName 
+                       <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
+                       <> colon <+> pp funcType 
+                       <+> (maybe empty (\_ -> pp "=") funcDef))
                       $$
-                      (maybe empty (nest' . pp) funcDef)
+                       (maybe empty (nest' . pp) funcDef)
 
 data Constructor = Constructor { consPos :: Pos
                                , consName :: String
                                , consArgs :: [Field] }
+
+instance Eq Constructor where
+    (==) (Constructor _ n1 as1) (Constructor _ n2 as2) = n1 == n2 && as1 == as2
+
+instance WithName Constructor where 
+    name = consName
 
 instance WithPos Constructor where
     pos = consPos
@@ -240,6 +262,13 @@ instance PP Constructor where
 instance Show Constructor where
     show = render . pp
 
+consType :: Refine -> String -> String
+consType r c = name $ fromJust 
+               $ find (\td -> case tdefType td of
+                                   Just (TStruct _ cs) -> any ((==c) . name) cs
+                                   _                   -> False)
+               $ refineTypes r
+
 data Type = TLocation {typePos :: Pos}
           | TBool     {typePos :: Pos}
           | TInt      {typePos :: Pos}
@@ -250,6 +279,36 @@ data Type = TLocation {typePos :: Pos}
           | TTuple    {typePos :: Pos, typeArgs :: [Type]}
           | TOpaque   {typePos :: Pos, typeName :: String}
           | TUser     {typePos :: Pos, typeName :: String}
+          | TSink     {typePos :: Pos}
+
+tLocation = TLocation nopos
+tBool     = TBool     nopos
+tInt      = TInt      nopos
+tString   = TString   nopos
+tBit      = TBit      nopos
+tArray    = TArray    nopos
+tStruct   = TStruct   nopos
+tTuple    = TTuple    nopos
+tOpaque   = TOpaque   nopos
+tUser     = TUser     nopos
+tSink     = TSink     nopos
+
+structGetField :: [Constructor] -> String -> Field
+structGetField cs f = fromJust $ find ((==f) . name) $ concatMap consArgs cs
+
+instance Eq Type where
+    (==) (TLocation _)      (TLocation _)       = True
+    (==) (TBool _)          (TBool _)           = True
+    (==) (TInt _)           (TInt _)            = True
+    (==) (TString _)        (TString _)         = True
+    (==) (TBit _ w1)        (TBit _ w2)         = w1 == w2
+    (==) (TArray _ t1 l1)   (TArray _ t2 l2)    = t1 == t2 && l1 == l2
+    (==) (TStruct _ cs1)    (TStruct _ cs2)     = cs1 == cs2
+    (==) (TTuple _ ts1)     (TTuple _ ts2)      = ts1 == ts2
+    (==) (TOpaque _ n1)     (TOpaque _ n2)      = n1 == n2
+    (==) (TUser _ n1)       (TUser _ n2)        = n1 == n2
+    (==) (TSink _)          (TSink _)           = True
+    (==) _                  _                   = False
 
 instance WithPos Type where
     pos = typePos
@@ -266,6 +325,7 @@ instance PP Type where
     pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
     pp (TOpaque _ n)    = pp n
     pp (TUser _ n)      = pp n
+    pp (TSink _)        = pp "sink"
 
 instance Show Type where
     show = render . pp
@@ -305,9 +365,40 @@ data Expr = EVar      {exprPos :: Pos, exprVar :: String}
           | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
           | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
           | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: Expr, exprFrkBody :: Expr}
-          | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprFrkBody :: Expr, exprDef :: Maybe Expr}
+          | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprWithBody :: Expr, exprDef :: Maybe Expr}
+          | EAny      {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprWithBody :: Expr, exprDef :: Maybe Expr}
           | EPHolder  {exprPos :: Pos}
           | ETyped    {exprPos :: Pos, exprExpr :: Expr, exprType :: Type}
+
+instance Eq Expr where
+    (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
+    (==) (EPacket _)              (EPacket _)                = True
+    (==) (EApply _ f1 as1)        (EApply _ f2 as2)          = f1 == f2 && as1 == as2
+    (==) (EField _ s1 f1)         (EField _ s2 f2)           = s1 == s2 && f1 == f2
+    (==) (ELocation _ r1 as1)     (ELocation _ r2 as2)       = r1 == r2 && as1 == as2
+    (==) (EBool _ b1)             (EBool _ b2)               = b1 == b2
+    (==) (EInt _ i1)              (EInt _ i2)                = i1 == i2
+    (==) (EString _ s1)           (EString _ s2)             = s1 == s2
+    (==) (EBit _ w1 i1)           (EBit _ w2 i2)             = w1 == w2 && i1 == i2
+    (==) (EStruct _ c1 fs1)       (EStruct _ c2 fs2)         = c1 == c2 && fs1 == fs2
+    (==) (ETuple _ fs1)           (ETuple _ fs2)             = fs1 == fs2
+    (==) (ESlice _ e1 h1 l1)      (ESlice _ e2 h2 l2)        = e1 == e2 && h1 == h2 && l1 == l2
+    (==) (EMatch _ e1 cs1)        (EMatch _ e2 cs2)          = e1 == e2 && cs1 == cs2
+    (==) (EVarDecl _ v1)          (EVarDecl _ v2)            = v1 == v2
+    (==) (ESeq _ l1 r1)           (ESeq _ l2 r2)             = l1 == l2 && r1 == r2
+    (==) (EPar _ l1 r1)           (EPar _ l2 r2)             = l1 == l2 && r1 == r2
+    (==) (EITE _ i1 t1 e1)        (EITE _ i2 t2 e2)          = i1 == i2 && t1 == t2 && e1 == e2
+    (==) (EDrop _)                (EDrop _)                  = True
+    (==) (ESet _ l1 r1)           (ESet _ l2 r2)             = l1 == l2 && r1 == r2
+    (==) (ESend _ d1)             (ESend _ d2)               = d1 == d2
+    (==) (EBinOp _ o1 l1 r1)      (EBinOp _ o2 l2 r2)        = o1 == o2 && l1 == l2 && r1 == r2
+    (==) (EUnOp _ o1 e1)          (EUnOp _ o2 e2)            = o1 == o2 && e1 == e2
+    (==) (EFork _ v1 t1 c1 b1)    (EFork _ v2 t2 c2 b2)      = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
+    (==) (EWith _ v1 t1 c1 b1 d1) (EWith _ v2 t2 c2 b2 d2)   = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
+    (==) (EAny _ v1 t1 c1 b1 d1)  (EAny _ v2 t2 c2 b2 d2)    = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
+    (==) (EPHolder _)             (EPHolder _)               = True
+    (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
+    (==) _                        _                          = False
 
 instance WithPos Expr where
     pos = exprPos
@@ -347,6 +438,9 @@ instance PP Expr where
     pp (EWith _ v t c b d) = (pp "with" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
                              $$ (nest' $ pp b)
                              $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
+    pp (EAny _ v t c b d)  = (pp "any" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
+                             $$ (nest' $ pp b)
+                             $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
     pp (EPHolder _)        = pp "_"
     pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
 
@@ -363,8 +457,13 @@ disj []     = EBool nopos False
 disj [e]    = e
 disj (e:es) = EBinOp nopos Or e (disj es)
 
-data ECtx = CtxAssume   Assume
-          | CtxRule     Relation Rule
-          | CtxFunc     Function
-          | CtxRole     Role
-          | CtxFork     ECtx [Field]
+data ECtx = CtxRel    Relation
+          | CtxRule   Relation Rule
+          | CtxAssume Assume
+          | CtxFunc   Function
+          | CtxRole   Role
+          | CtxExpr   ECtx Expr
+          | CtxMatch  ECtx Expr
+
+ctxForkVars = error "ctxForkVars is undefined"
+ctxRole = error "ctxRole is undefined"

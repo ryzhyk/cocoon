@@ -16,6 +16,7 @@ limitations under the License.
 {-# LANGUAGE RecordWildCards #-}
 
 module Refine( funcGraph
+             , refineStructs
              , refineIsMulticast
              , refineIsDeterministic) where
 
@@ -27,25 +28,28 @@ import Expr
 import Syntax
 import Name
 import Role
-import Statement
 import NS
 
 funcGraph :: Refine -> G.Gr String ()
-funcGraph r@Refine{..} = 
+funcGraph Refine{..} = 
     let g0 = foldl' (\g (i,f) -> G.insNode (i,name f) g)
                     G.empty $ zip [0..] refineFuncs in
     foldl' (\g (i,f) -> case funcDef f of
                              Nothing -> g
-                             Just e  -> foldl' (\g' f' -> G.insEdge (i, fromJust $ findIndex ((f'==) . name) $ refineFuncs, ()) g') g (exprFuncs r e))
+                             Just e  -> foldl' (\g' f' -> G.insEdge (i, fromJust $ findIndex ((f'==) . name) $ refineFuncs, ()) g') g (exprFuncs e))
            g0 $ zip [0..] refineFuncs
 
+refineStructs :: Refine -> [Type]
+refineStructs r = concatMap (\t -> case t of 
+                                        TypeDef _ _ (Just t'@(TStruct _ _)) -> [t']
+                                        _                                   -> []) $ refineTypes r
 
 refineIsMulticast :: Maybe Refine -> Refine -> String -> Bool
-refineIsMulticast mra rc rlname = any (statIsMulticast . roleBody . getRole rc) roles
+refineIsMulticast mra rc rlname = any (exprIsMulticast rc . roleBody . getRole rc) roles
     where new = maybe [] (\ra -> (map name (refineRoles rc) \\ map name (refineRoles ra))) mra
           roles = rlname : intersect new (roleSendsToRolesRec rc new rlname)
     
 refineIsDeterministic :: Maybe Refine -> Refine -> String -> Bool
-refineIsDeterministic mra rc rlname = any (statIsDeterministic . roleBody . getRole rc) roles
+refineIsDeterministic mra rc rlname = any (exprIsDeterministic rc . roleBody . getRole rc) roles
     where new = maybe [] (\ra -> (map name (refineRoles rc) \\ map name (refineRoles ra))) mra
           roles = rlname : intersect new (roleSendsToRolesRec rc new rlname)

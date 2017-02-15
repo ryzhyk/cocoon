@@ -112,3 +112,9 @@ msb n = 1 + (msb $ n `shiftR` 1)
 
 bitSlice :: (Bits a, Num a) => a -> Int -> Int -> a
 bitSlice v h l = (v `shiftR` l) .&. (2^(h-l+1) - 1)
+
+-- Group elements in the list (unlike groupBy, this function groups all
+-- equivalent elements, not just adjacent ones)
+sortAndGroup :: (Ord b) => (a -> b) -> [a] -> [[a]]
+sortAndGroup f = groupBy (\x y -> f x == f y) .
+                 sortBy (\x y -> compare (f x) (f y))

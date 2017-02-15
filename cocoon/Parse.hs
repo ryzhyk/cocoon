@@ -19,11 +19,11 @@ import Util
 
 reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
 reservedNames = ["and",
+                 "any",
                  "assume",
                  "bit",
                  "bool",
                  "check",
-                 "constraint",
                  "default",
                  "drop",
                  "else",
@@ -32,7 +32,6 @@ reservedNames = ["and",
                  "fork",
                  "function",
                  "host",
-                 "havoc",
                  "if",
                  "in",
                  "int",
@@ -43,6 +42,7 @@ reservedNames = ["and",
                  "or",
                  "pkt",
                  "primary",
+                 "procedure",
                  "references",
                  "refine",
                  "role",
@@ -161,6 +161,7 @@ decl =  (SpType         <$> typeDef)
     <|> (SpRelation     <$> relation)
     <|> (SpState        <$> stateVar)
     <|> (SpFunc         <$> func)
+    <|> (SpFunc         <$> proc)
     <|> (SpRole         <$> role)
     <|> (SpAssume       <$> assume)
     <|> (SpNode         <$> node)
@@ -170,12 +171,19 @@ typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (op
 
 stateVar = withPos $ reserved "state" *> arg
 
-func = withPos $ Function nopos <$  reserved "function" 
-                                <*> funcIdent
-                                <*> (parens $ commaSep arg) 
-                                <*> (colon *> (Just <$> typeSpecSimple) <|> (Nothing <$ reserved "sink"))
-                                <*> (option (EBool nopos True) (reservedOp "|" *> expr))
-                                <*> (optionMaybe $ reservedOp "=" *> expr)
+func = withPos $ Function nopos True <$  reserved "function"
+                                     <*> funcIdent
+                                     <*> (parens $ commaSep arg) 
+                                     <*> (colon *> typeSpecSimple)
+                                     <*> (option (EBool nopos True) (reservedOp "|" *> expr))
+                                     <*> (optionMaybe $ reservedOp "=" *> expr)
+
+proc = withPos $ Function nopos False <$  reserved "procedure"
+                                      <*> funcIdent
+                                      <*> (parens $ commaSep arg) 
+                                      <*> (colon *> typeSpecSimple)
+                                      <*> (option (EBool nopos True) (reservedOp "|" *> expr))
+                                      <*> (Just <$ reservedOp "=" <*> expr)
 
 relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
                                    <|>
@@ -282,6 +290,7 @@ term' = withPos $
      <|> evardcl
      <|> efork
      <|> ewith
+     <|> eany
      <|> epholder
 
 eapply = EApply nopos <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
@@ -312,6 +321,13 @@ efork   = EFork    nopos <$ reserved "fork"
                         <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
                         <*> expr
 ewith   = EWith    nopos <$ reserved "with" 
+                        <*> (symbol "(" *> varIdent)
+                        <*> (reserved "in" *> identifier) 
+                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
+                        <*> expr
+                        <*> (optionMaybe $ reserved "default" *> expr)
+
+eany    = EAny     nopos <$ reserved "any" 
                         <*> (symbol "(" *> varIdent)
                         <*> (reserved "in" *> identifier) 
                         <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")

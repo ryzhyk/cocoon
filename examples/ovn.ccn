@@ -390,7 +390,7 @@ role LogicalPortIn[port in logical_port | iLogicalPort(port)] =
             deliver(dport, sport)
     }
 
-function deliver(port: logical_port, fromport: port_id_t): () =
+procedure deliver(port: logical_port, fromport: port_id_t): () =
     (var sw, var nested, var enabled) = with (p in logical_port | p.port == port) (p.switch_id, p.nested, p.enabled);
     // send to connection tracker
     var cts : ct_flow_state_t;
@@ -407,7 +407,7 @@ function deliver(port: logical_port, fromport: port_id_t): () =
         // apply ACL
         var action = with (r in acl_to | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) 
                           r.action
-                      default 
+                     default 
                           ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
@@ -432,7 +432,7 @@ function deliver(port: logical_port, fromport: port_id_t): () =
         }
     }
 
-function lportSendOut(port: logical_port): () =
+procedure lportSendOut(port: logical_port): () =
     if iLogicalPort(port) {
         send LogicalPortOut[port]
     } else {
