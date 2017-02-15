@@ -34,6 +34,7 @@ cabal build
 ~~~
 
 Install [Z3](https://github.com/Z3Prover/z3)
+
 Download and compile [Corral](https://github.com/boogie-org/corral). (This requires
 mono on Linux; install it, e.g., with `sudo apt-get install mono-complete`)
 
