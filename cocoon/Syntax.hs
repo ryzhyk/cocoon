@@ -266,8 +266,8 @@ instance PP Constructor where
 instance Show Constructor where
     show = render . pp
 
-consType :: Refine -> String -> String
-consType r c = name $ fromJust 
+consType :: Refine -> String -> TypeDef
+consType r c = fromJust 
                $ find (\td -> case tdefType td of
                                    Just (TStruct _ cs) -> any ((==c) . name) cs
                                    _                   -> False)

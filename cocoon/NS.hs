@@ -21,6 +21,8 @@ module NS(lookupType, checkType, getType,
           lookupLocalVar, checkLocalVar, getLocalVar,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
+          lookupConstructor, checkConstructor, getConstructor,
+          lookupRelation, checkRelation, getRelation,
           --lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
@@ -122,6 +124,26 @@ checkNode p r n = case lookupNode r n of
 
 getNode :: Refine -> String -> Node
 getNode r n = fromJust $ lookupNode r n
+
+lookupConstructor :: Refine -> String -> Maybe Constructor
+lookupConstructor = error "lookupConstructor is undefined"
+
+checkConstructor :: (MonadError String me) => Pos -> Refine -> String -> me Constructor
+checkConstructor = error "lookupConstructor is undefined"
+
+getConstructor :: Refine -> String -> Constructor
+getConstructor = error "getConstructor is undefined"
+
+lookupRelation :: Refine -> String -> Maybe Relation
+lookupRelation = error "lookupRelation is undefined"
+
+checkRelation :: (MonadError String me) => Pos -> Refine -> String -> me Relation
+checkRelation = error "lookupRelation is undefined"
+
+getRelation :: Refine -> String -> Relation
+getRelation = error "getRelation is undefined"
+
+
 
 {-
 lookupBuiltin :: String -> Maybe Builtin
