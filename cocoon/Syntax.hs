@@ -133,6 +133,9 @@ instance PP Role where
                   $$
                   (nest' $ pp roleBody)
 
+instance Show Role where
+    show = render . pp
+
 roleLocals :: Role -> [Field]
 roleLocals = error "roleLocals is undefined"
 
@@ -196,12 +199,18 @@ instance PP Relation where
                       (maybe empty (\_ -> pp "=") relDef) $$
                       (maybe empty (vcat . map (ppRule relName)) relDef)
 
+instance Show Relation where
+    show = render . pp
+
 data Rule = Rule { rulePos :: Pos
                  , ruleLHS :: [Expr]
                  , ruleRHS :: [Expr]}
 
 ppRule :: String -> Rule -> Doc
 ppRule rel Rule{..} = pp rel <> (parens $ hsep $ punctuate comma $ map pp ruleLHS) <+> pp ":-" <+> (hsep $ punctuate comma $ map pp ruleRHS)
+
+instance Show Rule where
+    show = render . ppRule ""
 
 instance WithPos Rule where
     pos = rulePos
@@ -245,6 +254,9 @@ instance PP Function where
                        <+> (maybe empty (\_ -> pp "=") funcDef))
                       $$
                        (maybe empty (nest' . pp) funcDef)
+
+instance Show Function where
+    show = render . pp
 
 data Constructor = Constructor { consPos :: Pos
                                , consName :: String
@@ -372,7 +384,7 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EAny      {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EPHolder  {exprPos :: Pos}
-                | ETyped    {exprPos :: Pos, exprExpr :: e, exprType :: Type}
+                | ETyped    {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
 
 instance Eq e => Eq (ExprNode e) where
     (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
@@ -542,3 +554,4 @@ data ECtx = CtxRole      {ctxRole::Role}
           | CtxAnyBody   {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxAnyDef    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxTyped     {ctxParExpr::ENode, ctxPar::ECtx}
+          deriving(Show)
