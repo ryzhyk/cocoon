@@ -22,10 +22,14 @@ module Syntax( pktVar
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
+             , ExprNode(..)
+             , ENode
              , Expr(..)
+             , enode
+             , eVar, ePacket, eApply, eField, eLocation, eBool, eInt, eString, eBit, eStruct, eTuple
+             , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
+             , eWith, eAny, ePHolder, eTyped
              , ECtx(..)
-             , ctxForkVars
-             , ctxRole
              , conj
              , disj) where
 
@@ -342,40 +346,40 @@ instance WithPos TypeDef where
 instance WithName TypeDef where
     name = tdefName
 
-data Expr = EVar      {exprPos :: Pos, exprVar :: String}
-          | EPacket   {exprPos :: Pos}
-          | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [Expr]}
-          | EField    {exprPos :: Pos, exprStruct :: Expr, exprField :: String}
-          | ELocation {exprPos :: Pos, exprRole :: String, exprArgs :: [Expr]}
-          | EBool     {exprPos :: Pos, exprBVal :: Bool}
-          | EInt      {exprPos :: Pos, exprIVal :: Integer}
-          | EString   {exprPos :: Pos, exprString :: String}
-          | EBit      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
-          | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [Expr]}
-          | ETuple    {exprPos :: Pos, exprFields :: [Expr]}
-          | ESlice    {exprPos :: Pos, exprOp :: Expr, exprH :: Int, exprL :: Int}
-          | EMatch    {exprPos :: Pos, exprMatchExpr :: Expr, exprCases :: [(Expr, Expr)]}
-          | EVarDecl  {exprPos :: Pos, exprVName :: String}
-          | ESeq      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
-          | EPar      {exprPos :: Pos, exprLeft :: Expr, exprRight :: Expr}
-          | EITE      {exprPos :: Pos, exprCond :: Expr, exprThen :: Expr, exprElse :: Maybe Expr}
-          | EDrop     {exprPos :: Pos}
-          | ESet      {exprPos :: Pos, exprLVal :: Expr, exprRVal :: Expr}
-          | ESend     {exprPos :: Pos, exprDst  :: Expr}
-          | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: Expr, exprRight :: Expr}
-          | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: Expr}
-          | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: Expr, exprFrkBody :: Expr}
-          | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprWithBody :: Expr, exprDef :: Maybe Expr}
-          | EAny      {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: Expr, exprWithBody :: Expr, exprDef :: Maybe Expr}
-          | EPHolder  {exprPos :: Pos}
-          | ETyped    {exprPos :: Pos, exprExpr :: Expr, exprType :: Type}
+data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
+                | EPacket   {exprPos :: Pos}
+                | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
+                | EField    {exprPos :: Pos, exprStruct :: e, exprField :: String}
+                | ELocation {exprPos :: Pos, exprRole :: String, exprKey :: e}
+                | EBool     {exprPos :: Pos, exprBVal :: Bool}
+                | EInt      {exprPos :: Pos, exprIVal :: Integer}
+                | EString   {exprPos :: Pos, exprString :: String}
+                | EBit      {exprPos :: Pos, exprWidth :: Int, exprIVal :: Integer}
+                | EStruct   {exprPos :: Pos, exprConstructor :: String, exprFields :: [e]}
+                | ETuple    {exprPos :: Pos, exprFields :: [e]}
+                | ESlice    {exprPos :: Pos, exprOp :: e, exprH :: Int, exprL :: Int}
+                | EMatch    {exprPos :: Pos, exprMatchExpr :: e, exprCases :: [(e, e)]}
+                | EVarDecl  {exprPos :: Pos, exprVName :: String}
+                | ESeq      {exprPos :: Pos, exprLeft :: e, exprRight :: e}
+                | EPar      {exprPos :: Pos, exprLeft :: e, exprRight :: e}
+                | EITE      {exprPos :: Pos, exprCond :: e, exprThen :: e, exprElse :: Maybe e}
+                | EDrop     {exprPos :: Pos}
+                | ESet      {exprPos :: Pos, exprLVal :: e, exprRVal :: e}
+                | ESend     {exprPos :: Pos, exprDst  :: e}
+                | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: e, exprRight :: e}
+                | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: e}
+                | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
+                | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
+                | EAny      {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
+                | EPHolder  {exprPos :: Pos}
+                | ETyped    {exprPos :: Pos, exprExpr :: e, exprType :: Type}
 
-instance Eq Expr where
+instance Eq e => Eq (ExprNode e) where
     (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
     (==) (EPacket _)              (EPacket _)                = True
     (==) (EApply _ f1 as1)        (EApply _ f2 as2)          = f1 == f2 && as1 == as2
     (==) (EField _ s1 f1)         (EField _ s2 f2)           = s1 == s2 && f1 == f2
-    (==) (ELocation _ r1 as1)     (ELocation _ r2 as2)       = r1 == r2 && as1 == as2
+    (==) (ELocation _ r1 k1)      (ELocation _ r2 k2)        = r1 == r2 && k1 == k2
     (==) (EBool _ b1)             (EBool _ b2)               = b1 == b2
     (==) (EInt _ i1)              (EInt _ i2)                = i1 == i2
     (==) (EString _ s1)           (EString _ s2)             = s1 == s2
@@ -400,16 +404,16 @@ instance Eq Expr where
     (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
     (==) _                        _                          = False
 
-instance WithPos Expr where
+instance WithPos (ExprNode e) where
     pos = exprPos
     atPos e p = e{exprPos = p}
 
-instance PP Expr where
+instance PP e => PP (ExprNode e) where
     pp (EVar _ v)          = pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
-    pp (ELocation _ r as)  = pp r <> (brackets $ hsep $ punctuate comma $ map pp as)
+    pp (ELocation _ r k)   = pp r <> (brackets $ pp k)
     pp (EBool _ True)      = pp "true"
     pp (EBool _ False)     = pp "false"
     pp (EInt _ v)          = pp v
@@ -444,26 +448,97 @@ instance PP Expr where
     pp (EPHolder _)        = pp "_"
     pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
 
-instance Show Expr where
+instance PP e => Show (ExprNode e) where
     show = render . pp
 
+type ENode = ExprNode Expr
+
+newtype Expr = E (ExprNode Expr)
+enode :: Expr -> ExprNode Expr
+enode (E n) = n
+
+
+instance Eq Expr where
+    (==) (E e1) (E e2) = e1 == e2
+
+instance PP Expr where
+    pp (E n) = pp n
+
+instance WithPos Expr where
+    pos (E n) = pos n
+    atPos (E n) p = E $ atPos n p
+
+eVar v              = E $ EVar      nopos v
+ePacket             = E $ EPacket   nopos
+eApply f as         = E $ EApply    nopos f as
+eField e f          = E $ EField    nopos e f
+eLocation r k       = E $ ELocation nopos r k
+eBool b             = E $ EBool     nopos b
+eInt i              = E $ EInt      nopos i
+eString s           = E $ EString   nopos s
+eBit w v            = E $ EBit      nopos w v
+eStruct c as        = E $ EStruct   nopos c as
+eTuple as           = E $ ETuple    nopos as
+eSlice e h l        = E $ ESlice    nopos e h l
+eMatch e cs         = E $ EMatch    nopos e cs
+eVarDecl v          = E $ EVarDecl  nopos v
+eSeq l r            = E $ ESeq      nopos l r
+ePar l r            = E $ EPar      nopos l r
+eITE i t e          = E $ EITE      nopos i t e
+eDrop               = E $ EDrop     nopos
+eSet l r            = E $ ESet      nopos l r
+eSend e             = E $ ESend     nopos e
+eBinOp op l r       = E $ EBinOp    nopos op l r
+eUnOp op e          = E $ EUnOp     nopos op e
+eFork v t c b       = E $ EFork     nopos v t c b
+eWith v t c b d     = E $ EWith     nopos v t c b d
+eAny v t c b d      = E $ EAny      nopos v t c b d
+ePHolder            = E $ EPHolder  nopos
+eTyped e t          = E $ ETyped    nopos e t
+
 conj :: [Expr] -> Expr
-conj []     = EBool nopos True
+conj []     = eBool True
 conj [e]    = e
-conj (e:es) = EBinOp nopos And e (conj es)
+conj (e:es) = eBinOp And e (conj es)
 
 disj :: [Expr] -> Expr
-disj []     = EBool nopos False
+disj []     = eBool False
 disj [e]    = e
-disj (e:es) = EBinOp nopos Or e (disj es)
+disj (e:es) = eBinOp Or e (disj es)
 
-data ECtx = CtxRel    Relation
-          | CtxRule   Relation Rule
-          | CtxAssume Assume
-          | CtxFunc   Function
-          | CtxRole   Role
-          | CtxExpr   ECtx Expr
-          | CtxMatch  ECtx Expr
-
-ctxForkVars = error "ctxForkVars is undefined"
-ctxRole = error "ctxRole is undefined"
+data ECtx = CtxRole      {ctxRole::Role}
+          | CtxFunc      {ctxFunc::Function}
+          | CtxAssume    {ctxAssume::Assume}
+          | CtxRelation  {ctxRel::Relation}
+          | CtxRule      {ctxRule::Rule}
+          | CtxApply     {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxField     {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxLocation  {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxStruct    {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxTuple     {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxSlice     {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxMatchExpr {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxMatchPat  {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxMatchVal  {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxSeq1      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxSeq2      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxPar1      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxPar2      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxITEIf     {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxITEThen   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxITEElse   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxSetL      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxSetR      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxSend      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxBinOpL    {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxBinOpR    {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxUnOp      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxForkCond  {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxForkBody  {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxWithCond  {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxWithBody  {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxWithDef   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxAnyCond   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxAnyBody   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxAnyDef    {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxTyped     {ctxParExpr::ENode, ctxPar::ECtx}

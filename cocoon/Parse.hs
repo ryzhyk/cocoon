@@ -175,14 +175,14 @@ func = withPos $ Function nopos True <$  reserved "function"
                                      <*> funcIdent
                                      <*> (parens $ commaSep arg) 
                                      <*> (colon *> typeSpecSimple)
-                                     <*> (option (EBool nopos True) (reservedOp "|" *> expr))
+                                     <*> (option (eBool True) (reservedOp "|" *> expr))
                                      <*> (optionMaybe $ reservedOp "=" *> expr)
 
 proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> funcIdent
                                       <*> (parens $ commaSep arg) 
                                       <*> (colon *> typeSpecSimple)
-                                      <*> (option (EBool nopos True) (reservedOp "|" *> expr))
+                                      <*> (option (eBool True) (reservedOp "|" *> expr))
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
 relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
@@ -220,8 +220,8 @@ role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b)
                <*> (brackets $ (,,,)
                            <$> varIdent
                            <*> (reserved "in" *> identifier)
-                           <*> (option (EBool nopos True) (reservedOp "|" *> expr))
-                           <*> (option (EBool nopos True) (reservedOp "/" *> expr)))
+                           <*> (option (eBool True) (reservedOp "|" *> expr))
+                           <*> (option (eBool True) (reservedOp "/" *> expr)))
                <*> (reservedOp "=" *> expr)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
@@ -271,7 +271,7 @@ expr =  buildExpressionParser etable term
 
 term  =  (withPos $ (\es -> case es of 
                                  [e] -> e
-                                 _   -> ETuple nopos es) <$> (parens $ commaSep expr))
+                                 _   -> eTuple es) <$> (parens $ commaSep expr))
      <|> braces expr
      <|> term'
 term' = withPos $
@@ -293,47 +293,47 @@ term' = withPos $
      <|> eany
      <|> epholder
 
-eapply = EApply nopos <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
+eapply = eApply <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ funcIdent *> symbol "("
-eloc = ELocation nopos <$ isloc <*> roleIdent <*> (brackets $ commaSep expr)
-    where isloc = try $ lookAhead $ roleIdent *> (brackets $ commaSep expr)
-ebool = EBool nopos <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
-epacket = EPacket nopos <$ reserved "pkt"
-evar = EVar nopos <$> varIdent
-ematch = EMatch nopos <$ reserved "match" <*> parens expr
+eloc = eLocation <$ isloc <*> roleIdent <*> (brackets expr)
+    where isloc = try $ lookAhead $ roleIdent *> (brackets expr)
+ebool = eBool <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
+epacket = ePacket <$ reserved "pkt"
+evar = eVar <$> varIdent
+ematch = eMatch <$ reserved "match" <*> parens expr
                <*> (braces $ (commaSep1 $ (,) <$> expr <* reservedOp "->" <*> expr))
---eint  = EInt nopos <$> (fromIntegral <$> decimal)
+--eint  = Int <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
-estring = EString nopos <$> stringLit
-estruct = EStruct nopos <$> consIdent <*> (option [] $ braces $ commaSep expr)
+estring = eString <$> stringLit
+estruct = eStruct <$> consIdent <*> (option [] $ braces $ commaSep expr)
 
 eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
                                                    v <- sradval
                                                    mkLit w v)
 
-edrop   = EDrop    nopos <$ reserved "drop"
-esend   = ESend    nopos <$ reserved "send" <*> expr
-eite    = EITE     nopos <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
-evardcl = EVarDecl nopos <$ reserved "var" <*> varIdent
-efork   = EFork    nopos <$ reserved "fork" 
-                        <*> (symbol "(" *> varIdent)
-                        <*> (reserved "in" *> identifier) 
-                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
-                        <*> expr
-ewith   = EWith    nopos <$ reserved "with" 
-                        <*> (symbol "(" *> varIdent)
-                        <*> (reserved "in" *> identifier) 
-                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
-                        <*> expr
-                        <*> (optionMaybe $ reserved "default" *> expr)
+edrop   = eDrop    <$ reserved "drop"
+esend   = eSend    <$ reserved "send" <*> expr
+eite    = eITE     <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
+evardcl = eVarDecl <$ reserved "var" <*> varIdent
+efork   = eFork    <$ reserved "fork" 
+                   <*> (symbol "(" *> varIdent)
+                   <*> (reserved "in" *> identifier) 
+                   <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+                   <*> expr
+ewith   = eWith    <$ reserved "with" 
+                   <*> (symbol "(" *> varIdent)
+                   <*> (reserved "in" *> identifier) 
+                   <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+                   <*> expr
+                   <*> (optionMaybe $ reserved "default" *> expr)
 
-eany    = EAny     nopos <$ reserved "any" 
-                        <*> (symbol "(" *> varIdent)
-                        <*> (reserved "in" *> identifier) 
-                        <*> ((option (EBool nopos True) (reservedOp "|" *> expr)) <* symbol ")")
-                        <*> expr
-                        <*> (optionMaybe $ reserved "default" *> expr)
-epholder = EPHolder nopos <$ reservedOp "_"
+eany    = eAny <$ reserved "any" 
+               <*> (symbol "(" *> varIdent)
+               <*> (reserved "in" *> identifier) 
+               <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+               <*> expr
+               <*> (optionMaybe $ reserved "default" *> expr)
+epholder = ePHolder <$ reservedOp "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
 sradval =  ((try $ string "'b") *> parseBin)
@@ -354,9 +354,9 @@ parseHex :: Stream s m Char => ParsecT s u m Integer
 parseHex = (fst . head . readHex) <$> many1 hexDigit
 
 mkLit :: Maybe Int -> Integer -> ParsecT s u m Expr
-mkLit Nothing  v                       = return $ EInt nopos v
+mkLit Nothing  v                       = return $ eInt v
 mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width >0"
-                 | msb v < w           = return $ EBit nopos w v
+                 | msb v < w           = return $ eBit w v
                  | otherwise           = fail "Value exceeds specified width"
 
 etable = [[postf $ choice [postSlice, postApply, postField, postType]]
@@ -383,10 +383,10 @@ etable = [[postf $ choice [postSlice, postApply, postField, postType]]
 
 pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
-postField = (\f end e -> EField (fst $ pos e, end) e f) <$> field <*> getPosition
-postApply = (\(f, args) end e -> EApply (fst $ pos e, end) f (e:args)) <$> dotcall <*> getPosition
-postType = (\t end e -> ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
-postSlice  = try $ (\(h,l) end e -> ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
+postField = (\f end e -> E $ EField (fst $ pos e, end) e f) <$> field <*> getPosition
+postApply = (\(f, args) end e -> E $ EApply (fst $ pos e, end) f (e:args)) <$> dotcall <*> getPosition
+postType = (\t end e -> E $ ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
+postSlice  = try $ (\(h,l) end e -> E $ ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
 slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
 
 field = dot *> varIdent
@@ -395,8 +395,8 @@ dotcall = (,) <$ isapply <*> (dot *> funcIdent) <*> (parens $ commaSep expr)
 
 etype = reservedOp ":" *> typeSpecSimple
 
-prefix n fun = (\start e -> EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n
-binary n fun  = Infix $ (\le re -> EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
-sbinary n fun = Infix $ (\l  r  -> fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
+prefix n fun = (\start e -> E $ EUnOp (start, snd $ pos e) fun e) <$> getPosition <* reservedOp n
+binary n fun  = Infix $ (\le re -> E $ EBinOp (fst $ pos le, snd $ pos re) fun le re) <$ reservedOp n
+sbinary n fun = Infix $ (\l  r  -> E $ fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
-assign = Infix $ (\l r  -> ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="
+assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="

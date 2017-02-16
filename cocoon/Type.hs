@@ -38,7 +38,7 @@ instance WithType Type where
 instance WithType Field where
     typ _ _ = fieldType
 
-
+{-
 instance WithType Expr where
     typ _ ctx   (EVar _ v)          = fieldType $ getVar ctx v
     typ _ _     (EPacket _)         = tUser packetTypeName
@@ -85,7 +85,7 @@ instance WithType Expr where
     typ _ ctx e@(EAny  _ _ _ _ b _)  = typ r (CtxWith ctx e) b
     typ r ctx   (EPHolder _)         = ctxExpectType r ctx
     typ _ _     (ETyped _ _ t)       = t
-
+-}
 
 
 -- Unwrap typedef's down to actual type definition

@@ -223,9 +223,9 @@ nodeValidateFinal r nd@Node{..} = do
     mapM_ (\(p1,p2) -> do r1 <- checkRole (pos nd) r p1
                           r2 <- checkRole (pos nd) r p2
                           -- input ports can only send to output ports of the same node
-                          assertR r (all (\(ELocation _ rl args) -> (elem rl (map snd nodePorts)) {-&& 
+                          assertR r (all (\(E (ELocation _ rl args)) -> (elem rl (map snd nodePorts)) {-&& 
                                                                     (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)-})
-                                         $ exprSendsTo (roleBody r1)) (pos nd)
+                                         $ exprSendsTo r (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
                           assertR r (not $ any (\rl -> elem rl (map snd nodePorts)) $ exprSendsToRoles r (roleBody r2)) (pos nd)
                                  $ "Outbound port " ++ p2 ++ " is not allowed to forward packets to other outbound ports"
@@ -235,16 +235,16 @@ nodeValidateFinal r nd@Node{..} = do
 
 checkLinkExpr :: (MonadError String me) => Refine -> Expr -> me ()
 checkLinkExpr r e = do checkLinkExpr' e
-                       mapM_ (maybe return () checkLinkExpr' . funcDef) $ exprFuncsRec r e
+                       mapM_ (maybe (return ()) checkLinkExpr' . funcDef . getFunc r) $ exprFuncsRec r e
 
 
 checkLinkExpr' :: (MonadError String me) => Expr -> me ()
-checkLinkExpr' e = exprFoldDFM (\_ e' -> case e' of
-                                                 EPar p _ _      -> err p "Parallel composition not allowed in output port body"
-                                                 EFork p _ _ _ _ -> err p "Fork not allowed in output port body"
-                                                 ESet p _ _      -> err p "Assignment not allowed in output port body"
-                                                 EPacket p       -> err p "Output port body may not inspect packet headers"
-                                                 _               -> return ()) () e
+checkLinkExpr' e = exprTraverseM (\e' -> case e' of
+                                              EPar p _ _      -> err p "Parallel composition not allowed in output port body"
+                                              EFork p _ _ _ _ -> err p "Fork not allowed in output port body"
+                                              ESet p _ _      -> err p "Assignment not allowed in output port body"
+                                              EPacket p       -> err p "Output port body may not inspect packet headers"
+                                              _               -> return ()) e
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> [String] -> Expr -> me ()
 exprValidate = error "exprValidate is undefined"
