@@ -269,9 +269,7 @@ constructor = withPos $ Constructor nopos <$> consIdent <*> (option [] $ braces 
 expr =  buildExpressionParser etable term
     <?> "expression"
 
-term  =  (withPos $ (\es -> case es of 
-                                 [e] -> e
-                                 _   -> eTuple es) <$> (parens $ commaSep expr))
+term  =  (withPos $ eTuple <$> (parens $ commaSep expr))
      <|> braces expr
      <|> term'
 term' = withPos $
@@ -291,7 +289,7 @@ term' = withPos $
      <|> efork
      <|> ewith
      <|> eany
-     <|> epholder
+     <|> elhs
 
 eapply = eApply <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ funcIdent *> symbol "("
@@ -301,7 +299,22 @@ ebool = eBool <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = ePacket <$ reserved "pkt"
 evar = eVar <$> varIdent
 ematch = eMatch <$ reserved "match" <*> parens expr
-               <*> (braces $ (commaSep1 $ (,) <$> expr <* reservedOp "->" <*> expr))
+               <*> (braces $ (commaSep1 $ (,) <$> pattern <* reservedOp "->" <*> expr))
+pattern = withPos $ 
+          eTuple   <$> (parens $ commaSep pattern)
+      <|> eVarDecl <$> varIdent
+      <|> epholder
+      <|> eStruct  <$> consIdent <*> (option [] $ braces $ commaSep pattern)
+
+lhs = withPos $ 
+          eTuple <$> (parens $ commaSep lhs)
+      <|> evar
+      <|> evardcl
+      <|> epholder
+      <|> eStruct <$> consIdent <*> (option [] $ braces $ commaSep lhs)
+elhs = islhs *> lhs
+    where islhs = try $ lookAhead $ lhs *> reservedOp "="
+
 --eint  = Int <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
 estring = eString <$> stringLit

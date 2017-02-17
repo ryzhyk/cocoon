@@ -152,11 +152,11 @@ funcValidate r f@Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
-    exprValidate r (CtxFunc f) [] funcDom
+    exprValidate r (CtxFunc f) funcDom
     case funcDef of
          Nothing  -> return ()
-         Just def -> do exprValidate r (CtxFunc f) [] def
-                        matchType r (CtxFunc f) funcType def 
+         Just def -> do exprValidate r (CtxFunc f) def
+                        matchType r funcType (exprType r (CtxFunc f) def)
 
 
 relValidate :: (MonadError String me) => Refine -> Relation -> me ()
@@ -246,8 +246,166 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
                                               EPacket p       -> err p "Output port body may not inspect packet headers"
                                               _               -> return ()) e
 
-exprValidate :: (MonadError String me) => Refine -> ECtx -> [String] -> Expr -> me ()
-exprValidate = error "exprValidate is undefined"
+exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+exprValidate r ctx e = do exprTraverseCtxM (exprValidate' r) ctx e
+
+-- This function does not perform type checking: just checks that all functions and
+-- variables are defined; the number of arguments matches declarations, etc.
+exprValidate' :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me ()
+exprValidate' r ctx (EVar p v)          = do _ <- checkVar p r ctx v
+                                             return ()
+exprValidate' r ctx (EPacket p)         = ctxCheckSideEffects p r ctx
+exprValidate' r _   (EApply p f as)     = do fun <- checkFunc p r f
+                                             assertR r (length as == length (funcArgs fun)) p
+                                                     $ "Number of arguments does not match function declaration"
+exprValidate' _ _   (EField _ _ _)      = return ()
+exprValidate' r _   (ELocation p rl _)  = do _ <- checkRole p r rl
+                                             return ()
+exprValidate' _ _   (EBool _ _)         = return ()
+exprValidate' _ _   (EInt _ _)          = return ()
+exprValidate' _ _   (EString _ _)       = return ()
+exprValidate' _ _   (EBit _ _ _)        = return ()
+exprValidate' r _   (EStruct p c as)    = do cons <- checkConstructor p r c
+                                             assertR r (length as == length (consArgs cons)) p
+                                                     $ "Number of arguments does not match constructor declaration"
+exprValidate' _ _   (ETuple _ _)        = return ()
+exprValidate' _ _   (ESlice _ _ _ _)    = return ()
+exprValidate' _ _   (EMatch _ _ _)      = return ()
+exprValidate' r ctx (EVarDecl p v)      = checkNoVar p r ctx v
+exprValidate' _ _   (ESeq _ _ _)        = return ()
+exprValidate' r ctx (EPar p _ _)        = ctxCheckSideEffects p r ctx
+exprValidate' _ _   (EITE _ _ _ _)      = return ()
+exprValidate' r ctx (EDrop p)           = ctxCheckSideEffects p r ctx
+exprValidate' r ctx (ESet _ l _)        = checkLExpr r ctx l
+exprValidate' r ctx (ESend p _)         = ctxCheckSideEffects p r ctx
+exprValidate' _ _   (EBinOp _ _ _ _)    = return ()
+exprValidate' _ _   (EUnOp _ Not _)     = return ()
+exprValidate' r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
+                                             _ <- checkRelation p r ctx t
+                                             _ <- checkNoVar p r ctx v
+                                             return ()
+exprValidate' r ctx (EWith p v t _ _ _) = do _ <- checkRelation p r ctx t
+                                             _ <- checkNoVar p r ctx v
+                                             return ()
+exprValidate' r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
+                                             _ <- checkRelation p r ctx t
+                                             _ <- checkNoVar p r ctx v
+                                             return ()
+exprValidate' _ _   (EPHolder _)        = return ()
+exprValidate' _ _   (ETyped _ _ _)      = return ()
+
+checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
+checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
+                                 $ "Variable " ++ v ++ " already defined in this scope"
+
+-- Traverse again with types
+--exprValidate'' r _   (EField _ e f)      = return () 
+--ESlice - must be a bit vector of sufficient width
+--EMatch - all value types must be the same
+--ESeq - e1 should not send
+--EBinOp - ?
+--EITE - then and else branches must return the same type
+-- Traverse again, check that every expression matches its expected type, if any
+
+isLExpr :: Refine -> ECtx -> Expr -> Bool
+isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
+
+checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) "Expression is not an l-value"
+
+isLExpr' :: Refine -> ECtx -> ExprNode Bool -> Bool
+isLExpr' r ctx (EVar _ v)       = isLVar r ctx v
+isLExpr' _ _   (EPacket _)      = True
+isLExpr' _ _   (EField _ e _)   = e
+isLExpr' _ _   (ETuple _ as)    = and as
+isLExpr' _ _   (EStruct _ _ as) = and as
+isLExpr' _ _   (EVarDecl _ _)   = True
+isLExpr' _ _   (EPHolder _)     = True
+isLExpr' _ _   (ETyped _ e _)   = e
+isLExpr' _ _   _                = False
+
+isLVar :: Refine -> ECtx -> String -> Bool
+isLVar r ctx v = elem v $ fst $ ctxVars r ctx
+
+-- All variables available in the scope (l-vars, w)
+ctxVars :: Refine -> ECtx -> ([String], [String])
+ctxVars r ctx = 
+    case ctx of
+         CtxRefine            -> (map name $ refineState r, [])
+         CtxRole rl           -> (plvars, (roleKey rl) : prvars)
+         CtxFunc f            -> if funcPure f    
+                                    then ([], map name $ funcArgs f)
+                                    else (plvars, (map name $ funcArgs f) ++ prvars)
+         CtxAssume a          -> ([], exprVars $ assExpr a)
+         CtxRelation rel      -> ([], map name $ relArgs rel)
+         CtxRule rl           -> ([], nub $ concatMap exprVars $ ruleRHS rl)
+         CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
+         CtxField _ _         -> (plvars, prvars)
+         CtxLocation _ _      -> ([], plvars ++ prvars)
+         CtxStruct _ _ _      -> ([], plvars ++ prvars)
+         CtxTuple _ _ _       -> ([], plvars ++ prvars)
+         CtxSlice  _ _        -> ([], plvars ++ prvars)
+         CtxMatchExpr _ _     -> ([], plvars ++ prvars)
+         CtxMatchPat _ _ _    -> ([], plvars ++ prvars)
+         CtxMatchVal e pctx i -> let patternVars = exprVarDecls $ fst $ (exprCases e) !! i in
+                                 if isLExpr r pctx $ exprMatchExpr e
+                                    then (plvars ++ patternVars, prvars)
+                                    else (plvars, patternVars ++ prvars)
+         CtxSeq1 _ _          -> (plvars, prvars)
+         CtxSeq2 e _          -> let seq1vars = exprVarDecls $ exprLeft e
+                                 in (plvars ++ seq1vars, prvars)
+         CtxPar1 _ _          -> ([], plvars ++ prvars)
+         CtxPar2 _ _          -> ([], plvars ++ prvars)
+         CtxITEIf _ _         -> ([], plvars ++ prvars)
+         CtxITEThen _ _       -> (plvars, prvars)
+         CtxITEElse _ _       -> (plvars, prvars)
+         CtxSetL _ _          -> (plvars, prvars)
+         CtxSetR _ _          -> ([], plvars ++ prvars)
+         CtxSend _ _          -> ([], plvars ++ prvars)
+         CtxBinOpL _ _        -> ([], plvars ++ prvars)
+         CtxBinOpR _ _        -> ([], plvars ++ prvars)
+         CtxUnOp _ _          -> ([], plvars ++ prvars)
+         CtxForkCond e _      -> ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxForkBody e pctx   -> if isLRel r pctx (exprTable e)
+                                    then ([exprFrkVar e], plvars ++ prvars)
+                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxWithCond e _      -> ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxWithBody e pctx   -> if isLRel r pctx (exprTable e)
+                                    then ([exprFrkVar e], plvars ++ prvars)
+                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxWithDef _ _       -> (plvars, prvars)
+         CtxAnyCond e _       -> ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxAnyBody e pctx    -> if isLRel r pctx (exprTable e)
+                                    then ([exprFrkVar e], plvars ++ prvars)
+                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
+         CtxAnyDef _ _        -> (plvars, prvars)
+         CtxTyped _ _         -> (plvars, prvars)
+    where (plvars, prvars) = ctxVars r $ ctxParent ctx 
+
+
+isLRel :: Refine -> ECtx -> String -> Bool
+isLRel r ctx rel = elem rel $ fst $ ctxRels r ctx
+
+-- Fork, with, any: relations become unavailable
+-- Fork, Par: all relations become read-only
+ctxRels :: Refine -> ECtx -> ([String], [String])
+ctxRels r ctx = 
+    case ctx of
+         CtxRefine       -> (\(rw,ro) -> (map name rw, map name ro)) $ partition relMutable $ refineRels r
+         CtxPar1 _ _     -> ([], plrels ++ prrels)
+         CtxPar2 _ _     -> ([], plrels ++ prrels)
+         CtxForkCond _ _ -> ([], [])
+         CtxForkBody e _ -> ([], delete (exprTable e) $ plrels ++ prrels)
+         CtxWithCond _ _ -> ([], [])
+         CtxWithBody e _ -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         CtxAnyCond _ _  -> ([], [])
+         CtxAnyBody e _  -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         _               -> (plrels, prrels)
+    where (plrels, prrels) = ctxRels r $ ctxParent ctx
+
+ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
+ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
+
 
 {-
 exprValidate r ctx vset (EVar p v) | isRoleCtx ctx =

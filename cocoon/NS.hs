@@ -17,8 +17,8 @@ limitations under the License.
 
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
-          --lookupVar, checkVar, getVar,
-          lookupLocalVar, checkLocalVar, getLocalVar,
+          lookupVar, checkVar, getVar,
+          --lookupLocalVar, checkLocalVar, getLocalVar,
           lookupRole, checkRole, getRole,
           lookupNode, checkNode, getNode,
           lookupConstructor, checkConstructor, getConstructor,
@@ -73,22 +73,19 @@ checkRole p r n = case lookupRole r n of
 getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
+lookupVar :: Refine -> ECtx -> String -> Maybe Field
+lookupVar = error "lookupVar is undefined"
+
+checkVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Field
+checkVar p r c n = case lookupVar r c n of
+                        Nothing -> err p $ "Unknown variable: " ++ n
+                        Just v  -> return v
+
+getVar :: Refine -> ECtx -> String -> Field
+getVar r c n = fromJust $ lookupVar r c n
+
+
 {-
-lookupVar :: ECtx -> String -> Maybe Field
-lookupVar (CtxAssume Assume{..}) n = find ((==n) . name) assVars
-lookupVar (CtxFunc Function{..}) n = find ((==n) . name) funcArgs
-lookupVar ctx                    n = find ((==n) . name) $ [roleKey rl] ++ roleLocals rl ++ ctxForkVars ctx
-    where rl = ctxRole ctx
-
-checkVar :: (MonadError String me) => Pos -> ECtx -> String -> me Field
-checkVar p c n = case lookupVar c n of
-                      Nothing -> err p $ "Unknown variable: " ++ n
-                      Just v  -> return v
-
-getVar :: ECtx -> String -> Field
-getVar c n = fromJust $ lookupVar c n
--}
-
 lookupLocalVar :: Role -> String -> Maybe Field
 lookupLocalVar role n = find ((==n) . name) $ roleLocals role
 
@@ -99,6 +96,7 @@ checkLocalVar p rl n = case lookupLocalVar rl n of
 
 getLocalVar :: Role -> String -> Field
 getLocalVar rl n = fromJust $ lookupLocalVar rl n
+-}
 
 {-
 lookupKey :: Role -> String -> Maybe Field
@@ -137,7 +135,7 @@ getConstructor = error "getConstructor is undefined"
 lookupRelation :: Refine -> String -> Maybe Relation
 lookupRelation = error "lookupRelation is undefined"
 
-checkRelation :: (MonadError String me) => Pos -> Refine -> String -> me Relation
+checkRelation :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Relation
 checkRelation = error "lookupRelation is undefined"
 
 getRelation :: Refine -> String -> Relation

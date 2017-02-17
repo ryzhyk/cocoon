@@ -5,6 +5,7 @@ module Type( WithType(..)
            , typ', typ''
            , isBool, isBit, isLocation, isStruct, isArray
            , matchType, matchType'
+           , ctxExpectType
            {-, typeDomainSize, typeEnumerate-}) where
 
 import Data.Maybe
@@ -32,7 +33,7 @@ exprType :: Refine -> ECtx -> Expr -> Type
 exprType r ctx e = exprFoldCtx (etype r) ctx e
 
 etype :: Refine -> ECtx -> ExprNode Type -> Type
-etype r ctx (EVar _ v)          = fieldType $ ctxGetVar r ctx v
+etype r ctx (EVar _ v)          = typ $ getVar r ctx v
 etype _ _   (EPacket _)         = tUser packetTypeName
 etype r _   (EApply _ f _)      = funcType $ getFunc r f
 etype r _   (EField _ e f)      = let TStruct _ cs = typ' r e in
@@ -164,9 +165,6 @@ typeEnumerate r t =
           fieldsEnum []     = [[]]
           fieldsEnum (f:fs) = concatMap (\vs -> map (:vs) $ typeEnumerate r $ fieldType f) $ fieldsEnum fs
 -}
-
-ctxGetVar :: Refine -> ECtx -> String -> Field
-ctxGetVar = error "ctxGetVar is undefined"
 
 -- Infer expected type from context
 ctxExpectType :: Refine -> ECtx -> Maybe Type

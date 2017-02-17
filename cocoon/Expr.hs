@@ -2,11 +2,14 @@
 
 module Expr ( exprFold
             , exprFoldM
+            , exprTraverseCtxM
             , exprTraverseM
             , exprFoldCtx
             , exprFoldCtxM
             , exprCollect
             , exprCollectM
+            , exprVars
+            , exprVarDecls
             , exprFuncs
             , exprFuncsRec
             , exprRefersToPkt
@@ -90,6 +93,9 @@ exprFoldM f e = exprFoldCtxM (\_ e' -> f e') undefined e
 exprFold :: (ExprNode b -> b) -> Expr -> b
 exprFold f e = runIdentity $ exprFoldM (return . f) e
 
+exprTraverseCtxM :: (Monad m) => (ECtx -> ENode -> m ()) -> ECtx -> Expr -> m ()
+exprTraverseCtxM f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; return $ E e'}) ctx e; return ()}
+
 exprTraverseM :: (Monad m) => (ENode -> m ()) -> Expr -> m ()
 exprTraverseM f e = do {_ <- exprFoldM (\e' -> do {f e'; return $ E e'}) e; return ()}
 
@@ -132,6 +138,23 @@ exprCollectM f op e = exprFoldM g e
 
 exprCollect :: (ExprNode b -> b) -> (b -> b -> b) -> Expr -> b
 exprCollect f op e = runIdentity $ exprCollectM (return . f) op e
+
+-- enumerate all variables that occur in the expression
+exprVars :: Expr -> [String]
+exprVars e = nub $ exprCollect (\e' -> case e' of
+                                            EVar _ v -> [v]
+                                            _        -> [])
+                               (++) e
+
+-- Variables declared inside expression, visible in the code that follows the expression
+exprVarDecls :: Expr -> [String]
+exprVarDecls e = exprFold (\e' -> case e' of
+                                       EStruct _ _ fs -> concat fs
+                                       ETuple _ fs    -> concat fs
+                                       EVarDecl _ v   -> [v]
+                                       ESet _ l _     -> l
+                                       ETyped _ e'' _ -> e''
+                                       _              -> []) e
 
 -- Non-recursively enumerate all functions invoked by the expression
 exprFuncs :: Expr -> [String]

@@ -30,6 +30,7 @@ module Syntax( pktVar
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
              , eWith, eAny, ePHolder, eTyped
              , ECtx(..)
+             , ctxParent
              , conj
              , disj) where
 
@@ -191,6 +192,9 @@ data Relation = Relation { relPos     :: Pos
 instance WithPos Relation where
     pos = relPos
     atPos r p = r{relPos = p}
+
+instance WithName Relation where
+    name = relName
 
 instance PP Relation where
     pp Relation{..} = if' relMutable (pp "state") empty <+>
@@ -381,8 +385,8 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: e, exprRight :: e}
                 | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: e}
                 | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
-                | EWith     {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
-                | EAny      {exprPos :: Pos, exprWithVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
+                | EWith     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
+                | EAny      {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EPHolder  {exprPos :: Pos}
                 | ETyped    {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
 
@@ -490,6 +494,7 @@ eInt i              = E $ EInt      nopos i
 eString s           = E $ EString   nopos s
 eBit w v            = E $ EBit      nopos w v
 eStruct c as        = E $ EStruct   nopos c as
+eTuple [a]          = a
 eTuple as           = E $ ETuple    nopos as
 eSlice e h l        = E $ ESlice    nopos e h l
 eMatch e cs         = E $ EMatch    nopos e cs
@@ -518,7 +523,8 @@ disj []     = eBool False
 disj [e]    = e
 disj (e:es) = eBinOp Or e (disj es)
 
-data ECtx = CtxRole      {ctxRole::Role}
+data ECtx = CtxRefine
+          | CtxRole      {ctxRole::Role}
           | CtxFunc      {ctxFunc::Function}
           | CtxAssume    {ctxAssume::Assume}
           | CtxRelation  {ctxRel::Relation}
@@ -555,3 +561,11 @@ data ECtx = CtxRole      {ctxRole::Role}
           | CtxAnyDef    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxTyped     {ctxParExpr::ENode, ctxPar::ECtx}
           deriving(Show)
+
+ctxParent :: ECtx -> ECtx
+ctxParent (CtxRole _)     = CtxRefine     
+ctxParent (CtxFunc _)     = CtxRefine
+ctxParent (CtxAssume _)   = CtxRefine
+ctxParent (CtxRelation _) = CtxRefine
+ctxParent (CtxRule _)     = CtxRefine
+ctxParent ctx             = ctxPar ctx
