@@ -2,6 +2,7 @@
 
 module Type( WithType(..) 
            , exprType
+           , exprTraverseTypeM
            , typ', typ''
            , isBool, isBit, isLocation, isStruct, isArray
            , matchType, matchType'
@@ -28,6 +29,9 @@ instance WithType Type where
 
 instance WithType Field where
     typ = fieldType
+
+exprTraverseTypeM :: (Monad m) => Refine -> (ECtx -> ExprNode Type -> m ()) -> ECtx -> Expr -> m ()
+exprTraverseTypeM r = exprTraverseCtxWithM (etype r) 
 
 exprType :: Refine -> ECtx -> Expr -> Type
 exprType r ctx e = exprFoldCtx (etype r) ctx e

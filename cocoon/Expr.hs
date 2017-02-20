@@ -2,6 +2,7 @@
 
 module Expr ( exprFold
             , exprFoldM
+            , exprTraverseCtxWithM
             , exprTraverseCtxM
             , exprTraverseM
             , exprFoldCtx
@@ -93,11 +94,14 @@ exprFoldM f e = exprFoldCtxM (\_ e' -> f e') undefined e
 exprFold :: (ExprNode b -> b) -> Expr -> b
 exprFold f e = runIdentity $ exprFoldM (return . f) e
 
+exprTraverseCtxWithM :: (Monad m) => (ECtx -> ExprNode a -> a) -> (ECtx -> ExprNode a -> m ()) -> ECtx -> Expr -> m ()
+exprTraverseCtxWithM g f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; return $ g ctx e'}) ctx e; return ()}
+
 exprTraverseCtxM :: (Monad m) => (ECtx -> ENode -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseCtxM f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; return $ E e'}) ctx e; return ()}
+exprTraverseCtxM = exprTraverseCtxWithM (\_ x -> E x)
 
 exprTraverseM :: (Monad m) => (ENode -> m ()) -> Expr -> m ()
-exprTraverseM f e = do {_ <- exprFoldM (\e' -> do {f e'; return $ E e'}) e; return ()}
+exprTraverseM f = exprTraverseCtxM (\_ x -> f x) undefined
 
 
 exprCollectM :: (Monad m) => (ExprNode b -> m b) -> (b -> b -> b) -> Expr -> m b

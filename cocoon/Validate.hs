@@ -100,8 +100,8 @@ checkFRefinement f f' = do
     assert (isNothing $ funcDef f) (pos f') $ "Cannot re-define function " ++ name f' ++ " previously defined at " ++ spos f
 
 -- construct dependency graph
-typeGraph :: Refine -> G.Gr TypeDef ()
-typeGraph _ = undefined
+--typeGraph :: Refine -> G.Gr TypeDef ()
+--typeGraph _ = undefined
 
 -- Validate refinement with previous definitions inlined
 validate1 :: (MonadError String me) => Refine -> me ()
@@ -134,10 +134,10 @@ typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TBit p w)     = assert (w>0) p "Integer width must be greater than 0"
 typeValidate r (TStruct _ cs) = do uniqNames (\c -> "Multiple definitions of constructor " ++ c) cs
                                    mapM_ (consValidate r) cs
-                                   mapM_ (\as -> mapM_ (\(a1, a2) -> assertR r (fieldType a1 == fieldType a2) (pos a2) $
+                                   mapM_ (\as -> mapM_ (\(a1, a2) -> assertR r (typ a1 == typ a2) (pos a2) $
                                                                      "Argument " ++ name a1 ++ " is re-declared with a different types. Previous declaration: " ++ (show $ pos a1)) 
-                                                       $ zip as $ tail as) 
-                                         $ sortAndGroup name $ concatMap consArgs cs
+                                                       $ zip as $ tail as)
+                                           $ sortAndGroup name $ concatMap consArgs cs
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
@@ -223,7 +223,7 @@ nodeValidateFinal r nd@Node{..} = do
     mapM_ (\(p1,p2) -> do r1 <- checkRole (pos nd) r p1
                           r2 <- checkRole (pos nd) r p2
                           -- input ports can only send to output ports of the same node
-                          assertR r (all (\(E (ELocation _ rl args)) -> (elem rl (map snd nodePorts)) {-&& 
+                          assertR r (all (\(E (ELocation _ rl _)) -> (elem rl (map snd nodePorts)) {-&& 
                                                                     (all (\(key, arg) -> arg == (EVar nopos $ name key)) $ zip (init $ roleKeys r1) args)-})
                                          $ exprSendsTo r (roleBody r1)) (pos nd)
                                  $ "Inbound port " ++ p1 ++ " is only allowed to forward packets to the node's outbound ports"
@@ -247,64 +247,76 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
                                               _               -> return ()) e
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-exprValidate r ctx e = do exprTraverseCtxM (exprValidate' r) ctx e
+exprValidate r ctx e = do exprTraverseCtxM (exprValidate1 r) ctx e
+                          exprTraverseTypeM r (\_ e' -> exprValidate2 r e') ctx e
+                          --exprTraverseCtxM (exprValidate3 r) ctx e
 
 -- This function does not perform type checking: just checks that all functions and
 -- variables are defined; the number of arguments matches declarations, etc.
-exprValidate' :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me ()
-exprValidate' r ctx (EVar p v)          = do _ <- checkVar p r ctx v
+exprValidate1 :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me ()
+exprValidate1 r ctx (EVar p v)          = do _ <- checkVar p r ctx v
                                              return ()
-exprValidate' r ctx (EPacket p)         = ctxCheckSideEffects p r ctx
-exprValidate' r _   (EApply p f as)     = do fun <- checkFunc p r f
+exprValidate1 r ctx (EPacket p)         = ctxCheckSideEffects p r ctx
+exprValidate1 r _   (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
                                                      $ "Number of arguments does not match function declaration"
-exprValidate' _ _   (EField _ _ _)      = return ()
-exprValidate' r _   (ELocation p rl _)  = do _ <- checkRole p r rl
+exprValidate1 _ _   (EField _ _ _)      = return ()
+exprValidate1 r _   (ELocation p rl _)  = do _ <- checkRole p r rl
                                              return ()
-exprValidate' _ _   (EBool _ _)         = return ()
-exprValidate' _ _   (EInt _ _)          = return ()
-exprValidate' _ _   (EString _ _)       = return ()
-exprValidate' _ _   (EBit _ _ _)        = return ()
-exprValidate' r _   (EStruct p c as)    = do cons <- checkConstructor p r c
+exprValidate1 _ _   (EBool _ _)         = return ()
+exprValidate1 _ _   (EInt _ _)          = return ()
+exprValidate1 _ _   (EString _ _)       = return ()
+exprValidate1 _ _   (EBit _ _ _)        = return ()
+exprValidate1 r _   (EStruct p c as)    = do cons <- checkConstructor p r c
                                              assertR r (length as == length (consArgs cons)) p
                                                      $ "Number of arguments does not match constructor declaration"
-exprValidate' _ _   (ETuple _ _)        = return ()
-exprValidate' _ _   (ESlice _ _ _ _)    = return ()
-exprValidate' _ _   (EMatch _ _ _)      = return ()
-exprValidate' r ctx (EVarDecl p v)      = checkNoVar p r ctx v
-exprValidate' _ _   (ESeq _ _ _)        = return ()
-exprValidate' r ctx (EPar p _ _)        = ctxCheckSideEffects p r ctx
-exprValidate' _ _   (EITE _ _ _ _)      = return ()
-exprValidate' r ctx (EDrop p)           = ctxCheckSideEffects p r ctx
-exprValidate' r ctx (ESet _ l _)        = checkLExpr r ctx l
-exprValidate' r ctx (ESend p _)         = ctxCheckSideEffects p r ctx
-exprValidate' _ _   (EBinOp _ _ _ _)    = return ()
-exprValidate' _ _   (EUnOp _ Not _)     = return ()
-exprValidate' r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
+exprValidate1 _ _   (ETuple _ _)        = return ()
+exprValidate1 _ _   (ESlice _ _ _ _)    = return ()
+exprValidate1 _ _   (EMatch _ _ _)      = return ()
+exprValidate1 r ctx (EVarDecl p v)      = checkNoVar p r ctx v
+exprValidate1 _ _   (ESeq _ _ _)        = return ()
+exprValidate1 r ctx (EPar p _ _)        = ctxCheckSideEffects p r ctx
+exprValidate1 _ _   (EITE _ _ _ _)      = return ()
+exprValidate1 r ctx (EDrop p)           = ctxCheckSideEffects p r ctx
+exprValidate1 r ctx (ESet _ l _)        = checkLExpr r ctx l
+exprValidate1 r ctx (ESend p _)         = ctxCheckSideEffects p r ctx
+exprValidate1 _ _   (EBinOp _ _ _ _)    = return ()
+exprValidate1 _ _   (EUnOp _ Not _)     = return ()
+exprValidate1 r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
-exprValidate' r ctx (EWith p v t _ _ _) = do _ <- checkRelation p r ctx t
+exprValidate1 r ctx (EWith p v t _ _ _) = do _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
-exprValidate' r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
+exprValidate1 r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
-exprValidate' _ _   (EPHolder _)        = return ()
-exprValidate' _ _   (ETyped _ _ _)      = return ()
+exprValidate1 _ _   (EPHolder _)        = return ()
+exprValidate1 _ _   (ETyped _ _ _)      = return ()
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
                                  $ "Variable " ++ v ++ " already defined in this scope"
 
 -- Traverse again with types
---exprValidate'' r _   (EField _ e f)      = return () 
---ESlice - must be a bit vector of sufficient width
---EMatch - all value types must be the same
---ESeq - e1 should not send
+exprValidate2 :: (MonadError String me) => Refine -> ExprNode Type -> me ()
+exprValidate2 r (EField p e f)      = case e of
+                                           t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
+                                                                      $ "Unknown field " ++ f
+                                           _               -> errR r (pos e) $ "Expression is not a struct"
+exprValidate2 r (ESlice p e h l)    = case e of
+                                           TBit _ w -> do assertR r (h >= l) p "Upper bound of the slice must be greater than lower bound"
+                                                          assertR r (h < w) p "Upper bound of the slice cannot exceed argument width"
+                                           _        -> errR r (pos e) $ "Expression is not a bit vector"
+exprValidate2 r (EMatch _ _ cs)     = let t = snd $ head cs in
+                                      mapM_ (matchType r t . snd) $ tail cs
+exprValidate2 r (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
 --EBinOp - ?
---EITE - then and else branches must return the same type
+exprValidate2 r (EITE _ _ t me)     = maybe (return ()) (matchType r t) me
+exprValidate2 _ _                   = return ()
+
 -- Traverse again, check that every expression matches its expected type, if any
 
 isLExpr :: Refine -> ECtx -> Expr -> Bool
@@ -406,6 +418,9 @@ ctxRels r ctx =
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
 
+structArgs :: Type -> [Field]
+structArgs (TStruct _ cs) = nub $ concatMap consArgs cs
+structArgs t              = error $ "structArgs " ++ show t
 
 {-
 exprValidate r ctx vset (EVar p v) | isRoleCtx ctx =
