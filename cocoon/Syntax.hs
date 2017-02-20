@@ -473,12 +473,14 @@ newtype Expr = E (ExprNode Expr)
 enode :: Expr -> ExprNode Expr
 enode (E n) = n
 
-
 instance Eq Expr where
     (==) (E e1) (E e2) = e1 == e2
 
 instance PP Expr where
     pp (E n) = pp n
+
+instance Show Expr where
+    show (E n) = show n
 
 instance WithPos Expr where
     pos (E n) = pos n

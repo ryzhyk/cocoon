@@ -1,10 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 
 module Type( WithType(..) 
-           , exprType
+           , exprType, exprType', exprTypeMaybe
            , exprTraverseTypeM
            , typ', typ''
-           , isBool, isBit, isLocation, isStruct, isArray
+           , isBool, isBit, isInt, isLocation, isStruct, isArray
            , matchType, matchType'
            , ctxExpectType
            {-, typeDomainSize, typeEnumerate-}) where
@@ -30,60 +30,67 @@ instance WithType Type where
 instance WithType Field where
     typ = fieldType
 
-exprTraverseTypeM :: (Monad m) => Refine -> (ECtx -> ExprNode Type -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseTypeM r = exprTraverseCtxWithM (etype r) 
+exprTraverseTypeM :: (Monad m) => Refine -> (ECtx -> ExprNode (Maybe Type) -> m ()) -> ECtx -> Expr -> m ()
+exprTraverseTypeM r = exprTraverseCtxWithM (\ctx e -> return $ exprType' r ctx e) 
 
 exprType :: Refine -> ECtx -> Expr -> Type
-exprType r ctx e = exprFoldCtx (etype r) ctx e
+exprType r ctx e = maybe (error $ "exprType: expression " ++ show e ++ " has unknown type") id $ exprTypeMaybe r ctx e
 
-etype :: Refine -> ECtx -> ExprNode Type -> Type
-etype r ctx (EVar _ v)          = typ $ getVar r ctx v
-etype _ _   (EPacket _)         = tUser packetTypeName
-etype r _   (EApply _ f _)      = funcType $ getFunc r f
-etype r _   (EField _ e f)      = let TStruct _ cs = typ' r e in
-                                  fieldType $ structGetField cs f
-etype _ _   (ELocation _ _ _)   = tLocation
-etype _ _   (EBool _ _)         = tBool
-etype _ _   (EInt _ _)          = tInt
-etype _ _   (EString _ _)       = tString
-etype _ _   (EBit _ w _)        = tBit w
-etype r _   (EStruct _ c _)     = tUser $ name $ consType r c
-etype _ _   (ETuple _ fs)       = tTuple fs
-etype _ _   (ESlice _ _ h l)    = tBit $ h - l + 1
-etype _ _   (EMatch _ _ cs)     = fst $ head cs
-etype r ctx (EVarDecl p v)      = maybe (error $ "exprType: cannot infer type of variable " ++ v ++ "(" ++ show p ++ ")") id 
-                                  $ ctxExpectType r ctx
-etype _ _   (ESeq _ _ e2)       = e2
-etype _ _   (EPar _ _ _)        = tSink
-etype _ _   (EITE _ _ t _)      = t
-etype _ _   (EDrop _)           = tSink
-etype _ _   (ESet _ _ _)        = tTuple []
-etype _ _   (ESend  _ _)        = tSink
-etype r _   (EBinOp _ op e1 e2) = case op of
-                                       Eq     -> tBool
-                                       Neq    -> tBool
-                                       Lt     -> tBool
-                                       Gt     -> tBool
-                                       Lte    -> tBool
-                                       Gte    -> tBool
-                                       And    -> tBool
-                                       Or     -> tBool
-                                       Impl   -> tBool
-                                       Plus   -> if' (isBit r t1) (tBit (max (typeWidth t1) (typeWidth t2))) tInt
-                                       Minus  -> if' (isBit r t1) (tBit (max (typeWidth t1) (typeWidth t2))) tInt
-                                       ShiftR -> t1
-                                       ShiftL -> t1
-                                       Mod    -> t1
-                                       Concat -> tBit (typeWidth t1 + typeWidth t2)
+exprTypeMaybe :: Refine -> ECtx -> Expr -> Maybe Type
+exprTypeMaybe r ctx e = exprFoldCtx (exprType' r) ctx e
+
+exprType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
+exprType' r ctx (EVar _ v)            = Just $ typ $ getVar r ctx v
+exprType' _ _   (EPacket _)           = Just $ tUser packetTypeName
+exprType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
+exprType' r _   (EField _ e f)        = fmap (\e' -> let TStruct _ cs = typ' r e' in
+                                                     fieldType $ structGetField cs f) e
+exprType' _ _   (ELocation _ _ _)     = Just tLocation
+exprType' _ _   (EBool _ _)           = Just tBool
+exprType' r ctx (EInt _ _)            = case ctxExpectType r ctx of
+                                             t@(Just (TBit _ _)) -> t
+                                             _                   -> Just tInt
+exprType' _ _   (EString _ _)         = Just tString
+exprType' _ _   (EBit _ w _)          = Just $ tBit w
+exprType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
+exprType' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
+exprType' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
+exprType' _ _   (EMatch _ _ cs)       = snd $ head cs
+exprType' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
+exprType' _ _   (ESeq _ _ e2)         = e2
+exprType' _ _   (EPar _ _ _)          = Just tSink
+exprType' _ _   (EITE _ _ t _)        = t
+exprType' _ _   (EDrop _)             = Just tSink
+exprType' _ _   (ESet _ _ _)          = Just $ tTuple []
+exprType' _ _   (ESend  _ _)          = Just tSink
+exprType' r _   (EBinOp _ op (Just e1) (Just e2)) = 
+                                  case op of
+                                       Eq     -> Just tBool
+                                       Neq    -> Just tBool
+                                       Lt     -> Just tBool
+                                       Gt     -> Just tBool
+                                       Lte    -> Just tBool
+                                       Gte    -> Just tBool
+                                       And    -> Just tBool
+                                       Or     -> Just tBool
+                                       Impl   -> Just tBool
+                                       Plus   -> Just $ if' (isBit r t1) (tBit (max (typeWidth t1) (typeWidth t2))) tInt
+                                       Minus  -> Just $ if' (isBit r t1) (tBit (max (typeWidth t1) (typeWidth t2))) tInt
+                                       ShiftR -> Just t1
+                                       ShiftL -> Just t1
+                                       Mod    -> Just t1
+                                       Concat -> Just $ tBit (typeWidth t1 + typeWidth t2)
     where t1 = typ' r e1
           t2 = typ' r e2
-etype _ _   (EUnOp _ Not _)      = tBool
-etype _ _   (EFork _ _ _ _ _)    = tSink
-etype _ _   (EWith _ _ _ _ b _)  = b
-etype _ _   (EAny  _ _ _ _ b _)  = b
-etype r ctx (EPHolder p)         = maybe (error $ "exprType: cannot infer type of placeholder from context (" ++ show p ++ ")") id
-                                   $ ctxExpectType r ctx
-etype _ _   (ETyped _ _ t)       = t
+exprType' _ _   (EBinOp _ ShiftR e1 _) = e1
+exprType' _ _   (EBinOp _ ShiftL e1 _) = e1
+exprType' _ _   (EBinOp _ _ _ _)       = Nothing
+exprType' _ _   (EUnOp _ Not _)        = Just tBool
+exprType' _ _   (EFork _ _ _ _ _)      = Just tSink
+exprType' _ _   (EWith _ _ _ _ b _)    = b
+exprType' _ _   (EAny  _ _ _ _ b _)    = b
+exprType' r ctx (EPHolder _)           = ctxExpectType r ctx
+exprType' _ _   (ETyped _ _ t)         = Just t
 
 
 -- Unwrap typedef's down to actual type definition
@@ -109,6 +116,11 @@ isBit :: (WithType a) => Refine -> a -> Bool
 isBit r a = case typ' r a of
                  TBit _ _ -> True
                  _        -> False
+
+isInt :: (WithType a) => Refine -> a -> Bool
+isInt r a = case typ' r a of
+                 TInt _ -> True
+                 _      -> False
 
 isLocation :: (WithType a) => Refine -> a -> Bool
 isLocation r a = case typ' r a of
@@ -177,11 +189,16 @@ ctxExpectType _ (CtxFunc f)                        = Just $ funcType f
 ctxExpectType _ (CtxAssume _)                      = Just tBool
 ctxExpectType _ (CtxRelation _)                    = Nothing
 ctxExpectType _ (CtxRule _)                        = Nothing
-ctxExpectType r (CtxApply (EApply _ f _) _ i)      = Just $ fieldType $ (funcArgs $ getFunc r f) !! i
+ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
+                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing
 ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r $ roleTable $ getRole r rl
-ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = Just $ typ $ (consArgs $ getConstructor r c) !! i
-ctxExpectType r (CtxTuple _ ctx i)                 = fmap (\t -> let TTuple _ fs = typ' r t in fs !! i) $ ctxExpectType r ctx
+ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = let args = consArgs $ getConstructor r c in
+                                                     if' (i < length args) (Just $ typ $ args !! i) Nothing
+ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of 
+                                                          Just t -> let TTuple _ fs = typ' r t in 
+                                                                    if' (i < length fs) (Just $ fs !! i) Nothing
+                                                          Nothing -> Nothing
 ctxExpectType _ (CtxSlice _ _)                     = Nothing
 ctxExpectType _ (CtxMatchExpr _ _)                 = Nothing
 ctxExpectType r (CtxMatchPat e ctx _)              = ctxExpectType r (CtxMatchExpr e ctx)
@@ -193,11 +210,43 @@ ctxExpectType _ (CtxPar2 _ _)                      = Just tSink
 ctxExpectType _ (CtxITEIf _ _)                     = Just tBool
 ctxExpectType r (CtxITEThen _ ctx)                 = ctxExpectType r ctx
 ctxExpectType r (CtxITEElse _ ctx)                 = ctxExpectType r ctx
-ctxExpectType r (CtxSetL e@(ESet _ _ rhs) ctx)     = Just $ exprType r (CtxSetR e ctx) rhs
-ctxExpectType _ (CtxSetR _ _)                      = Nothing
+ctxExpectType r (CtxSetL e@(ESet _ _ rhs) ctx)     = exprTypeMaybe r (CtxSetR e ctx) rhs
+ctxExpectType r (CtxSetR (ESet _ lhs _) ctx)       = exprTypeMaybe r ctx lhs -- avoid infinite recursion by evaluating lhs standalone
 ctxExpectType _ (CtxSend _ _)                      = Just $ tLocation
-ctxExpectType _ (CtxBinOpL _ _)                    = Nothing
-ctxExpectType _ (CtxBinOpR _ _)                    = Nothing
+ctxExpectType r (CtxBinOpL e ctx)                  = case exprBOp e of
+                                                          Eq     -> trhs
+                                                          Neq    -> trhs
+                                                          Lt     -> trhs
+                                                          Gt     -> trhs
+                                                          Lte    -> trhs
+                                                          Gte    -> trhs
+                                                          And    -> Just tBool
+                                                          Or     -> Just tBool
+                                                          Impl   -> Just tBool
+                                                          Plus   -> trhs
+                                                          Minus  -> trhs
+                                                          ShiftR -> Nothing
+                                                          ShiftL -> Nothing
+                                                          Mod    -> Nothing
+                                                          Concat -> Nothing
+    where trhs = exprTypeMaybe r ctx $ exprRight e
+ctxExpectType r (CtxBinOpR e ctx)                  = case exprBOp e of
+                                                          Eq     -> tlhs
+                                                          Neq    -> tlhs
+                                                          Lt     -> tlhs
+                                                          Gt     -> tlhs
+                                                          Lte    -> tlhs
+                                                          Gte    -> tlhs
+                                                          And    -> Just tBool
+                                                          Or     -> Just tBool
+                                                          Impl   -> Just tBool
+                                                          Plus   -> tlhs
+                                                          Minus  -> tlhs
+                                                          ShiftR -> Nothing
+                                                          ShiftL -> Nothing
+                                                          Mod    -> Nothing
+                                                          Concat -> Nothing
+    where tlhs = exprTypeMaybe r ctx $ exprLeft e
 ctxExpectType _ (CtxUnOp (EUnOp _ Not _) _)        = Just tBool
 ctxExpectType _ (CtxForkCond _ _)                  = Just tBool
 ctxExpectType _ (CtxForkBody _ _)                  = Just tSink

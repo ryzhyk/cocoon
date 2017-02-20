@@ -18,7 +18,6 @@ limitations under the License.
 module Validate (validate) where
 
 import Control.Monad.Except
-import qualified Data.Graph.Inductive as G
 import Data.Maybe
 import Data.List
 
@@ -248,8 +247,18 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 exprValidate r ctx e = do exprTraverseCtxM (exprValidate1 r) ctx e
-                          exprTraverseTypeM r (\_ e' -> exprValidate2 r e') ctx e
-                          --exprTraverseCtxM (exprValidate3 r) ctx e
+                          exprTraverseTypeME r (exprValidate2 r) ctx e
+
+exprTraverseTypeME :: (MonadError String me) => Refine -> (ECtx -> ExprNode Type -> me ()) -> ECtx -> Expr -> me ()
+exprTraverseTypeME r = exprTraverseCtxWithM (\ctx e -> do 
+    e' <- exprMap (return . Just) e
+    case exprType' r ctx e' of
+         Just t  -> do case ctxExpectType r ctx of
+                            Nothing -> return ()
+                            Just t' -> assertR r (matchType' r t t') (pos e) 
+                                               $ "Couldn't match expected type " ++ show t' ++ " with actual type " ++ show t
+                       return t
+         Nothing -> error $ "Expression " ++ show e ++ " has unknown type") 
 
 -- This function does not perform type checking: just checks that all functions and
 -- variables are defined; the number of arguments matches declarations, etc.
@@ -300,24 +309,48 @@ checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
                                  $ "Variable " ++ v ++ " already defined in this scope"
 
--- Traverse again with types
-exprValidate2 :: (MonadError String me) => Refine -> ExprNode Type -> me ()
-exprValidate2 r (EField p e f)      = case e of
-                                           t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
-                                                                      $ "Unknown field " ++ f
-                                           _               -> errR r (pos e) $ "Expression is not a struct"
-exprValidate2 r (ESlice p e h l)    = case e of
-                                           TBit _ w -> do assertR r (h >= l) p "Upper bound of the slice must be greater than lower bound"
-                                                          assertR r (h < w) p "Upper bound of the slice cannot exceed argument width"
-                                           _        -> errR r (pos e) $ "Expression is not a bit vector"
-exprValidate2 r (EMatch _ _ cs)     = let t = snd $ head cs in
-                                      mapM_ (matchType r t . snd) $ tail cs
-exprValidate2 r (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
---EBinOp - ?
-exprValidate2 r (EITE _ _ t me)     = maybe (return ()) (matchType r t) me
-exprValidate2 _ _                   = return ()
-
--- Traverse again, check that every expression matches its expected type, if any
+-- Traverse again with types.  This pass ensures that all sub-expressions
+-- have well-defined types
+exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
+exprValidate2 r _   (EField p e f)      = case e of
+                                               t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
+                                                                          $ "Unknown field " ++ f
+                                               _               -> errR r (pos e) $ "Expression is not a struct"
+exprValidate2 r _   (ESlice p e h l)    = case e of
+                                               TBit _ w -> do assertR r (h >= l) p 
+                                                                      $ "Upper bound of the slice must be greater than lower bound"
+                                                              assertR r (h < w) p
+                                                                      $ "Upper bound of the slice cannot exceed argument width"
+                                               _        -> errR r (pos e) $ "Expression is not a bit vector"
+exprValidate2 r _   (EMatch _ _ cs)     = let t = snd $ head cs in
+                                          mapM_ (matchType r t . snd) $ tail cs
+                                          -- pattern structure matches 
+exprValidate2 r _   (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
+exprValidate2 r _   (EBinOp _ op e1 e2) = case op of 
+                                               Eq     -> m
+                                               Neq    -> m
+                                               Lt     -> do {m; isint1}
+                                               Gt     -> do {m; isint1}
+                                               Lte    -> do {m; isint1}
+                                               Gte    -> do {m; isint1}
+                                               And    -> do {m; isbool}
+                                               Or     -> do {m; isbool}
+                                               Impl   -> do {m; isbool}
+                                               Plus   -> do {m; isint1} 
+                                               Minus  -> do {m; isint1}
+                                               ShiftR -> do {isint1; isint2} 
+                                               ShiftL -> do {isint1; isint2}
+                                               Mod    -> do {isint1; isint2}
+                                               Concat -> do {isbit1; isbit2}
+    where m = matchType r e1 e2
+          isint1 = assertR r (isInt r e1 || isBit r e1) (pos e1) $ "Not an integer"
+          isint2 = assertR r (isInt r e2 || isBit r e2) (pos e2) $ "Not an integer"
+          isbit1 = assertR r (isBit r e1) (pos e1) $ "Not a bit vector"
+          isbit2 = assertR r (isBit r e2) (pos e2) $ "Not a bit vector"
+          isbool = assertR r (isBool r e1) (pos e1) $ "Not a Boolean"
+exprValidate2 r ctx (EVarDecl p _)      = assertR r (isJust $ ctxExpectType r ctx) p $ "Variable type is unknown"
+exprValidate2 r _   (EITE _ _ t me)     = matchType r t $ maybe (tTuple []) id me
+exprValidate2 _ _   _                   = return ()
 
 isLExpr :: Refine -> ECtx -> Expr -> Bool
 isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
@@ -421,215 +454,3 @@ ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
 structArgs :: Type -> [Field]
 structArgs (TStruct _ cs) = nub $ concatMap consArgs cs
 structArgs t              = error $ "structArgs " ++ show t
-
-{-
-exprValidate r ctx vset (EVar p v) | isRoleCtx ctx =
-    if elem v vset
-       then return ()
-       else case find ((==v) . name) $ roleKeys (ctxRole ctx) ++ ctxForkVars ctx of
-                 Nothing -> errR r p $ "Unknown variable: " ++ v
-                 Just _  -> return ()
-exprValidate _ ctx _ (EVar p v) = do
-   _ <- checkVar p ctx v
-   return ()
-exprValidate r ctx _ (EDotVar p v) = 
-   case ctx of
-        CtxSend _ t -> do _ <- checkKey p t v
-                          return()
-        _           -> errR r p "Dot-variable is not allowed here"
-exprValidate r ctx _ (EPacket p) = do 
-   case ctx of
-        CtxAssume _ -> errR r p "Assumptions cannot refer to pkt"
-        CtxFunc _   -> errR r p "Functions cannot refer to pkt"
-        CtxRole _   -> return ()
-        CtxSend _ _ -> return ()
-        CtxFork _ _ -> return ()
-   return ()
-exprValidate r ctx vset (EApply p f as) = do
-    func <- checkFunc p r f
-    assertR r ((length $ funcArgs func) == length as) p "Number of arguments does not match function declaration"
-    mapM_ (\(formal,actual) -> do exprValidate r ctx vset actual
-                                  matchType r ctx actual formal) 
-          $ zip (funcArgs func) as
-exprValidate r ctx vset (EBuiltin p f as) = do
-    func <- checkBuiltin p f
-    mapM_ (exprValidate r ctx vset) as
-    (bfuncValidate func) r ctx p as
-
-exprValidate r ctx vset (EField p s f) = do
-    exprValidate r ctx vset s
-    case typ' r ctx s of
-        TStruct _ fs -> assertR r (isJust $ find ((==f) . fieldName) fs) p $ "Unknown field " ++ f
-        _            -> err p $ "Expression is not of struct type"
-
-exprValidate r ctx vset (ELocation p rname as) = do
-    role' <- checkRole p r rname
-    assertR r ((length $ roleKeys role') == length as) p "Number of keys does not match role declaration"
-    mapM_ (\(formal,actual) -> do exprValidate r ctx vset actual
-                                  matchType r ctx actual formal) 
-          $ zip (roleKeys role') as
-
-exprValidate r ctx vset (EStruct p n as) = do
-    t <- checkType p r n
-    case typ' r ctx (tdefType t) of
-         TStruct _ fs -> do assertR r (length as == length fs) p "Number of fields does not match struct definition"
-                            mapM_ (\(field, e) -> do exprValidate r ctx vset e
-                                                     matchType r ctx e field)
-                                  $ zip fs as
-         _            -> err p $ n ++ " is not a struct type"
-exprValidate r ctx vset (EBinOp _ op left right) = do
-    exprValidate r ctx vset left
-    exprValidate r ctx vset right
-    if' (elem op [Eq, Neq]) (matchType r ctx left right)
-     $ if' (elem op [Lt, Lte, Gt, Gte, Plus, Minus, ShiftL, ShiftR]) (
-          do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
-             assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression"
-             matchType r ctx left right)
-     $ if' (elem op [And, Or, Impl]) (
-          do assertR r (isBool r ctx left)  (pos left)  $ "Not a Boolean expression"
-             assertR r (isBool r ctx right) (pos right) $ "Not a Boolean expression")
-     $ if' (elem op [Mod, Concat]) (
-          do assertR r (isUInt r ctx left)  (pos left)  $ "Not an integer expression"
-             assertR r (isUInt r ctx right) (pos right) $ "Not an integer expression") 
-     $ undefined
-
-exprValidate r ctx vset (EUnOp _ op e) = do
-    exprValidate r ctx vset e
-    case op of
-         Not -> assertR r (isBool r ctx e) (pos e)  $ "Not a Boolean expression"
-
-exprValidate r ctx vset (ESlice p e h l) = do
-    exprValidate r ctx vset e
-    case typ' r ctx e of
-         TUInt _ w -> do assertR r (h >= l) p "Upper bound of the slice must be greater than lower bound"
-                         assertR r (h < w) p "Upper bound of the slice cannot exceed argument width"
-         _         -> errR r (pos e) "Cannot take slice of a non-integer expression"
-
-exprValidate r ctx vset (ECond _ cs def) = do
-    exprValidate r ctx vset def
-    mapM_ (\(cond, e)-> do exprValidate r ctx vset cond
-                           exprValidate r ctx vset e
-                           assertR r (isBool r ctx cond) (pos cond) $ "Not a Boolean expression"
-                           matchType r ctx e def) cs
-
-exprValidate _ _ _ _ = return ()
-
-
-lexprValidate :: (MonadError String me) => Refine -> ECtx -> [Expr] -> [String] -> Expr -> me ()
-lexprValidate r ctx mset vset e = do
-    exprValidate r ctx vset e
-    assertR r (isLExpr e) (pos e) "Not an l-value"
-    checkNotModified r ctx mset e
-
-isLExpr :: Expr -> Bool
-isLExpr (EVar _ _)        = False
-isLExpr (EDotVar _ _)     = False
-isLExpr (EPacket _)       = True
-isLExpr (EApply _ _ _)    = False
-isLExpr (EBuiltin _ _ _)  = False
-isLExpr (EField _ s _)    = isLExpr s
-isLExpr (ELocation _ _ _) = False
-isLExpr (EBool _ _)       = False
-isLExpr (EInt _ _ _)      = False
-isLExpr (EStruct _ _ _)   = False
-isLExpr (EBinOp _ _ _ _)  = False
-isLExpr (EUnOp _ _ _)     = False
-isLExpr (ESlice _ _ _ _)  = False -- TODO: allow this
-isLExpr (ECond _ _ _)     = False
-
--- Checks that no part of lvalue e is in the modified set mset
-checkNotModified :: (MonadError String me) => Refine -> ECtx -> [Expr] -> Expr -> me ()
-checkNotModified r ctx mset e = do
-    let checkParent e' = do assert (not $ elem e' mset) (pos e') $ show e' ++ " has already been assigned"
-                            case e' of
-                                 EField _ p _ -> checkParent p
-                                 _            -> return ()
-    -- e and its ancestors are not in mset
-    checkParent e
-    -- recursively check children
-    case typ' r ctx e of
-         TStruct _ fs -> mapM_ (checkNotModified r ctx mset . EField nopos e . name) fs
-         _            -> return()
-
-
-statValidate :: (MonadError String me) => Refine -> ECtx -> [Expr] -> [String] -> Statement -> me (Bool, [Expr], [String])
-statValidate r ctx mset vset (SSeq _ h t) = do
-    (sends, mset', vset') <- statValidate r ctx mset vset h
-    assertR r (not sends) (pos h) "Send/fork not allowed in the middle of a sequence"
-    statValidate r ctx mset' vset' t
-
-statValidate r ctx mset vset (SPar _ h t) = do
-    (_, mset1, _) <- statValidate r ctx mset vset h
-    (_, mset2, _) <- statValidate r ctx mset vset t
-    return $ (True, union mset1 mset2, vset)
-
-statValidate r ctx mset vset (SITE _ c t e) = do
-    exprValidate r ctx vset c
-    assertR r (isBool r ctx c) (pos c) "Condition must be a Boolean expression"
-    (sends1, mset1, _) <- statValidate r ctx mset vset t
-    (sends2, mset2, _) <- maybe (return (False,[],[])) (statValidate r ctx mset vset) e
-    return $ (sends1 || sends2, union mset1 mset2, vset)
-
-statValidate r ctx mset vset (STest _ c) = do
-    exprValidate r ctx vset c
-    assertR r (isBool r ctx c) (pos c) "Filter must be a Boolean expression"
-    return (False, mset, vset)
-
-statValidate r ctx mset vset (SSet _ lval rval) = do
-    exprValidate r ctx vset rval
-    lexprValidate r ctx mset vset lval
-    matchType r ctx lval rval
-    when (exprIsValidFlag lval) $ case rval of
-                                       EBool _ _ -> return ()
-                                       _         -> errR r (pos rval) $ "Not a Boolean constant"
-    return (False, union [lval] mset, vset)
-
-statValidate r ctx mset vset (SSend _ dst) = do
-    exprValidate r ctx vset dst
-    assertR r (isLocation r ctx dst) (pos dst) "Not a valid location"
-    case dst of
-         ELocation _ _ _ -> return ()
-         _               -> errR r (pos dst)  "send destination must be of the form Role[args]"
-    let ELocation p rl _ = dst
-    assertR r (rl /= name (ctxRole ctx)) p "role cannot send to itself"
-    return (True, mset, vset)
-
-statValidate r ctx mset vset (SSendND p rl c) = do
-    role' <- checkRole p r rl
-    exprValidate r (CtxSend ctx role') vset c
-    assertR r (isBool r (CtxSend ctx role') c) (pos c) "Condition must be a Boolean expression"
-    assertR r (rl /= name (ctxRole ctx)) p "role cannot send to itself"
-    return (True, mset, vset)
-
-statValidate r ctx mset vset (SHavoc _ lval) = do
-    lexprValidate r ctx mset vset lval
-    return (False, union [lval] mset, vset)
-
-statValidate r ctx mset vset (SAssume _ c) = do
-    exprValidate r ctx vset c
-    assertR r (isBool r ctx c) (pos c) "Assumption must be a Boolean expression"
-    return (False, mset, vset)
-
-statValidate r ctx mset vset (SLet p t n v) = do
-    assertR r (not $ elem n $ map name $ roleKeys $ ctxRole ctx) p $ "Local variable name shadows key name"
-    assertR r (not $ elem n $ vset) p $ "Local variable name shadows previously declared variable"
-    assertR r (not $ elem n $ map name $ roleForkVars $ ctxRole ctx) p $ "Local variable name shadows fork variable"
-    typeValidate r t
-    exprValidate r ctx vset v
-    matchType r ctx t v 
-    return (False, mset, union [n] vset)
-
-statValidate r ctx mset vset (SFork p vs c b) = do
-    let ctx' = CtxFork ctx vs
-    mapM_ (\v -> do typeValidate r $ fieldType v
-                    assertR r (not $ elem (name v) $ map name $ roleKeys $ ctxRole ctx) p $ "Fork variable name shadows key name"
-                    assertR r (not $ elem (name v) $ map name $ roleLocals $ ctxRole ctx) p $ "Fork variable name shadows local variable"
-                    assertR r (not $ elem (name v) $ map name $ ctxForkVars ctx) p $ "Fork variable name shadows containing fork variable")
-           vs
-    uniqNames (\n -> "Multiple definitions of variable " ++ n) vs
-    exprValidate r ctx' vset c
-    assertR r (isBool r ctx' c) (pos c) "Fork condition must be a Boolean expression"
-    (_, mset', vset') <- statValidate r ctx' mset vset b
-    return (True, mset', vset')
-
--}

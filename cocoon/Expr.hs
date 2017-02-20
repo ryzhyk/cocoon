@@ -1,6 +1,7 @@
 {-# LANGUAGE ImplicitParams #-}
 
-module Expr ( exprFold
+module Expr ( exprMap
+            , exprFold
             , exprFoldM
             , exprTraverseCtxWithM
             , exprTraverseCtxM
@@ -65,7 +66,7 @@ exprFoldCtxM' f ctx e@(EITE p i t me)     = f ctx =<< (liftM3 $ EITE p)
                                                       (exprFoldCtxM f (CtxITEThen e ctx) t) 
                                                       (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxITEElse e ctx)) me)
 exprFoldCtxM' f ctx   (EDrop p)           = f ctx $ EDrop p
-exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetL e ctx) l) (exprFoldCtxM f (CtxSetR e ctx) r)
+exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetR e ctx) r) (exprFoldCtxM f (CtxSetL e ctx) l)
 exprFoldCtxM' f ctx e@(ESend p d)         = f ctx =<< (liftM $ ESend p) (exprFoldCtxM f (CtxSend e ctx) d)
 exprFoldCtxM' f ctx e@(EBinOp p op l r)   = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
                                                                              (exprFoldCtxM f (CtxBinOpR e ctx) r)
@@ -84,6 +85,35 @@ exprFoldCtxM' f ctx   (EPHolder p)        = f ctx $ EPHolder p
 exprFoldCtxM' f ctx e@(ETyped p x t)      = do x' <- exprFoldCtxM f (CtxTyped e ctx) x
                                                f ctx $ ETyped p x' t
 
+exprMap :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
+exprMap g e = case e of
+                   EVar p v          -> return $ EVar p v
+                   EPacket p         -> return $ EPacket p
+                   EApply p f as     -> (liftM $ EApply p f) $ mapM g as
+                   EField p s f      -> (liftM $ \s' -> EField p s' f) $ g s
+                   ELocation p rl a  -> (liftM $ ELocation p rl) $ g a
+                   EBool p b         -> return $ EBool p b
+                   EInt p i          -> return $ EInt p i
+                   EString p s       -> return $ EString p s
+                   EBit p w v        -> return $ EBit p w v
+                   EStruct p s fs    -> (liftM $ EStruct p s) $ mapM g fs
+                   ETuple p fs       -> (liftM $ ETuple p) $ mapM g fs
+                   ESlice p v h l    -> (liftM $ \v' -> ESlice p v' h l) $ g v
+                   EMatch p m cs     -> (liftM2 $ EMatch p) (g m) $ mapM (\(e1, e2) -> liftM2 (,) (g e1) (g e2)) cs
+                   EVarDecl p v      -> return $ EVarDecl p v
+                   ESeq p l r        -> (liftM2 $ ESeq p) (g l) (g r)
+                   EPar p l r        -> (liftM2 $ ESeq p) (g l) (g r)
+                   EITE p i t me     -> (liftM3 $ EITE p) (g i) (g t) (maybe (return Nothing) (liftM Just . g) me)
+                   EDrop p           -> return $ EDrop p
+                   ESet p l r        -> (liftM2 $ ESet p) (g l) (g r)
+                   ESend p d         -> (liftM $ ESend p) (g d)
+                   EBinOp p op l r   -> (liftM2 $ EBinOp p op) (g l) (g r)
+                   EUnOp p op v      -> (liftM $ EUnOp p op) (g v)
+                   EFork p v t c b   -> (liftM2 $ EFork p v t) (g c) (g b)
+                   EWith p v t c b d -> (liftM3 $ EWith p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EAny p v t c b d  -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
+                   EPHolder p        -> return $ EPHolder p
+                   ETyped p v t      -> (liftM $ \v' -> ETyped p v' t) (g v)
 
 exprFoldCtx :: (ECtx -> ExprNode b -> b) -> ECtx -> Expr -> b
 exprFoldCtx f ctx e = runIdentity $ exprFoldCtxM (\ctx' e' -> return $ f ctx' e') ctx e
@@ -94,11 +124,11 @@ exprFoldM f e = exprFoldCtxM (\_ e' -> f e') undefined e
 exprFold :: (ExprNode b -> b) -> Expr -> b
 exprFold f e = runIdentity $ exprFoldM (return . f) e
 
-exprTraverseCtxWithM :: (Monad m) => (ECtx -> ExprNode a -> a) -> (ECtx -> ExprNode a -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseCtxWithM g f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; return $ g ctx e'}) ctx e; return ()}
+exprTraverseCtxWithM :: (Monad m) => (ECtx -> ExprNode a -> m a) -> (ECtx -> ExprNode a -> m ()) -> ECtx -> Expr -> m ()
+exprTraverseCtxWithM g f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; g ctx e'}) ctx e; return ()}
 
 exprTraverseCtxM :: (Monad m) => (ECtx -> ENode -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseCtxM = exprTraverseCtxWithM (\_ x -> E x)
+exprTraverseCtxM = exprTraverseCtxWithM (\_ x -> return $ E x)
 
 exprTraverseM :: (Monad m) => (ENode -> m ()) -> Expr -> m ()
 exprTraverseM f = exprTraverseCtxM (\_ x -> f x) undefined
