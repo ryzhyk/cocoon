@@ -17,8 +17,9 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "_"]
-reservedNames = ["and",
+reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
+reservedNames = ["_",
+                 "and",
                  "any",
                  "assume",
                  "bit",
@@ -67,7 +68,7 @@ ccnDef = emptyDef { T.commentStart      = "/*"
                   , T.identLetter       = alphaNum <|> char '_'
                   , T.reservedOpNames   = reservedOpNames
                   , T.reservedNames     = reservedNames
-                  , T.opLetter          = oneOf "_!?:%*-+./=|<>"
+                  , T.opLetter          = oneOf "!?:%*-+./=|<>"
                   , T.caseSensitive     = True}
 
 ccnLCDef = ccnDef{T.identStart = lower <|> char '_'}
@@ -346,7 +347,7 @@ eany    = eAny <$ reserved "any"
                <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                <*> expr
                <*> (optionMaybe $ reserved "default" *> expr)
-epholder = ePHolder <$ reservedOp "_"
+epholder = ePHolder <$ reserved "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
 sradval =  ((try $ string "'b") *> parseBin)
