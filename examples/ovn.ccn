@@ -79,10 +79,10 @@ typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
 typedef uuid_t = bit<128>
 typedef vlan_id_t = bit<12>
 
-table local_network( name: string
+table LocalNetwork( name: string
                    , primary key (name))
 
-table logical_switch( uuid : uuid_t
+table LogicalSwitch( uuid : uuid_t
                     , name : string
                     , primary key (uuid))
 
@@ -90,7 +90,7 @@ typedef port_type_t = PortRegular
                     | PortRouter   { rport: port_id_t}
                     | PortLocalnet { network_name: string}
 //                    | PortVTEP     { vtep_physical_switch: string
-//                                   , vtep_logical_switch: uuid_t}
+//                                   , vtep_LogicalSwitch: uuid_t}
 
 function isRouterPort(t: port_type_t): bool = 
     match (t) {
@@ -113,22 +113,22 @@ function isLocalnetPort(t: port_type_t): bool =
 typedef nested_port_t = NestedPortNone
                       | NestedPort {parent: string, tag: vlan_id_t}
 
-table logical_port( name      : port_id_t
+table LogicalPort( name      : port_id_t
                   , switch_id : uuid_t
                   , type      : port_type_t
                   , nested    : nested_port_t
                   , enabled   : bool
                   , primary key (name)
-                  , foreign key (switch_id)                 references logical_switch(uuid)
-                  , foreign key (type.rport)                references logical_router_port(name)
-                  , foreign key (type.network_name)         references local_network(name)
+                  , foreign key (switch_id)                 references LogicalSwitch(uuid)
+                  , foreign key (type.rport)                references LogicalRouterPort(name)
+                  , foreign key (type.network_name)         references LocalNetwork(name)
 //                  , foreign key (type.vtep_physical_switch) references physical_network(name)
-//                  , foreign key (type.vtep_logical_switch)  references logical_switch(uuid)
-                  , foreign key (nested.parent)             references logical_port(name)
+//                  , foreign key (type.vtep_LogicalSwitch)  references LogicalSwitch(uuid)
+                  , foreign key (nested.parent)             references LogicalPort(name)
                   , unique (nested.parsw, nested.tag) /* Siblings must have different tags */
                   , check (is_nested(nested) => not is_router(type)))
 
-view parent_port( child_name    : port_id_t
+view ParentPort( child_name    : port_id_t
                 , child_switch  : uuid_t
                 , child_type    : port_type_t
                 , parent_name   : port_id_t
@@ -139,34 +139,36 @@ view parent_port( child_name    : port_id_t
                 , check child_switch == parent_switch
                 , check parent_nested == NestedPortNone{})
 
-parent_port(cn: port_id_t, cs: uuid_t, ct, pn, ps, pt, pnest) :- logical_port(cn, _, ct, NestedPort{pn, _}, _),
-                                                                 logical_port(pn, _, pt, pnest, _)
+ParentPort(cn: port_id_t, cs: uuid_t, ct, pn, ps, pt, pnest) :- LogicalPort(cn, _, ct, NestedPort{pn, _}, _),
+                                                                LogicalPort(pn, _, pt, pnest, _)
    
-view trunk_port(port: port_id_t)
-trunk_port(p) :- logical_port(_, _, _, NestedPort{p, _}, _)
+view TrunkPort(port: port_id_t)
+TrunkPort(p) :- LogicalPort(_, _, _, NestedPort{p, _}, _)
 
 // If a given logical switch has multiple router ports, the Logical_Router_Port rows that 
 // they reference must be all on the same Logical_Router (for different subnets).
-view logical_switch_router ( switch_id : uuid_t
+/*view LogicalSwitchRouter ( switch_id : uuid_t
                            , router_id : uuid_t
                            , unique (switch_id))
-logical_switch_router(sw, r) :- logical_port(_, sw, PortRouter{rp}, _, _), logical_router_port(rp, r)
+LogicalSwitchRouter(sw, r) :- LogicalPort(_, sw, PortRouter{rp}, _, _), LogicalRouterPort(rp, r)*/
 
-//assume logical_port(p1, sw, PortRouter{rport1}, _, _) and logical_port(p2, sw, PortRouter{rport2}, _, _) and
-//       logical_router_port(rport1, lrouter1) and logical_router_port(rport2, lrouter2) 
+//assume LogicalPort(p1, sw, PortRouter{rport1}, _, _) and LogicalPort(p2, sw, PortRouter{rport2}, _, _) and
+//       LogicalRouterPort(rport1, lrouter1) and LogicalRouterPort(rport2, lrouter2) 
 //       => lrouter1 == lrouter2
 
 // router port cannot be connected to both switch and other router
-assume logical_port(p: port_id_t, _, PortRouter{rport}, _, _) => not logical_router_port_peered(rport)
+assume LogicalPort(p, _, PortRouter{rport}, _, _) and LogicalRouterPort(rport, _, _, _, _, ppeer) => ppeer == PeerSwitch
+
+//error :- LogicalPort(p: port_id_t, _, PortRouter{rport}, _, _), logical_router_port_peered(rport)
 
 // Disallow >1 layers of nesting
-//assume logical_port(_, sw1, _, NestedPort{parsw, _}, _) and logical_port(_, sw2, _, nested2, _) 
+//assume LogicalPort(_, sw1, _, NestedPort{parsw, _}, _) and LogicalPort(_, sw2, _, nested2, _) 
 //       => sw1 == sw2 and nested2 == NestedPortNone
 
 // This table is populated by ovn-northd, rather than by the CMS plugin as is most of this database
-table logical_port_up( port: port_id_t
+table LogicalPort_up( port: port_id_t
                      , up  : bool
-                     , foreign key (port) references logical_port(name)
+                     , foreign key (port) references LogicalPort(name)
                      , unique (port))
 
 // Addresses owned by the logical port.  Each element in the set must take one 
@@ -196,44 +198,44 @@ typedef port_addr_t = PortAddressUnknown
                     | PortAddressMACIP4 {mac: mac_addr_t, ip: ip4_addr_t}
                     | PortAddressMACIP6 {mac: mac_addr_t, ip: ip6_addr_t}
 
-table logical_port_address( port: port_id_t
+table LogicalPort_address( port: port_id_t
                           , addr: port_addr_t
-                          , foreign key (port) references logical_port(name))
+                          , foreign key (port) references LogicalPort(name))
 
-view logical_port_mac( port: port_id_t, mac: mac_addr_t)
-logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP4{mac, _})
-logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMACIP6{mac, _})
-logical_port_mac(p, mac) :- logical_port_address(p, PortAddressMAC{mac})
+view LogicalPort_mac( port: port_id_t, mac: mac_addr_t)
+LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP4{mac, _})
+LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP6{mac, _})
+LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMAC{mac})
 
 // Eth and mac addresses must be unique with logical switch
-view logical_switch_mac( switch_id : uuid_t
+view LogicalSwitch_mac( switch_id : uuid_t
                        , port      : port_id_t
                        , mac       : mac_addr_t
                        , unique(switch_id, mac))
-logical_switch_mac(sw, port, mac) :- logical_port(p, sw, _, _, _), logical_port_mac(p, mac)
+LogicalSwitch_mac(sw, port, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
 
-view logical_switch_accepts_unknown( switch_id : uuid_t
+view LogicalSwitch_accepts_unknown( switch_id : uuid_t
                                    , port      : port_id_t)
-logical_switch_accepts_unknown(sw, p) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressUnknown)
+LogicalSwitch_accepts_unknown(sw, p) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressUnknown)
 
-//assume logical_port(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
-//       logical_port_mac(p1, mac) and logical_port_mac(p2, mac) =>
+//assume LogicalPort(p1, sw, _, _, _) and LogicalPort(p2, sw, _ ,_ ,_) and
+//       LogicalPort_mac(p1, mac) and LogicalPort_mac(p2, mac) =>
 //       p1 == p2
 
-view logical_switch_ip4_addr( switch_id : uuid_t
+view LogicalSwitch_ip4_addr( switch_id : uuid_t
                             , mac       : mac_addr_t
                             , ip        : ip4_addr_t
                             , unique(switch_id, ip))
-logical_switch_ip4_addr(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP4{mac,ip})
+LogicalSwitch_ip4_addr(sw, mac, ip) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressMACIP4{mac,ip})
 
-view logical_switch_ip6_addr( switch_id : uuid_t
+view LogicalSwitch_ip6_addr( switch_id : uuid_t
                             , mac       : mac_addr_t
                             , ip        : ip6_addr_t
                             , unique(switch_id, ip))
-logical_switch_ip6_addr(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_port_address(p, PortAddressMACIP6{mac,ip})
+LogicalSwitch_ip6_addr(sw, mac, ip) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressMACIP6{mac,ip})
 
-//assume logical_port_address(p1, sw, _, _, _) and logical_port(p2, sw, _ ,_ ,_) and
-//       logical_port_address(p1, PortAddressMACIP{mac1, ip}) and logical_port_address(p2, PortAddressMACIP{mac2, ip}) =>
+//assume LogicalPort_address(p1, sw, _, _, _) and LogicalPort(p2, sw, _ ,_ ,_) and
+//       LogicalPort_address(p1, PortAddressMACIP{mac1, ip}) and LogicalPort_address(p2, PortAddressMACIP{mac2, ip}) =>
 //       p1 == p2 and mac1 == mac2
 
 // port_security: set of strings
@@ -242,14 +244,14 @@ logical_switch_ip6_addr(sw, mac, ip) :- logical_port(p, sw, _, _, _), logical_po
 // packets.  If this column is empty, all addresses are permitted.  
 // Logical ports are always allowed to receive packets addressed to 
 // multicast and broadcast addresses.
-table logical_port_security( port: port_id_t
+table LogicalPortSecurity( port: port_id_t
                            , mac : mac_addr_t
-                           , foreign key (port) references logical_port(name))
+                           , foreign key (port) references LogicalPort(name))
 
-view logical_port_secured(port: port_id_t)
-logical_port_secured(p) :- logical_port_security(p, _)
+view LogicalPortSecured(port: port_id_t)
+LogicalPortSecured(p) :- LogicalPortSecurity(p, _)
 
-table logical_router( uuid: uuid_t   
+table LogicalRouter( uuid: uuid_t   
                     , name: port_id_t
                     , default_gw: ip_addr_t
                     , primary key (uuid))
@@ -263,22 +265,37 @@ typedef ip6_netmask_t = IP6NetMask {ip: ip6_addr_t, mask: bit<10>}
 typedef router_port_peer_t = PeerSwitch
                            | PeerRouter {peer_port: port_id_t}
 
-table logical_router_port( name    : port_id_t
+table LogicalRouterPort( name    : port_id_t
                          , router  : uuid_t
                          , network : netmask_t
                          , mac     : mac_addr_t
                          , enabled : bool
                          , peer    : router_port_peer_t
                          , primary key (name)
-                         , foreign key (router) references logical_router(uuid)
-                         , foreign key (peer.peer_port) references logical_router_port(name))
+                         , foreign key (router) references LogicalRouter(uuid)
+                         , foreign key (peer.peer_port) references LogicalRouterPort(name))
 
-view logical_router_port_peered(port: port_id_t)
-logical_router_port_peered(p) :- logical_router_port(p, _, _, _, _, PeerRouter{_})
+/*view logical_router_port_peered(port: port_id_t)
+logical_router_port_peered(p) :- LogicalRouterPort(p, _, _, _, _, PeerRouter{_}) */
 
-assume logical_router_port(p, _, _, _, _, PeerRouter{peer}) => logical_router_port_peered(peer)
-assume logical_router_port(p, _, _, _, _, PeerRouter{peer}) and logical_router_port_peered(peer, _, _, _, _, PeerRouter{ppeer}) 
-       => ppeer == p
+//assume LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}) and LogicalRouterPort(peer, _, _, _, _, PeerRouter{_})
+
+/*assume p: port_id_t 
+with (lrp in LogicalRouterPort | lrp.name == p) {
+    match lrp.peer {
+        PeerRouter{peer} -> with (peered in logical_router_port_peered | port == peer) true 
+                            default false,
+        _                -> true
+    }
+} default true */
+
+//error :- LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}), logical_router_port_peered(peer)
+
+assume LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}) and LogicalRouterPort(peer, _, _, _, _, ppeer) 
+       => ppeer.peer_port == p
+
+//error :- LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}), logical_router_port_peered(peer, _, _, _, _, PeerRouter{ppeer}), ppeer != p
+
 
 typedef acl_direction_t = DirToLPort
                         | DirFromLPort
@@ -288,34 +305,34 @@ typedef acl_action_t = ActionAllow
                      | ActionDrop
                      | ActionReject // Not implemented--currently treated as drop
 
-table acl_from ( switch_id : uuid_t
+table ACLFrom ( switch_id : uuid_t
                , port      : port_id_t
                , packet    : Packet
                , action    : acl_action_t 
-               , foreign key (switch_id) references logical_switch(uuid)
-               , foreign key (port)      references logical_port(name)
+               , foreign key (switch_id) references LogicalSwitch(uuid)
+               , foreign key (port)      references LogicalPort(name)
                , unique (switch_id, port, direction, packet))
 
-table acl_to   ( switch_id : uuid_t
+table ACLTo   ( switch_id : uuid_t
                , port      : port_id_t
                , from      : port_id_t
                , packet    : Packet
                , action    : acl_action_t 
-               , foreign key (switch_id) references logical_switch(uuid)
-               , foreign key (port)      references logical_port(name)
-               , foreign key (from)      references logical_port(name)
+               , foreign key (switch_id) references LogicalSwitch(uuid)
+               , foreign key (port)      references LogicalPort(name)
+               , foreign key (from)      references LogicalPort(name)
                , unique (switch_id, port, direction, packet))
 
 
 
-function sourcePort(port: logical_port, p:Packet): logical_port =
+function sourcePort(port: LogicalPort, p:Packet): LogicalPort =
     // trunk port?
-    if trunk_port(port.name) {
+    with (tport in TrunkPort | tport.name == port.name) {
         if p.vlan == VLANNone drop;
-        var sport = with (x in logical_port | x.nested == NestedPort{name, p.vlan.vid}) x;
+        var sport = with (x in LogicalPort | x.nested == NestedPort{name, p.vlan.vid}) x;
         p.vlan = VLANNone;
         sport
-    } else {
+    } default {
         // drop packets with VLAN tags or multicast Ethernet source addresses
         if p.vlan != VLANNone drop;
         port
@@ -336,31 +353,31 @@ function ct_track_to(s: ct_state_t, p: Packet): ct_flow_state_t
 function ct_commit_from(s: ct_state_t, p: Packet): ()
 function ct_commit_to(s: ct_state_t, p: Packet): ()
 
-state table ct_state ( port: port_id_t
+state table CTState ( port: port_id_t
                      , ctst: ct_state_t
                      , primary key (port))
 
-function iLogicalPort(port: logical_port): bool =
+function iLogicalPort(port: LogicalPort): bool =
     (isRegularPort(x.type) or isLocalnetPort(x.type)) and x.nested==NestedPortNone
     
-role LogicalPortIn[port in logical_port | iLogicalPort(port)] = 
+role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] = 
     // drop all packets if port is disabled
     if not port.enabled drop;
     // drop multicast packets
     if not ethUnicastAddr(pkt.src) drop;
     var sport = sourcePort(port);
     // port security enabled? - check valid eth.src address
-    if logical_port_secured.find(sport.name) 
-        if not logical_port_security.find(sport, pkt.src) drop;
+    if LogicalPortSecured.find(sport.name) 
+        if not LogicalPortSecurity.find(sport, pkt.src) drop;
 
     // send to connection tracker
-    //let cts = ct_track_from(ct_state.where(_.port==sport).single().ctst, pkt);
+    //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
     var cts: ct_flow_state_t;
-    with (x in ct_state | x.port==sport) {
+    with (x in CTState | x.port==sport) {
         (x.ctst, cts) = ct_track_from(x.ctst, pkt)
     } default {
         (var st, cts) = ct_track_from(ct_state_new(), pkt);
-        ct_state.insert(sport, st)
+        CTState.insert(sport, st)
     };
 
     // invalid - drop
@@ -368,58 +385,58 @@ role LogicalPortIn[port in logical_port | iLogicalPort(port)] =
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
-        var action = with (r in acl_from | r.switch_id == port.sw and r.port==sport and r.packet==pkt) x.action
+        var action = with (r in ACLFrom | r.switch_id == port.sw and r.port==sport and r.packet==pkt) x.action
                      default ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (x in ct_state | x.port == sport) x.ctst = ct_commit_from(x.ctst, pkt),
+            ActionAllowRelated -> with (x in CTState | x.port == sport) x.ctst = ct_commit_from(x.ctst, pkt),
             _                  -> drop
         }
     }
     if ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst) {
         // multicast | broadcast -- send to all ports
-        fork (dport in logical_port | dport.switch_id == port.sw and dport.name != port.name)
+        fork (dport in LogicalPort | dport.switch_id == port.sw and dport.name != port.name)
             deliver(dport, sport)
     } else if knownAddr(port.sw, pkt.dst) {
         // unicast to known destination
-        var dport = with (s in logical_switch_mac | s.switch_id==port.sw and s.mac == pkt.dst) x.port;
+        var dport = with (s in LogicalSwitch_mac | s.switch_id==port.sw and s.mac == pkt.dst) x.port;
         deliver(dport, sport)
     } else {
         // otherwise, multicast to all ports that accept packets for unknown destinations
-        fork (dport in logical_port | logical_switch_accepts_unknown.find(port.sw, dport.name))
+        fork (dport in LogicalPort | LogicalSwitch_accepts_unknown.find(port.sw, dport.name))
             deliver(dport, sport)
     }
 
-procedure deliver(port: logical_port, fromport: port_id_t): () =
-    (var sw, var nested, var enabled) = with (p in logical_port | p.port == port) (p.switch_id, p.nested, p.enabled);
+procedure deliver(port: LogicalPort, fromport: port_id_t): () =
+    (var sw, var nested, var enabled) = with (p in LogicalPort | p.port == port) (p.switch_id, p.nested, p.enabled);
     // send to connection tracker
     var cts : ct_flow_state_t;
-    with (s in ct_state | s.port == port.name) {
+    with (s in CTState | s.port == port.name) {
         (s.ctst, cts) = ct_track_to(s.ctst, pkt)
     } default {
         (var st, cts) = ct_track_to(ct_state_new(), pkt);
-        ct_state.insert(sport, st)
+        CTState.insert(sport, st)
     };
     // invalid - drop
     if cts == CTInvalid drop;
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
-        var action = with (r in acl_to | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) 
+        var action = with (r in ACLTo | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) 
                           r.action
                      default 
                           ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (s in ct_state | s.port == port.name) s.ctst = ct_commit_to(s.ctst, pkt),
+            ActionAllowRelated -> with (s in CTState | s.port == port.name) s.ctst = ct_commit_to(s.ctst, pkt),
             _                  -> drop
         }
     }
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address
-        with (p in logical_port_secured | p.port == port.name) {
-            with (x in logical_port_security | x.port == port.name and x.mac == pkt.dst) ()
+        with (p in LogicalPortSecured | p.port == port.name) {
+            with (x in LogicalPortSecurity | x.port == port.name and x.mac == pkt.dst) ()
             default drop
         } default ()
     };
@@ -432,15 +449,15 @@ procedure deliver(port: logical_port, fromport: port_id_t): () =
         }
     }
 
-procedure lportSendOut(port: logical_port): () =
+procedure lportSendOut(port: LogicalPort): () =
     if iLogicalPort(port) {
         send LogicalPortOut[port]
     } else {
-        var rport = with (lp in logical_port | lp.port==port) lp.type.rport;
+        var rport = with (lp in LogicalPort | lp.port==port) lp.type.rport;
         send RouterPortIn[rport]
     }
 
-role LogicalPortOut[port in port_id_t | iLogicalPort(port)] = drop
+role LogicalPortOut[port in LogicalPort | iLogicalPort(port)] = drop
 
 
 /*
@@ -771,22 +788,22 @@ router port, with action output;.
 */
 /*
 source role LogicalPortIn[port: string where iLogicalPort(port) and pkt.srcAddr != bcast_addr] = 
-    let (enabled, sw) = logical_port
+    let (enabled, sw) = LogicalPort
                       . where(_.p == port)
                       . map((_.sw, _.enabled))
                       . single();
-    //let (enabled, sw) = logical_port(port, sw, _, _, enabled).single();
+    //let (enabled, sw) = LogicalPort(port, sw, _, _, enabled).single();
     if not enabled drop;
     let sport: string = sourcePort(port);
     // port security enabled? - check valid eth.src address
-    if not logical_port_security(sport, pkt.src) exit;
+    if not LogicalPortSecurity(sport, pkt.src) exit;
 
     match (action) {
         ActionAllow:        skip,
-        ActionAllowRelated: ct_commit_from(ct_state[sport], pkt),
+        ActionAllowRelated: ct_commit_from(CTState[sport], pkt),
         _:                  exit
     }
-    forall (dport in logical_port.where(_.sw == sw).map(_.dport))
+    forall (dport in LogicalPort.where(_.sw == sw).map(_.dport))
         deliver(dport, sport)
 
 function where1(relation() ports, port: string): relation =
@@ -796,24 +813,24 @@ function where1(relation() ports, port: string): relation =
 /*
 source role LogicalPortIn[port: string where iLogicalPort(port) and pkt.srcAddr != bcast_addr] = 
 
-    let sw, enabled | logical_port(port, sw, _, _, enabled);
-    let (enabled, sw) = logical_port
+    let sw, enabled | LogicalPort(port, sw, _, _, enabled);
+    let (enabled, sw) = LogicalPort
                       . where(_.p == port)
                       . map((_.sw, _.enabled))
                       . single()
                       . where((sw, enabled) -> enabled);
-    //let (enabled, sw) = logical_port(port, sw, _, _, enabled).single();
+    //let (enabled, sw) = LogicalPort(port, sw, _, _, enabled).single();
     if (not enabled) drop;
     let sport: string = sourcePort(port);
     // port security enabled? - check valid eth.src address
-    if not logical_port_security(sport, pkt.src) exit;
+    if not LogicalPortSecurity(sport, pkt.src) exit;
 
     match (action) {
         ActionAllow:        (),
-        ActionAllowRelated: ct_commit_from(ct_state[sport], pkt),
+        ActionAllowRelated: ct_commit_from(CTState[sport], pkt),
         _:                  drop
     }
-    fork dport in logical_port.where(_.sw == sw).map(_.dport)
+    fork dport in LogicalPort.where(_.sw == sw).map(_.dport)
         deliver(dport, sport)
 */
 

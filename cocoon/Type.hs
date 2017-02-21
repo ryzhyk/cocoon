@@ -91,6 +91,7 @@ exprType' _ _   (EWith _ _ _ _ b _)    = b
 exprType' _ _   (EAny  _ _ _ _ b _)    = b
 exprType' r ctx (EPHolder _)           = ctxExpectType r ctx
 exprType' _ _   (ETyped _ _ t)         = Just t
+exprType' _ _   (ERelPred _ _ _)       = Just tBool
 
 
 -- Unwrap typedef's down to actual type definition
@@ -184,11 +185,14 @@ typeEnumerate r t =
 
 -- Infer expected type from context
 ctxExpectType :: Refine -> ECtx -> Maybe Type
+ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
 ctxExpectType _ (CtxRole _)                        = Just tSink
 ctxExpectType _ (CtxFunc f)                        = Just $ funcType f
 ctxExpectType _ (CtxAssume _)                      = Just tBool
 ctxExpectType _ (CtxRelation _)                    = Nothing
-ctxExpectType _ (CtxRule _)                        = Nothing
+ctxExpectType _ (CtxRuleL rel _ i)                 = let args = relArgs rel in
+                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
+ctxExpectType _ (CtxRuleR _ _)                     = Just tBool
 ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing
@@ -257,4 +261,6 @@ ctxExpectType _ (CtxAnyCond _ _)                   = Just tBool
 ctxExpectType r (CtxAnyBody _ ctx)                 = ctxExpectType r ctx
 ctxExpectType r (CtxAnyDef _ ctx)                  = ctxExpectType r ctx
 ctxExpectType _ (CtxTyped (ETyped _ _ t) _)        = Just t
+ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r $ exprRel e in
+                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ ctx                                = error $ "ctxExpectType " ++ show ctx

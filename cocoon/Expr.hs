@@ -84,6 +84,7 @@ exprFoldCtxM' f ctx e@(EAny p v t c b d)  = f ctx =<< (liftM3 $ EAny p v t)
 exprFoldCtxM' f ctx   (EPHolder p)        = f ctx $ EPHolder p
 exprFoldCtxM' f ctx e@(ETyped p x t)      = do x' <- exprFoldCtxM f (CtxTyped e ctx) x
                                                f ctx $ ETyped p x' t
+exprFoldCtxM' f ctx e@(ERelPred p rel as) = f ctx =<< (liftM $ ERelPred p rel) (mapIdxM (\a i -> exprFoldCtxM f (CtxRelPred e ctx i) a) as)
 
 exprMap :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
 exprMap g e = case e of
@@ -114,6 +115,7 @@ exprMap g e = case e of
                    EAny p v t c b d  -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
                    EPHolder p        -> return $ EPHolder p
                    ETyped p v t      -> (liftM $ \v' -> ETyped p v' t) (g v)
+                   ERelPred p rel as -> (liftM $ ERelPred p rel) $ mapM g as
 
 exprFoldCtx :: (ECtx -> ExprNode b -> b) -> ECtx -> Expr -> b
 exprFoldCtx f ctx e = runIdentity $ exprFoldCtxM (\ctx' e' -> return $ f ctx' e') ctx e
@@ -168,6 +170,7 @@ exprCollectM f op e = exprFoldM g e
                                                       maybe x'' (x'' `op`) d
                                  EPHolder _        -> x'
                                  ETyped _ v _      -> x' `op` v
+                                 ERelPred _ _ as   -> foldl' op x' as
 
 
 exprCollect :: (ExprNode b -> b) -> (b -> b -> b) -> Expr -> b

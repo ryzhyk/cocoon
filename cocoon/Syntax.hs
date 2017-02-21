@@ -28,7 +28,7 @@ module Syntax( pktVar
              , enode
              , eVar, ePacket, eApply, eField, eLocation, eBool, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
-             , eWith, eAny, ePHolder, eTyped
+             , eWith, eAny, ePHolder, eTyped, eRelPred
              , ECtx(..)
              , ctxParent
              , conj
@@ -389,6 +389,7 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EAny      {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EPHolder  {exprPos :: Pos}
                 | ETyped    {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
+                | ERelPred  {exprPos :: Pos, exprRel :: String, exprArgs :: [e]}
 
 instance Eq e => Eq (ExprNode e) where
     (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
@@ -418,6 +419,7 @@ instance Eq e => Eq (ExprNode e) where
     (==) (EAny _ v1 t1 c1 b1 d1)  (EAny _ v2 t2 c2 b2 d2)    = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
     (==) (EPHolder _)             (EPHolder _)               = True
     (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
+    (==) (ERelPred _ r1 as1)      (ERelPred _ r2 as2)        = r1 == r2 && as1 == as2
     (==) _                        _                          = False
 
 instance WithPos (ExprNode e) where
@@ -463,6 +465,7 @@ instance PP e => PP (ExprNode e) where
                              $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
     pp (EPHolder _)        = pp "_"
     pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
+    pp (ERelPred _ rel as) = pp rel <> (parens $ hsep $ punctuate comma $ map pp as)
 
 instance PP e => Show (ExprNode e) where
     show = render . pp
@@ -514,6 +517,7 @@ eWith v t c b d     = E $ EWith     nopos v t c b d
 eAny v t c b d      = E $ EAny      nopos v t c b d
 ePHolder            = E $ EPHolder  nopos
 eTyped e t          = E $ ETyped    nopos e t
+eRelPred rel as     = E $ ERelPred  nopos rel as
 
 conj :: [Expr] -> Expr
 conj []     = eBool True
@@ -527,10 +531,12 @@ disj (e:es) = eBinOp Or e (disj es)
 
 data ECtx = CtxRefine
           | CtxRole      {ctxRole::Role}
+          | CtxRoleGuard {ctxRole::Role}
           | CtxFunc      {ctxFunc::Function}
           | CtxAssume    {ctxAssume::Assume}
           | CtxRelation  {ctxRel::Relation}
-          | CtxRule      {ctxRule::Rule}
+          | CtxRuleL     {ctxRel::Relation, ctxRule::Rule, ctxIdx::Int}
+          | CtxRuleR     {ctxRel::Relation, ctxRule::Rule}
           | CtxApply     {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
           | CtxField     {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxLocation  {ctxParExpr::ENode, ctxPar::ECtx}
@@ -562,12 +568,14 @@ data ECtx = CtxRefine
           | CtxAnyBody   {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxAnyDef    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxTyped     {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxRelPred   {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
           deriving(Show)
 
 ctxParent :: ECtx -> ECtx
-ctxParent (CtxRole _)     = CtxRefine     
-ctxParent (CtxFunc _)     = CtxRefine
-ctxParent (CtxAssume _)   = CtxRefine
-ctxParent (CtxRelation _) = CtxRefine
-ctxParent (CtxRule _)     = CtxRefine
-ctxParent ctx             = ctxPar ctx
+ctxParent (CtxRole _)      = CtxRefine     
+ctxParent (CtxFunc _)      = CtxRefine
+ctxParent (CtxAssume _)    = CtxRefine
+ctxParent (CtxRelation _)  = CtxRefine
+ctxParent (CtxRuleL _ _ _) = CtxRefine
+ctxParent (CtxRuleR _ _)   = CtxRefine
+ctxParent ctx              = ctxPar ctx

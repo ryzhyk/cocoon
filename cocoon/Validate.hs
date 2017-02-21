@@ -157,27 +157,20 @@ funcValidate r f@Function{..} = do
          Just def -> do exprValidate r (CtxFunc f) def
                         matchType r funcType (exprType r (CtxFunc f) def)
 
-
 relValidate :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate = error "relValidate is undefined"
 
 stateValidate :: (MonadError String me) => Refine -> Field -> me ()
-stateValidate = error "stateValidate is undefined"
+stateValidate r = typeValidate r . fieldType
 
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
-roleValidate = error "roleValidate is undefined"
-
-{-
-roleValidate r role@Role{..} = do
-    uniqNames (\k -> "Multiple definitions of key " ++ k) roleKeys
-    uniqNames (\v -> "Multiple definitions of local variable " ++ v) $ roleLocals role
-    uniqNames (\v -> "Multiple definitions of fork variable " ++ v) $ roleForkVars role
-    mapM_ (typeValidate r . fieldType) roleKeys
-    exprValidate r (CtxRole role) [] roleKeyRange
-    exprValidate r (CtxRole role) [] rolePktGuard
-    _ <- statValidate r (CtxRole role) [] [] roleBody
-    return ()
--}
+roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
+                                rel <- checkRelation rolePos r (CtxRole rl) roleTable
+                                assertR r (not $ relMutable rel) rolePos 
+                                        $ "Mutable relation " ++ (show $ name rel) ++ " cannot be used in role declaration"
+                                exprValidate r (CtxRoleGuard rl) roleCond
+                                exprValidate r (CtxRoleGuard rl) rolePktGuard
+                                exprValidate r (CtxRole rl) roleBody
 
 roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
 roleValidateFinal r Role{..} = do
@@ -304,13 +297,17 @@ exprValidate1 r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
                                              return ()
 exprValidate1 _ _   (EPHolder _)        = return ()
 exprValidate1 _ _   (ETyped _ _ _)      = return ()
+exprValidate1 r ctx (ERelPred p rel as) = do ctxCheckRelPred p r ctx
+                                             rel' <- checkRelation p r ctx rel
+                                             assertR r (length as == length (relArgs rel')) p
+                                                     $ "Number of arguments does not match relation declaration"
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
                                  $ "Variable " ++ v ++ " already defined in this scope"
 
 -- Traverse again with types.  This pass ensures that all sub-expressions
--- have well-defined types
+-- have well-defined types that match their context
 exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
 exprValidate2 r _   (EField p e f)      = case e of
                                                t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
@@ -378,12 +375,14 @@ ctxVars r ctx =
     case ctx of
          CtxRefine            -> (map name $ refineState r, [])
          CtxRole rl           -> (plvars, (roleKey rl) : prvars)
+         CtxRoleGuard rl      -> ([], (roleKey rl) : plvars ++ prvars)
          CtxFunc f            -> if funcPure f    
                                     then ([], map name $ funcArgs f)
                                     else (plvars, (map name $ funcArgs f) ++ prvars)
          CtxAssume a          -> ([], exprVars $ assExpr a)
          CtxRelation rel      -> ([], map name $ relArgs rel)
-         CtxRule rl           -> ([], nub $ concatMap exprVars $ ruleRHS rl)
+         CtxRuleL _ rl _      -> ([], nub $ concatMap exprVars $ ruleRHS rl)
+         CtxRuleR _ rl        -> ([], nub $ concatMap exprVars $ ruleRHS rl)
          CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
          CtxField _ _         -> (plvars, prvars)
          CtxLocation _ _      -> ([], plvars ++ prvars)
@@ -425,6 +424,7 @@ ctxVars r ctx =
                                     else ([], (exprFrkVar e) : (plvars ++ prvars))
          CtxAnyDef _ _        -> (plvars, prvars)
          CtxTyped _ _         -> (plvars, prvars)
+         CtxRelPred _ _ _     -> ([], plvars ++ prvars)
     where (plvars, prvars) = ctxVars r $ ctxParent ctx 
 
 
@@ -450,6 +450,9 @@ ctxRels r ctx =
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
+
+ctxCheckRelPred :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
+ctxCheckRelPred = error "ctxCheckRelPred is undefined"
 
 structArgs :: Type -> [Field]
 structArgs (TStruct _ cs) = nub $ concatMap consArgs cs

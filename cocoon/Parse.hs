@@ -106,6 +106,7 @@ stringLit    = T.stringLiteral lexer
 
 roleIdent = ucIdentifier
 consIdent = ucIdentifier
+relIdent  = ucIdentifier
 varIdent  = lcIdentifier
 funcIdent = lcIdentifier
 
@@ -189,19 +190,19 @@ proc = withPos $ Function nopos False <$  reserved "procedure"
 relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
                                    <|>
                                    (False <$ reserved "table")
-                        n <- identifier
+                        n <- relIdent
                         (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
                         return $ Relation nopos mutable n as cs Nothing
                  <|> do reserved "view" 
-                        n <- identifier
+                        n <- relIdent
                         (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
                         rs <- many1 $ withPos $ do 
-                                      try $ lookAhead $ identifier *> (parens $ commaSep expr) *> reservedOp ":-"
-                                      rn <- identifier
+                                      try $ lookAhead $ relIdent *> (parens $ commaSep expr) *> reservedOp ":-"
+                                      rn <- relIdent
                                       when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
                                       rargs <- parens $ commaSep expr
                                       reservedOp ":-"
-                                      rhs <- commaSep expr
+                                      rhs <- commaSep expr 
                                       return $ Rule nopos rargs rhs
                         return $ Relation nopos False n as cs $ Just rs
 
@@ -210,7 +211,7 @@ argOrConstraint =  (Right <$> constraint)
 
 constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep expr)))
                     <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep expr)) 
-                                          <*> (reserved "references" *> identifier) <*> (parens $ commaSep expr))
+                                          <*> (reserved "references" *> relIdent) <*> (parens $ commaSep expr))
                     <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep expr))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
@@ -220,7 +221,7 @@ role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b)
                <*> roleIdent 
                <*> (brackets $ (,,,)
                            <$> varIdent
-                           <*> (reserved "in" *> identifier)
+                           <*> (reserved "in" *> relIdent)
                            <*> (option (eBool True) (reservedOp "|" *> expr))
                            <*> (option (eBool True) (reservedOp "/" *> expr)))
                <*> (reservedOp "=" *> expr)
@@ -276,6 +277,7 @@ term  =  (withPos $ eTuple <$> (parens $ commaSep expr))
 term' = withPos $
          eapply
      <|> eloc
+     <|> erelpred
      <|> estruct
      <|> eint
      <|> ebool
@@ -299,6 +301,7 @@ eloc = eLocation <$ isloc <*> roleIdent <*> (brackets expr)
 ebool = eBool <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = ePacket <$ reserved "pkt"
 evar = eVar <$> varIdent
+
 ematch = eMatch <$ reserved "match" <*> parens expr
                <*> (braces $ (commaSep1 $ (,) <$> pattern <* reservedOp "->" <*> expr))
 pattern = withPos $ 
@@ -316,6 +319,14 @@ lhs = withPos $
 elhs = islhs *> lhs
     where islhs = try $ lookAhead $ lhs *> reservedOp "="
 
+erelpred = isrelpred *> (eRelPred <$> relIdent <*> (parens $ commaSep relarg))
+    where isrelpred = try $ lookAhead $ relIdent *> symbol "("
+relarg = withPos $ 
+          eTuple <$> (parens $ commaSep relarg)
+      <|> evar
+      <|> epholder
+      <|> eStruct <$> consIdent <*> (option [] $ braces $ commaSep relarg)
+
 --eint  = Int <$> (fromIntegral <$> decimal)
 eint  = lexeme eint'
 estring = eString <$> stringLit
@@ -331,19 +342,19 @@ eite    = eITE     <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserve
 evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
                    <*> (symbol "(" *> varIdent)
-                   <*> (reserved "in" *> identifier) 
+                   <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                    <*> expr
 ewith   = eWith    <$ reserved "with" 
                    <*> (symbol "(" *> varIdent)
-                   <*> (reserved "in" *> identifier) 
+                   <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                    <*> expr
                    <*> (optionMaybe $ reserved "default" *> expr)
 
 eany    = eAny <$ reserved "any" 
                <*> (symbol "(" *> varIdent)
-               <*> (reserved "in" *> identifier) 
+               <*> (reserved "in" *> relIdent) 
                <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                <*> expr
                <*> (optionMaybe $ reserved "default" *> expr)
