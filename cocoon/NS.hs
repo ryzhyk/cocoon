@@ -23,6 +23,8 @@ module NS(lookupType, checkType, getType,
           lookupNode, checkNode, getNode,
           lookupConstructor, checkConstructor, getConstructor,
           lookupRelation, checkRelation, getRelation,
+          ctxVars, ctxRels,
+          isLVar, isLRel,
           --lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
@@ -34,6 +36,9 @@ import Syntax
 import Name
 import Util
 import Pos
+import Relation
+import {-# SOURCE #-}Expr
+import {-# SOURCE #-}Type
 --import {-# SOURCE #-}Builtins
 
 packetTypeName = "Packet"
@@ -142,6 +147,96 @@ getRelation :: Refine -> String -> Relation
 getRelation = error "getRelation is undefined"
 
 
+-- All variables available in the scope: (l-vars, read-only vars)
+type MField = (String, Maybe Type)
+f2mf f = (name f, Just $ fieldType f)
+
+ctxVars :: Refine -> ECtx -> ([MField], [MField])
+ctxVars r ctx = 
+    case ctx of
+         CtxRefine            -> (map f2mf $ refineState r, [])
+         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
+         CtxRoleGuard rl      -> ([], (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : plvars ++ prvars)
+         CtxFunc f            -> if funcPure f    
+                                    then ([], map f2mf $ funcArgs f)
+                                    else (plvars, (map f2mf $ funcArgs f) ++ prvars)
+         CtxAssume a          -> ([], vartypes $ exprVars ctx $ assExpr a)
+         CtxRelKey rel        -> ([], map f2mf $ relArgs rel)
+         CtxRelForeign _ con  -> let ForeignKey _ _ fname _ = con 
+                                     frel = getRelation r fname in
+                                 ([], map f2mf $ relArgs frel)
+         CtxCheck rel         -> ([], map f2mf $ relArgs rel)
+         CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
+         CtxRuleR _ rl        -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
+         CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
+         CtxField _ _         -> (plvars, prvars)
+         CtxLocation _ _      -> ([], plvars ++ prvars)
+         CtxStruct _ _ _      -> ([], plvars ++ prvars)
+         CtxTuple _ _ _       -> ([], plvars ++ prvars)
+         CtxSlice  _ _        -> ([], plvars ++ prvars)
+         CtxMatchExpr _ _     -> ([], plvars ++ prvars)
+         CtxMatchPat _ _ _    -> ([], plvars ++ prvars)
+         CtxMatchVal e pctx i -> let patternVars = map (mapSnd $ ctxExpectType r) $ exprVarDecls ctx $ fst $ (exprCases e) !! i in
+                                 if isLExpr r pctx $ exprMatchExpr e
+                                    then (plvars ++ patternVars, prvars)
+                                    else (plvars, patternVars ++ prvars)
+         CtxSeq1 _ _          -> (plvars, prvars)
+         CtxSeq2 e pctx       -> let seq1vars = map (mapSnd $ ctxExpectType r) $ exprVarDecls (CtxSeq1 e pctx) $ exprLeft e
+                                 in (plvars ++ seq1vars, prvars)
+         CtxPar1 _ _          -> ([], plvars ++ prvars)
+         CtxPar2 _ _          -> ([], plvars ++ prvars)
+         CtxITEIf _ _         -> ([], plvars ++ prvars)
+         CtxITEThen _ _       -> (plvars, prvars)
+         CtxITEElse _ _       -> (plvars, prvars)
+         CtxSetL _ _          -> (plvars, prvars)
+         CtxSetR _ _          -> ([], plvars ++ prvars)
+         CtxSend _ _          -> ([], plvars ++ prvars)
+         CtxBinOpL _ _        -> ([], plvars ++ prvars)
+         CtxBinOpR _ _        -> ([], plvars ++ prvars)
+         CtxUnOp _ _          -> ([], plvars ++ prvars)
+         CtxForkCond e _      -> ([], (frkvar e) : (plvars ++ prvars))
+         CtxForkBody e pctx   -> if isLRel r pctx (exprTable e)
+                                    then ([frkvar e], plvars ++ prvars)
+                                    else ([], (frkvar e) : (plvars ++ prvars))
+         CtxWithCond e _      -> ([], (frkvar e) : (plvars ++ prvars))
+         CtxWithBody e pctx   -> if isLRel r pctx (exprTable e)
+                                    then ([frkvar e], plvars ++ prvars)
+                                    else ([], (frkvar e) : (plvars ++ prvars))
+         CtxWithDef _ _       -> (plvars, prvars)
+         CtxAnyCond e _       -> ([], (frkvar e) : (plvars ++ prvars))
+         CtxAnyBody e pctx    -> if isLRel r pctx (exprTable e)
+                                    then ([frkvar e], plvars ++ prvars)
+                                    else ([], (frkvar e) : (plvars ++ prvars))
+         CtxAnyDef _ _        -> (plvars, prvars)
+         CtxTyped _ _         -> (plvars, prvars)
+         CtxRelPred _ _ _     -> ([], plvars ++ prvars)
+    where (plvars, prvars) = ctxVars r $ ctxParent ctx 
+          frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r $ exprTable e)
+          vartypes :: [(String, ECtx)] -> [MField]
+          vartypes vs = map (\gr -> case filter (isJust . snd) $ map (mapSnd $ ctxExpectType r) gr of
+                                         []  -> (fst $ head gr, Nothing)
+                                         vs' -> head vs') 
+                            $ sortAndGroup fst vs
+
+-- Fork, with, any: relations become unavailable
+-- Fork, Par: all relations become read-only
+ctxRels :: Refine -> ECtx -> ([String], [String])
+ctxRels r ctx = 
+    case ctx of
+         CtxRefine         -> (\(rw,ro) -> (map name rw, map name ro)) $ partition relMutable $ refineRels r
+         CtxRelKey _       -> ([],[])
+         CtxRelForeign _ _ -> ([],[])
+         CtxCheck _        -> ([],[])
+         CtxPar1 _ _       -> ([], plrels ++ prrels)
+         CtxPar2 _ _       -> ([], plrels ++ prrels)
+         CtxForkCond _ _   -> ([], [])
+         CtxForkBody e _   -> ([], delete (exprTable e) $ plrels ++ prrels)
+         CtxWithCond _ _   -> ([], [])
+         CtxWithBody e _   -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         CtxAnyCond _ _    -> ([], [])
+         CtxAnyBody e _    -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         _                 -> (plrels, prrels)
+    where (plrels, prrels) = ctxRels r $ ctxParent ctx
 
 {-
 lookupBuiltin :: String -> Maybe Builtin

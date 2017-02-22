@@ -8,8 +8,10 @@ module Expr ( exprMap
             , exprTraverseM
             , exprFoldCtx
             , exprFoldCtxM
-            , exprCollect
+            , exprCollectCtxM
             , exprCollectM
+            , exprCollectCtx
+            , exprCollect
             , exprVars
             , exprVarDecls
             , exprFuncs
@@ -19,6 +21,9 @@ module Expr ( exprMap
             , exprIsDeterministic
             , exprSendsToRoles
             , exprSendsTo
+            , isLExpr
+            , isLVar
+            , isLRel
             --, exprScalars
             --, exprDeps
             --, exprSubst
@@ -26,6 +31,7 @@ module Expr ( exprMap
             ) where
 
 import Data.List
+import Data.Maybe
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
@@ -136,62 +142,68 @@ exprTraverseM :: (Monad m) => (ENode -> m ()) -> Expr -> m ()
 exprTraverseM f = exprTraverseCtxM (\_ x -> f x) undefined
 
 
-exprCollectM :: (Monad m) => (ExprNode b -> m b) -> (b -> b -> b) -> Expr -> m b
-exprCollectM f op e = exprFoldM g e
-    where g x = do x' <- f x
-                   return $ case x of
-                                 EVar _ _          -> x'
-                                 EPacket _         -> x'
-                                 EApply _ _ as     -> foldl' op x' as
-                                 EField _ s _      -> x' `op` s
-                                 ELocation _ _ a   -> x' `op` a
-                                 EBool _ _         -> x'
-                                 EInt _ _          -> x'
-                                 EString _ _       -> x'
-                                 EBit _ _ _        -> x'
-                                 EStruct _ _ fs    -> foldl' op x' fs
-                                 ETuple _ fs       -> foldl' op x' fs
-                                 ESlice _ v _ _    -> x' `op` v
-                                 EMatch _ m cs     -> foldl' (\a (p,v) -> a `op` p `op` v) (x' `op` m) cs
-                                 EVarDecl _ _      -> x'    
-                                 ESeq _ l r        -> x' `op` l `op` r       
-                                 EPar _ l r        -> x' `op` l `op` r       
-                                 EITE _ i t me     -> let x'' = x' `op` i `op` t in 
-                                                      maybe x'' (x'' `op`) me
-                                 EDrop _           -> x'
-                                 ESet _ l r        -> x' `op` l `op` r
-                                 ESend _ d         -> x' `op` d        
-                                 EBinOp _ _ l r    -> x' `op` l `op` r  
-                                 EUnOp _ _ v       -> x' `op` v
-                                 EFork _ _ _ c b   -> x' `op` c `op` b
-                                 EWith _ _ _ c b d -> let x'' = x' `op` c `op` b in
-                                                      maybe x'' (x'' `op`) d
-                                 EAny _ _ _ c b d  -> let x'' = x' `op` c `op` b in
-                                                      maybe x'' (x'' `op`) d
-                                 EPHolder _        -> x'
-                                 ETyped _ v _      -> x' `op` v
-                                 ERelPred _ _ as   -> foldl' op x' as
+exprCollectCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> (b -> b -> b) -> ECtx -> Expr -> m b
+exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
+    where g ctx' x = do x' <- f ctx' x
+                        return $ case x of
+                                     EVar _ _          -> x'
+                                     EPacket _         -> x'
+                                     EApply _ _ as     -> foldl' op x' as
+                                     EField _ s _      -> x' `op` s
+                                     ELocation _ _ a   -> x' `op` a
+                                     EBool _ _         -> x'
+                                     EInt _ _          -> x'
+                                     EString _ _       -> x'
+                                     EBit _ _ _        -> x'
+                                     EStruct _ _ fs    -> foldl' op x' fs
+                                     ETuple _ fs       -> foldl' op x' fs
+                                     ESlice _ v _ _    -> x' `op` v
+                                     EMatch _ m cs     -> foldl' (\a (p,v) -> a `op` p `op` v) (x' `op` m) cs
+                                     EVarDecl _ _      -> x'    
+                                     ESeq _ l r        -> x' `op` l `op` r       
+                                     EPar _ l r        -> x' `op` l `op` r       
+                                     EITE _ i t me     -> let x'' = x' `op` i `op` t in 
+                                                          maybe x'' (x'' `op`) me
+                                     EDrop _           -> x'
+                                     ESet _ l r        -> x' `op` l `op` r
+                                     ESend _ d         -> x' `op` d        
+                                     EBinOp _ _ l r    -> x' `op` l `op` r  
+                                     EUnOp _ _ v       -> x' `op` v
+                                     EFork _ _ _ c b   -> x' `op` c `op` b
+                                     EWith _ _ _ c b d -> let x'' = x' `op` c `op` b in
+                                                          maybe x'' (x'' `op`) d
+                                     EAny _ _ _ c b d  -> let x'' = x' `op` c `op` b in
+                                                          maybe x'' (x'' `op`) d
+                                     EPHolder _        -> x'
+                                     ETyped _ v _      -> x' `op` v
+                                     ERelPred _ _ as   -> foldl' op x' as
 
+
+exprCollectM :: (Monad m) => (ExprNode b -> m b) -> (b -> b -> b) -> Expr -> m b
+exprCollectM f op e = exprCollectCtxM (\_ e' -> f e') op undefined e
+
+exprCollectCtx :: (ECtx -> ExprNode b -> b) -> (b -> b -> b) -> ECtx -> Expr -> b
+exprCollectCtx f op ctx e = runIdentity $ exprCollectCtxM (\ctx' x -> return $ f ctx' x) op ctx e
 
 exprCollect :: (ExprNode b -> b) -> (b -> b -> b) -> Expr -> b
 exprCollect f op e = runIdentity $ exprCollectM (return . f) op e
 
 -- enumerate all variables that occur in the expression
-exprVars :: Expr -> [String]
-exprVars e = nub $ exprCollect (\e' -> case e' of
-                                            EVar _ v -> [v]
-                                            _        -> [])
-                               (++) e
+exprVars :: ECtx -> Expr -> [(String, ECtx)]
+exprVars ctx e = exprCollectCtx (\ctx' e' -> case e' of
+                                                  EVar _ v -> [(v, ctx')]
+                                                  _        -> [])
+                                (++) ctx e
 
 -- Variables declared inside expression, visible in the code that follows the expression
-exprVarDecls :: Expr -> [String]
-exprVarDecls e = exprFold (\e' -> case e' of
-                                       EStruct _ _ fs -> concat fs
-                                       ETuple _ fs    -> concat fs
-                                       EVarDecl _ v   -> [v]
-                                       ESet _ l _     -> l
-                                       ETyped _ e'' _ -> e''
-                                       _              -> []) e
+exprVarDecls :: ECtx -> Expr -> [(String, ECtx)]
+exprVarDecls ctx e = exprFoldCtx (\ctx' e' -> case e' of
+                                                   EStruct _ _ fs -> concat fs
+                                                   ETuple _ fs    -> concat fs
+                                                   EVarDecl _ v   -> [(v, ctx')]
+                                                   ESet _ l _     -> l
+                                                   ETyped _ e'' _ -> e''
+                                                   _              -> []) ctx e
 
 -- Non-recursively enumerate all functions invoked by the expression
 exprFuncs :: Expr -> [String]
@@ -259,6 +271,27 @@ exprSendsTo' :: Expr -> [Expr]
 exprSendsTo' e = execState (exprTraverseM (\e' -> case e' of
                                                        ESend _ loc -> modify (loc:)
                                                        _           -> return ()) e) []
+
+
+isLExpr :: Refine -> ECtx -> Expr -> Bool
+isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
+
+isLExpr' :: Refine -> ECtx -> ExprNode Bool -> Bool
+isLExpr' r ctx (EVar _ v)       = isLVar r ctx v
+isLExpr' _ _   (EPacket _)      = True
+isLExpr' _ _   (EField _ e _)   = e
+isLExpr' _ _   (ETuple _ as)    = and as
+isLExpr' _ _   (EStruct _ _ as) = and as
+isLExpr' _ _   (EVarDecl _ _)   = True
+isLExpr' _ _   (EPHolder _)     = True
+isLExpr' _ _   (ETyped _ e _)   = e
+isLExpr' _ _   _                = False
+
+isLVar :: Refine -> ECtx -> String -> Bool
+isLVar r ctx v = isJust $ lookup v $ fst $ ctxVars r ctx
+
+isLRel :: Refine -> ECtx -> String -> Bool
+isLRel r ctx rel = elem rel $ fst $ ctxRels r ctx
 
 {-
 exprScalars :: Refine -> ECtx -> Expr -> [Expr]

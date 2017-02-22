@@ -40,7 +40,8 @@ exprTypeMaybe :: Refine -> ECtx -> Expr -> Maybe Type
 exprTypeMaybe r ctx e = exprFoldCtx (exprType' r) ctx e
 
 exprType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
-exprType' r ctx (EVar _ v)            = Just $ typ $ getVar r ctx v
+exprType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
+                                        fromJust $ lookup v $ lvs ++ rvs 
 exprType' _ _   (EPacket _)           = Just $ tUser packetTypeName
 exprType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
 exprType' r _   (EField _ e f)        = fmap (\e' -> let TStruct _ cs = typ' r e' in
@@ -189,7 +190,9 @@ ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
 ctxExpectType _ (CtxRole _)                        = Just tSink
 ctxExpectType _ (CtxFunc f)                        = Just $ funcType f
 ctxExpectType _ (CtxAssume _)                      = Just tBool
-ctxExpectType _ (CtxRelation _)                    = Nothing
+ctxExpectType _ (CtxRelKey _)                      = Nothing
+ctxExpectType _ (CtxRelForeign _ _)                = Nothing
+ctxExpectType _ (CtxCheck _)                       = Just tBool
 ctxExpectType _ (CtxRuleL rel _ i)                 = let args = relArgs rel in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxRuleR _ _)                     = Just tBool

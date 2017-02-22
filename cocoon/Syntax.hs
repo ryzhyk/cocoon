@@ -164,10 +164,11 @@ instance PP Node where
                   <+>
                   (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
 
-data Constraint = PrimaryKey {constrPos :: Pos, constrArgs :: [Expr]}
+data Constraint = PrimaryKey {constrPos :: Pos, constrFields :: [Expr]}
                 | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [Expr]}
                 | Unique     {constrPos :: Pos, constrFields :: [Expr]}
                 | Check      {constrPos :: Pos, constrCond :: Expr}
+                
 
 instance WithPos Constraint where
     pos = constrPos
@@ -181,6 +182,8 @@ instance PP Constraint where
     pp (Unique _ as)           = pp "unique" <+> (parens $ hsep $ punctuate comma $ map pp as)
     pp (Check _ e)             = pp "check" <+> pp e
    
+instance Show Constraint where
+    show = render . pp
 
 data Relation = Relation { relPos     :: Pos
                          , relMutable :: Bool
@@ -534,7 +537,9 @@ data ECtx = CtxRefine
           | CtxRoleGuard {ctxRole::Role}
           | CtxFunc      {ctxFunc::Function}
           | CtxAssume    {ctxAssume::Assume}
-          | CtxRelation  {ctxRel::Relation}
+          | CtxRelKey    {ctxRel::Relation}
+          | CtxRelForeign{ctxRel::Relation, ctxConstr::Constraint}
+          | CtxCheck     {ctxRel::Relation}
           | CtxRuleL     {ctxRel::Relation, ctxRule::Rule, ctxIdx::Int}
           | CtxRuleR     {ctxRel::Relation, ctxRule::Rule}
           | CtxApply     {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
@@ -572,10 +577,13 @@ data ECtx = CtxRefine
           deriving(Show)
 
 ctxParent :: ECtx -> ECtx
-ctxParent (CtxRole _)      = CtxRefine     
-ctxParent (CtxFunc _)      = CtxRefine
-ctxParent (CtxAssume _)    = CtxRefine
-ctxParent (CtxRelation _)  = CtxRefine
-ctxParent (CtxRuleL _ _ _) = CtxRefine
-ctxParent (CtxRuleR _ _)   = CtxRefine
-ctxParent ctx              = ctxPar ctx
+ctxParent (CtxRole _)         = CtxRefine     
+ctxParent (CtxRoleGuard _)    = CtxRefine     
+ctxParent (CtxFunc _)         = CtxRefine
+ctxParent (CtxAssume _)       = CtxRefine
+ctxParent (CtxRelKey _)       = CtxRefine
+ctxParent (CtxRelForeign _ _) = CtxRefine
+ctxParent (CtxCheck _)        = CtxRefine
+ctxParent (CtxRuleL _ _ _)    = CtxRefine
+ctxParent (CtxRuleR _ _)      = CtxRefine
+ctxParent ctx                 = ctxPar ctx

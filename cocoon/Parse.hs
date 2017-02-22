@@ -209,10 +209,10 @@ relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state"
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
 
-constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep expr)))
-                    <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep expr)) 
-                                          <*> (reserved "references" *> relIdent) <*> (parens $ commaSep expr))
-                    <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep expr))
+constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "key" *> (parens $ commaSep fexpr)))
+                    <|> (ForeignKey nopos <$ reserved "foreign" <*> (reserved "key" *> (parens $ commaSep fexpr)) 
+                                          <*> (reserved "references" *> relIdent) <*> (parens $ commaSep fexpr))
+                    <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep fexpr))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
 
 
@@ -425,3 +425,11 @@ binary n fun  = Infix $ (\le re -> E $ EBinOp (fst $ pos le, snd $ pos re) fun l
 sbinary n fun = Infix $ (\l  r  -> E $ fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
 assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="
+
+
+fexpr =  buildExpressionParser fetable fterm
+    <?> "column or field name"
+
+fterm  =  withPos $ evar
+
+fetable = [[postf postField]]

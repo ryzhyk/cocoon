@@ -18,6 +18,7 @@ limitations under the License.
 module Validate (validate) where
 
 import Control.Monad.Except
+import Control.Monad.State
 import Data.Maybe
 import Data.List
 
@@ -122,6 +123,7 @@ validate1 r@Refine{..} = do
 --         Nothing -> return ()
 --         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
     mapM_ (relValidate r)    refineRels
+    mapM_ (relValidate2 r)   refineRels
     mapM_ (stateValidate r)  refineState
     mapM_ (funcValidate r)   refineFuncs
     mapM_ (roleValidate r)   refineRoles
@@ -157,8 +159,51 @@ funcValidate r f@Function{..} = do
          Just def -> do exprValidate r (CtxFunc f) def
                         matchType r funcType (exprType r (CtxFunc f) def)
 
+-- Relations are validated in two passes: the first pass validates
+-- fields; the seconds pass validates constraints and rules.  This 
+-- two-phase process is needed, as foreign key constraints refer to 
+-- fields of other relations
 relValidate :: (MonadError String me) => Refine -> Relation -> me ()
-relValidate = error "relValidate is undefined"
+relValidate r Relation{..} = do 
+    uniqNames (\a -> "Multiple definitions of column " ++ a) relArgs
+    mapM_ (typeValidate r . fieldType) relArgs
+
+relValidate2 :: (MonadError String me) => Refine -> Relation -> me ()
+relValidate2 r rel@Relation{..} = do 
+    mapM_ (constraintValidate r rel) relConstraints
+    maybe (return ()) (mapM_ (ruleValidate r rel)) relDef
+
+constraintValidate :: (MonadError String me) => Refine -> Relation -> Constraint ->  me ()
+constraintValidate r rel Check{..} = exprValidate r (CtxCheck rel) constrCond
+
+-- primary/foreign key/unique
+constraintValidate r rel constr = do
+    -- TODO: should all keys be different?
+    mapM_ (exprValidate r (CtxRelKey rel)) $ constrFields constr
+    case constr of 
+          ForeignKey{..} -> do frel <- checkRelation (pos constr) r CtxRefine constrForeign
+                               mapM_ (exprValidate r (CtxRelForeign rel constr)) constrFArgs
+                               assertR r (length constrFArgs == length constrFields) (pos constr)
+                                       $ "Number of foreign fields does not match the number of local fields"
+                               mapM_ (\(e1,e2) -> do let t1 = exprType r (CtxRelKey rel) e1
+                                                     let t2 = exprType r (CtxRelForeign rel constr) e2
+                                                     matchType r t1 t2) $ zip constrFields constrFArgs
+                               assertR r (relCheckKey frel constrFArgs) (pos constr)
+                                       $ "Foreign fields do not form a primary or unique key"
+          _              -> return () 
+
+relCheckKey :: Relation -> [Expr] -> Bool
+relCheckKey Relation{..} fs = isJust $ find check relConstraints
+    where check (Unique _ fs')     = fs' == fs
+          check (PrimaryKey _ fs') = fs' == fs
+          check _                  = False
+
+ruleValidate :: (MonadError String me) => Refine -> Relation -> Rule -> me ()
+ruleValidate r rel@Relation{..} rl@Rule{..} = do
+    assertR r (length ruleLHS == length relArgs) (pos rl)
+            $ "Number of arguments in the left-hand-side of the rule does not match the number of fields in relation " ++ name rel
+    mapIdxM_ (\e i -> exprValidate r (CtxRuleL rel rl i) e) ruleLHS
+    mapM_ (exprValidate r (CtxRuleR rel rl)) ruleRHS
 
 stateValidate :: (MonadError String me) => Refine -> Field -> me ()
 stateValidate r = typeValidate r . fieldType
@@ -167,7 +212,7 @@ roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
                                 rel <- checkRelation rolePos r (CtxRole rl) roleTable
                                 assertR r (not $ relMutable rel) rolePos 
-                                        $ "Mutable relation " ++ (show $ name rel) ++ " cannot be used in role declaration"
+                                        $ "Mutable relation " ++ name rel ++ " cannot be used in role declaration"
                                 exprValidate r (CtxRoleGuard rl) roleCond
                                 exprValidate r (CtxRoleGuard rl) rolePktGuard
                                 exprValidate r (CtxRole rl) roleBody
@@ -321,7 +366,7 @@ exprValidate2 r _   (ESlice p e h l)    = case e of
                                                _        -> errR r (pos e) $ "Expression is not a bit vector"
 exprValidate2 r _   (EMatch _ _ cs)     = let t = snd $ head cs in
                                           mapM_ (matchType r t . snd) $ tail cs
-                                          -- pattern structure matches 
+                                          -- TODO: pattern structure matches 
 exprValidate2 r _   (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
 exprValidate2 r _   (EBinOp _ op e1 e2) = case op of 
                                                Eq     -> m
@@ -349,104 +394,8 @@ exprValidate2 r ctx (EVarDecl p _)      = assertR r (isJust $ ctxExpectType r ct
 exprValidate2 r _   (EITE _ _ t me)     = matchType r t $ maybe (tTuple []) id me
 exprValidate2 _ _   _                   = return ()
 
-isLExpr :: Refine -> ECtx -> Expr -> Bool
-isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
-
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) "Expression is not an l-value"
-
-isLExpr' :: Refine -> ECtx -> ExprNode Bool -> Bool
-isLExpr' r ctx (EVar _ v)       = isLVar r ctx v
-isLExpr' _ _   (EPacket _)      = True
-isLExpr' _ _   (EField _ e _)   = e
-isLExpr' _ _   (ETuple _ as)    = and as
-isLExpr' _ _   (EStruct _ _ as) = and as
-isLExpr' _ _   (EVarDecl _ _)   = True
-isLExpr' _ _   (EPHolder _)     = True
-isLExpr' _ _   (ETyped _ e _)   = e
-isLExpr' _ _   _                = False
-
-isLVar :: Refine -> ECtx -> String -> Bool
-isLVar r ctx v = elem v $ fst $ ctxVars r ctx
-
--- All variables available in the scope (l-vars, w)
-ctxVars :: Refine -> ECtx -> ([String], [String])
-ctxVars r ctx = 
-    case ctx of
-         CtxRefine            -> (map name $ refineState r, [])
-         CtxRole rl           -> (plvars, (roleKey rl) : prvars)
-         CtxRoleGuard rl      -> ([], (roleKey rl) : plvars ++ prvars)
-         CtxFunc f            -> if funcPure f    
-                                    then ([], map name $ funcArgs f)
-                                    else (plvars, (map name $ funcArgs f) ++ prvars)
-         CtxAssume a          -> ([], exprVars $ assExpr a)
-         CtxRelation rel      -> ([], map name $ relArgs rel)
-         CtxRuleL _ rl _      -> ([], nub $ concatMap exprVars $ ruleRHS rl)
-         CtxRuleR _ rl        -> ([], nub $ concatMap exprVars $ ruleRHS rl)
-         CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
-         CtxField _ _         -> (plvars, prvars)
-         CtxLocation _ _      -> ([], plvars ++ prvars)
-         CtxStruct _ _ _      -> ([], plvars ++ prvars)
-         CtxTuple _ _ _       -> ([], plvars ++ prvars)
-         CtxSlice  _ _        -> ([], plvars ++ prvars)
-         CtxMatchExpr _ _     -> ([], plvars ++ prvars)
-         CtxMatchPat _ _ _    -> ([], plvars ++ prvars)
-         CtxMatchVal e pctx i -> let patternVars = exprVarDecls $ fst $ (exprCases e) !! i in
-                                 if isLExpr r pctx $ exprMatchExpr e
-                                    then (plvars ++ patternVars, prvars)
-                                    else (plvars, patternVars ++ prvars)
-         CtxSeq1 _ _          -> (plvars, prvars)
-         CtxSeq2 e _          -> let seq1vars = exprVarDecls $ exprLeft e
-                                 in (plvars ++ seq1vars, prvars)
-         CtxPar1 _ _          -> ([], plvars ++ prvars)
-         CtxPar2 _ _          -> ([], plvars ++ prvars)
-         CtxITEIf _ _         -> ([], plvars ++ prvars)
-         CtxITEThen _ _       -> (plvars, prvars)
-         CtxITEElse _ _       -> (plvars, prvars)
-         CtxSetL _ _          -> (plvars, prvars)
-         CtxSetR _ _          -> ([], plvars ++ prvars)
-         CtxSend _ _          -> ([], plvars ++ prvars)
-         CtxBinOpL _ _        -> ([], plvars ++ prvars)
-         CtxBinOpR _ _        -> ([], plvars ++ prvars)
-         CtxUnOp _ _          -> ([], plvars ++ prvars)
-         CtxForkCond e _      -> ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxForkBody e pctx   -> if isLRel r pctx (exprTable e)
-                                    then ([exprFrkVar e], plvars ++ prvars)
-                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxWithCond e _      -> ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxWithBody e pctx   -> if isLRel r pctx (exprTable e)
-                                    then ([exprFrkVar e], plvars ++ prvars)
-                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxWithDef _ _       -> (plvars, prvars)
-         CtxAnyCond e _       -> ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxAnyBody e pctx    -> if isLRel r pctx (exprTable e)
-                                    then ([exprFrkVar e], plvars ++ prvars)
-                                    else ([], (exprFrkVar e) : (plvars ++ prvars))
-         CtxAnyDef _ _        -> (plvars, prvars)
-         CtxTyped _ _         -> (plvars, prvars)
-         CtxRelPred _ _ _     -> ([], plvars ++ prvars)
-    where (plvars, prvars) = ctxVars r $ ctxParent ctx 
-
-
-isLRel :: Refine -> ECtx -> String -> Bool
-isLRel r ctx rel = elem rel $ fst $ ctxRels r ctx
-
--- Fork, with, any: relations become unavailable
--- Fork, Par: all relations become read-only
-ctxRels :: Refine -> ECtx -> ([String], [String])
-ctxRels r ctx = 
-    case ctx of
-         CtxRefine       -> (\(rw,ro) -> (map name rw, map name ro)) $ partition relMutable $ refineRels r
-         CtxPar1 _ _     -> ([], plrels ++ prrels)
-         CtxPar2 _ _     -> ([], plrels ++ prrels)
-         CtxForkCond _ _ -> ([], [])
-         CtxForkBody e _ -> ([], delete (exprTable e) $ plrels ++ prrels)
-         CtxWithCond _ _ -> ([], [])
-         CtxWithBody e _ -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
-         CtxAnyCond _ _  -> ([], [])
-         CtxAnyBody e _  -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
-         _               -> (plrels, prrels)
-    where (plrels, prrels) = ctxRels r $ ctxParent ctx
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
