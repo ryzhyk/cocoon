@@ -89,6 +89,8 @@ checkVar p r c n = case lookupVar r c n of
 getVar :: Refine -> ECtx -> String -> Field
 getVar r c n = fromJust $ lookupVar r c n
 
+isGlobalVar :: Refine -> String -> Bool
+isGlobalVar r v = isJust $ find ((==v) . name) $ refineState r
 
 {-
 lookupLocalVar :: Role -> String -> Maybe Field
@@ -157,9 +159,11 @@ ctxVars r ctx =
          CtxRefine            -> (map f2mf $ refineState r, [])
          CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
          CtxRoleGuard rl      -> ([], (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : plvars ++ prvars)
-         CtxFunc f            -> if funcPure f    
+         CtxFunc f _          -> let plvars' = filter (isGlobalVar r . fst) plvars 
+                                     prvars' = filter (isGlobalVar r . fst) prvars in
+                                 if funcPure f    
                                     then ([], map f2mf $ funcArgs f)
-                                    else (plvars, (map f2mf $ funcArgs f) ++ prvars)
+                                    else (plvars', (map f2mf $ funcArgs f) ++ prvars')
          CtxAssume a          -> ([], vartypes $ exprVars ctx $ assExpr a)
          CtxRelKey rel        -> ([], map f2mf $ relArgs rel)
          CtxRelForeign _ con  -> let ForeignKey _ _ fname _ = con 

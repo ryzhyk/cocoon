@@ -188,7 +188,7 @@ typeEnumerate r t =
 ctxExpectType :: Refine -> ECtx -> Maybe Type
 ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
 ctxExpectType _ (CtxRole _)                        = Just tSink
-ctxExpectType _ (CtxFunc f)                        = Just $ funcType f
+ctxExpectType _ (CtxFunc f _)                      = Just $ funcType f
 ctxExpectType _ (CtxAssume _)                      = Just tBool
 ctxExpectType _ (CtxRelKey _)                      = Nothing
 ctxExpectType _ (CtxRelForeign _ _)                = Nothing

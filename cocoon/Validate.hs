@@ -18,7 +18,6 @@ limitations under the License.
 module Validate (validate) where
 
 import Control.Monad.Except
-import Control.Monad.State
 import Data.Maybe
 import Data.List
 
@@ -153,11 +152,10 @@ funcValidate r f@Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
-    exprValidate r (CtxFunc f) funcDom
+    exprValidate r (CtxFunc f CtxRefine) funcDom
     case funcDef of
          Nothing  -> return ()
-         Just def -> do exprValidate r (CtxFunc f) def
-                        matchType r funcType (exprType r (CtxFunc f) def)
+         Just def -> exprValidate r (CtxFunc f CtxRefine) def
 
 -- Relations are validated in two passes: the first pass validates
 -- fields; the seconds pass validates constraints and rules.  This 
@@ -223,15 +221,7 @@ roleValidateFinal r Role{..} = do
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
-assumeValidate = error "assumeValidate is undefined"
-{-
-assumeValidate r a@Assume{..} = do
-    uniqNames (\v -> "Multiple definitions of variable " ++ v) assVars
-    mapM_ (typeValidate r . fieldType) assVars
-    exprValidate r (CtxAssume a) [] assExpr
-    assertR r (isBool r (CtxAssume a) assExpr) (pos assExpr) $ "Not a Boolean expression"
-    return ()
--}
+assumeValidate r a@Assume{..} = exprValidate r (CtxAssume a) assExpr
 
 nodeValidate :: (MonadError String me) => Refine -> Node -> me ()
 nodeValidate = error "nodeValidate is undefined"
@@ -304,9 +294,13 @@ exprValidate1 :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me
 exprValidate1 r ctx (EVar p v)          = do _ <- checkVar p r ctx v
                                              return ()
 exprValidate1 r ctx (EPacket p)         = ctxCheckSideEffects p r ctx
-exprValidate1 r _   (EApply p f as)     = do fun <- checkFunc p r f
+exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
                                                      $ "Number of arguments does not match function declaration"
+                                             when (not $ funcPure fun) $ do 
+                                                  ctxCheckSideEffects p r ctx
+                                                  -- make sure the procedure respects constraints on global variables and relations visibility
+                                                  exprTraverseCtxM (exprValidate1 r) (CtxFunc fun ctx) $ fromJust $ funcDef fun
 exprValidate1 _ _   (EField _ _ _)      = return ()
 exprValidate1 r _   (ELocation p rl _)  = do _ <- checkRole p r rl
                                              return ()
@@ -398,7 +392,28 @@ checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) "Expression is not an l-value"
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
-ctxCheckSideEffects = error "ctxCheckSideEffects is undefined"
+ctxCheckSideEffects p r ctx =
+    case ctx of 
+         CtxRole _         -> return ()
+         CtxFunc f _       -> when (funcPure f) complain
+         CtxApply _ _ _    -> complain
+         CtxField _ _      -> complain
+         CtxLocation _ _   -> complain
+         CtxStruct _ _ _   -> complain
+         CtxTuple _ _ _    -> complain
+         CtxSlice _ _      -> complain
+         CtxMatchExpr _ _  -> complain
+         CtxMatchPat _ _ _ -> complain
+         CtxITEIf _ _      -> complain
+         CtxSetL _ _       -> complain
+         CtxSend  _ _      -> complain
+         CtxForkCond _ _   -> complain
+         CtxWithCond _ _   -> complain
+         CtxAnyCond _ _    -> complain
+         CtxRelPred _ _ _  -> complain
+         CtxRefine         -> complain
+         _                 -> ctxCheckSideEffects p r (ctxParent ctx)
+    where complain = err p "Side effects are not allowed in this context"
 
 ctxCheckRelPred :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckRelPred = error "ctxCheckRelPred is undefined"

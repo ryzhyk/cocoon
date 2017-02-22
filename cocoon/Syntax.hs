@@ -535,7 +535,7 @@ disj (e:es) = eBinOp Or e (disj es)
 data ECtx = CtxRefine
           | CtxRole      {ctxRole::Role}
           | CtxRoleGuard {ctxRole::Role}
-          | CtxFunc      {ctxFunc::Function}
+          | CtxFunc      {ctxFunc::Function, ctxPar::ECtx}
           | CtxAssume    {ctxAssume::Assume}
           | CtxRelKey    {ctxRel::Relation}
           | CtxRelForeign{ctxRel::Relation, ctxConstr::Constraint}
@@ -579,7 +579,6 @@ data ECtx = CtxRefine
 ctxParent :: ECtx -> ECtx
 ctxParent (CtxRole _)         = CtxRefine     
 ctxParent (CtxRoleGuard _)    = CtxRefine     
-ctxParent (CtxFunc _)         = CtxRefine
 ctxParent (CtxAssume _)       = CtxRefine
 ctxParent (CtxRelKey _)       = CtxRefine
 ctxParent (CtxRelForeign _ _) = CtxRefine
