@@ -214,17 +214,17 @@ ctxRels r ctx =
          CtxRelKey _       -> ([],[])
          CtxRelForeign _ _ -> ([],[])
          CtxCheck _        -> ([],[])
-         CtxPar1 _ _       -> ([], plrels ++ prrels)
-         CtxPar2 _ _       -> ([], plrels ++ prrels)
+         CtxPar1 _ _       -> (plrels, prrels)
+         CtxPar2 _ _       -> (plrels, prrels)
          CtxForkCond _ _   -> ([], [])
-         CtxForkBody e _   -> ([], del (exprTable e) $ plrels ++ prrels)
+         CtxForkBody _ _   -> ({-del (exprTable e)-} plrels, {-del (exprTable e)-} prrels)
          CtxWithCond _ _   -> ([], [])
-         CtxWithBody e _   -> (del (exprTable e) plrels, del (exprTable e) prrels)
+         CtxWithBody _ _   -> ({-del (exprTable e)-} plrels, {-del (exprTable e)-} prrels)
          CtxAnyCond _ _    -> ([], [])
-         CtxAnyBody e _    -> (del (exprTable e) plrels, del (exprTable e) prrels)
+         CtxAnyBody _ _    -> ({-del (exprTable e)-} plrels, {-del (exprTable e)-} prrels)
          _                 -> (plrels, prrels)
     where (plrels, prrels) = ctxRels r $ ctxParent ctx
-          del t rels = filter ((/=t) . name) rels
+          --del t rels = filter ((/=t) . name) rels
 
 {-
 lookupBuiltin :: String -> Maybe Builtin

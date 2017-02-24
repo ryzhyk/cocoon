@@ -218,15 +218,15 @@ LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP6{mac, _})
 LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMAC{mac})
 
 // Eth and mac addresses must be unique with logical switch
-view LogicalSwitch_mac( switch_id : uuid_t
+view LogicalSwitchMAC( switch_id : uuid_t
                       , port      : port_id_t
                       , mac       : mac_addr_t
                       , unique(switch_id, mac))
-LogicalSwitch_mac(sw, p, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
+LogicalSwitchMAC(sw, p, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
 
-view LogicalSwitch_accepts_unknown( switch_id : uuid_t
-                                   , port      : port_id_t)
-LogicalSwitch_accepts_unknown(sw, p) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressUnknown)
+view LogicalSwitchAcceptsUnknown( switch_id : uuid_t
+                                  , port      : port_id_t)
+LogicalSwitchAcceptsUnknown(sw, p) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressUnknown)
 
 //assume LogicalPort(p1, sw, _, _, _) and LogicalPort(p2, sw, _ ,_ ,_) and
 //       LogicalPort_mac(p1, mac) and LogicalPort_mac(p2, mac) =>
@@ -389,7 +389,7 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     // send to connection tracker
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
     var cts: ct_flow_state_t;
-    with (x in CTState | x.port==sport) {
+    with (x in CTState | x.port==sport.name) {
         (x.ctst, cts) = ct_track_from(x.ctst, pkt)
     } default {
         (var st, cts) = ct_track_from(ct_state_new(), pkt)
@@ -401,27 +401,34 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     // established | committed -- pass through
     if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
-        var action = with (r in ACLFrom | r.switch_id == port.sw and r.port==sport and r.packet==pkt) {
+        var action = with (r in ACLFrom | r.switch_id == port.switch_id and r.port==sport.name and r.packet==pkt) {
                          r.action
                      } default ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (x in CTState | x.port == sport) (x.ctst = ct_commit_from(x.ctst, pkt)),
+            ActionAllowRelated -> with (x in CTState | x.port == sport.name) (x.ctst = ct_commit_from(x.ctst, pkt)),
             _                  -> drop
         }
     };
     if (ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst)) {
         // multicast | broadcast -- send to all ports
-        fork (dport in LogicalPort | dport.switch_id == port.sw and dport.name != port.name)
-            deliver(dport, sport)
-    } else if knownAddr(port.sw, pkt.dst) {
-        // unicast to known destination
-        var dport = with (s in LogicalSwitch_mac | s.switch_id==port.sw and s.mac == pkt.dst) x.port;
-        deliver(dport, sport)
+        fork (dport in LogicalPort | dport.switch_id == port.switch_id and dport.name != port.name)
+            deliver(dport, sport.name)
     } else {
-        // otherwise, multicast to all ports that accept packets for unknown destinations
-        fork (dport in LogicalPort | LogicalSwitch_accepts_unknown.find(port.sw, dport.name))
-            deliver(dport, sport)
+        // knownAddr(port.sw, pkt.dst) {
+        // unicast to known destination
+        with (dportmac in LogicalSwitchMAC | dportmac.switch_id==port.switch_id and dportmac.mac == pkt.dst) {
+            with (dport in LogicalPort | dport.name == dportmac.port) {
+                deliver(dport, sport.name)
+            }
+        } default {
+            // otherwise, multicast to all ports that accept packets for unknown destinations
+            fork (accepts in LogicalSwitchAcceptsUnknown | accepts.switch_id==port.switch_id) {
+                with (dport in LogicalPort | dport.name == accepts.port) {
+                    deliver(dport, sport.name)
+                }
+            }
+        }
     }
 
 procedure deliver(port: LogicalPort, fromport: port_id_t): sink =

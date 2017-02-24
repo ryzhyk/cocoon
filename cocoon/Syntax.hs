@@ -54,6 +54,7 @@ import Control.Monad.Except
 import Text.PrettyPrint
 import Data.Maybe
 import Data.List
+import Debug.Trace
 
 import Util
 import Pos
@@ -329,7 +330,7 @@ tUser     = TUser     nopos
 tSink     = TSink     nopos
 
 structGetField :: [Constructor] -> String -> Field
-structGetField cs f = fromJust $ find ((==f) . name) $ concatMap consArgs cs
+structGetField cs f = trace ("structGetField " ++ show f ++ " " ++ show cs) $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
 
 instance Eq Type where
     (==) (TLocation _)      (TLocation _)       = True

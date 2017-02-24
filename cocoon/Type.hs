@@ -26,6 +26,7 @@ module Type( WithType(..)
            {-, typeDomainSize, typeEnumerate-}) where
 
 import Data.Maybe
+import Data.List
 import Control.Monad.Except
 --import {-# SOURCE #-} Builtins
 
@@ -60,11 +61,13 @@ exprType' r ctx e = fmap ((flip atPos) (pos e)) $ exprType'' r ctx e
 
 exprType'' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
 exprType'' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
-                                        fromJust $ lookup v $ lvs ++ rvs 
+                                         fromJust $ lookup v $ lvs ++ rvs 
 exprType'' _ _   (EPacket _)           = Just $ tUser packetTypeName
 exprType'' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
-exprType'' r _   (EField _ e f)        = fmap (\e' -> let TStruct _ cs = typ' r e' in
-                                                     fieldType $ structGetField cs f) e
+exprType'' r _   (EField _ e f)        = case e of
+                                              Nothing -> Nothing
+                                              Just e' -> let TStruct _ cs = typ' r e' in
+                                                         fmap fieldType $ find ((==f) . name) $ concatMap consArgs cs
 exprType'' _ _   (ELocation _ _ _)     = Just tLocation
 exprType'' _ _   (EBool _ _)           = Just tBool
 exprType'' r ctx (EInt _ _)            = case ctxExpectType r ctx of
