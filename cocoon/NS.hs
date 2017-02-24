@@ -85,7 +85,7 @@ lookupVar r ctx n = fmap (\(Just t) -> Field nopos n t)
 
 checkVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Field
 checkVar p r c n = case lookupVar r c n of
-                        Nothing -> err p $ "Unknown variable: " ++ n
+                        Nothing -> err p $ "Unknown variable: " ++ n-- ++ ". All known variables: " ++ (show $ (\(ls,vs) -> (map fst ls, map fst vs)) $ ctxVars r c)
                         Just v  -> return v
 
 getVar :: Refine -> ECtx -> String -> Field
@@ -158,8 +158,8 @@ ctxVars r ctx =
          CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
          CtxField _ _         -> (plvars, prvars)
          CtxLocation _ _      -> ([], plvars ++ prvars)
-         CtxStruct _ _ _      -> ([], plvars ++ prvars)
-         CtxTuple _ _ _       -> ([], plvars ++ prvars)
+         CtxStruct _ _ _      -> (plvars, prvars)
+         CtxTuple _ _ _       -> (plvars, prvars)
          CtxSlice  _ _        -> ([], plvars ++ prvars)
          CtxMatchExpr _ _     -> ([], plvars ++ prvars)
          CtxMatchPat _ _ _    -> ([], plvars ++ prvars)
@@ -187,13 +187,13 @@ ctxVars r ctx =
                                     else ([], (frkvar e) : (plvars ++ prvars))
          CtxWithCond e _      -> ([], (frkvar e) : (plvars ++ prvars))
          CtxWithBody e pctx   -> if isLRel r pctx (exprTable e)
-                                    then ([frkvar e], plvars ++ prvars)
-                                    else ([], (frkvar e) : (plvars ++ prvars))
+                                    then ((frkvar e):plvars, prvars)
+                                    else (plvars, (frkvar e) : prvars)
          CtxWithDef _ _       -> (plvars, prvars)
          CtxAnyCond e _       -> ([], (frkvar e) : (plvars ++ prvars))
          CtxAnyBody e pctx    -> if isLRel r pctx (exprTable e)
-                                    then ([frkvar e], plvars ++ prvars)
-                                    else ([], (frkvar e) : (plvars ++ prvars))
+                                    then ((frkvar e) : plvars, prvars)
+                                    else (plvars, (frkvar e) : prvars)
          CtxAnyDef _ _        -> (plvars, prvars)
          CtxTyped _ _         -> (plvars, prvars)
          CtxRelPred _ _ _     -> ([], plvars ++ prvars)

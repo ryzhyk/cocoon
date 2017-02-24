@@ -202,7 +202,7 @@ func = withPos $ Function nopos True <$  reserved "function"
 proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> funcIdent
                                       <*> (parens $ commaSep arg) 
-                                      <*> (colon *> typeSpecSimple)
+                                      <*> (colon *> (typeSpecSimple <|> (withPos $ tSink <$ reserved "sink")))
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
 relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
@@ -289,11 +289,13 @@ constructor = withPos $ Constructor nopos <$> consIdent <*> (option [] $ braces 
 expr =  buildExpressionParser etable term
     <?> "expression"
 
-term  =  (withPos $ eTuple <$> (parens $ commaSep expr))
+term  =  elhs
+     <|> (withPos $ eTuple <$> (parens $ commaSep expr))
      <|> braces expr
      <|> term'
 term' = withPos $
          eapply
+     <|> elhs
      <|> eloc
      <|> erelpred
      <|> estruct
@@ -310,7 +312,6 @@ term' = withPos $
      <|> efork
      <|> ewith
      <|> eany
-     <|> elhs
 
 eapply = eApply <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
     where isapply = try $ lookAhead $ funcIdent *> symbol "("
@@ -330,7 +331,7 @@ pattern = withPos $
 
 lhs = withPos $ 
           eTuple <$> (parens $ commaSep lhs)
-      <|> evar
+      <|> fexpr
       <|> evardcl
       <|> epholder
       <|> eStruct <$> consIdent <*> (option [] $ braces $ commaSep lhs)
@@ -356,7 +357,7 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
 
 edrop   = eDrop    <$ reserved "drop"
 esend   = eSend    <$ reserved "send" <*> expr
-eite    = eITE     <$ reserved "if" <*> expr <*> term <*> (optionMaybe $ reserved "else" *> term)
+eite    = eITE     <$ reserved "if" <*> term <*> term <*> (optionMaybe $ reserved "else" *> term)
 evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
                    <*> (symbol "(" *> varIdent)
@@ -368,14 +369,14 @@ ewith   = eWith    <$ reserved "with"
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
-                   <*> (optionMaybe $ reserved "default" *> expr)
+                   <*> (optionMaybe $ reserved "default" *> term)
 
 eany    = eAny <$ reserved "any" 
                <*> (symbol "(" *> varIdent)
                <*> (reserved "in" *> relIdent) 
                <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                <*> term
-               <*> (optionMaybe $ reserved "default" *> expr)
+               <*> (optionMaybe $ reserved "default" *> term)
 epholder = ePHolder <$ reserved "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
@@ -443,7 +444,6 @@ binary n fun  = Infix $ (\le re -> E $ EBinOp (fst $ pos le, snd $ pos re) fun l
 sbinary n fun = Infix $ (\l  r  -> E $ fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
 assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="
-
 
 fexpr =  buildExpressionParser fetable fterm
     <?> "column or field name"

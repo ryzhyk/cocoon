@@ -12,6 +12,10 @@ typedef ip6_addr_t = bit<128>
 typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
                    | IPAddr6 {addr6 : ip6_addr_t}
 
+function ethUnicastAddr(addr: mac_addr_t): bool
+function ethMulticastAddr(addr: mac_addr_t): bool
+function ethBroadcastAddr(addr: mac_addr_t): bool
+
 typedef Packet = eth_pkt_t
 
 typedef eth_pkt_t = EtherPacket { src  : mac_addr_t
@@ -272,14 +276,14 @@ typedef router_port_peer_t = PeerSwitch
                            | PeerRouter {peer_port: port_id_t}
 
 table LogicalRouterPort( name    : port_id_t
-                         , router  : uuid_t
-                         , network : netmask_t
-                         , mac     : mac_addr_t
-                         , enabled : bool
-                         , peer    : router_port_peer_t
-                         , primary key (name)
-                         , foreign key (router) references LogicalRouter(uuid)
-                         , foreign key (peer.peer_port) references LogicalRouterPort(name))
+                       , router  : uuid_t
+                       , network : netmask_t
+                       , mac     : mac_addr_t
+                       , enabled : bool
+                       , peer    : router_port_peer_t
+                       , primary key (name)
+                       , foreign key (router) references LogicalRouter(uuid)
+                       , foreign key (peer.peer_port) references LogicalRouterPort(name))
 
 /*view logical_router_port_peered(port: port_id_t)
 logical_router_port_peered(p) :- LogicalRouterPort(p, _, _, _, _, PeerRouter{_}) */
@@ -334,13 +338,13 @@ table ACLTo   ( switch_id : uuid_t
 procedure sourcePort(port: LogicalPort): LogicalPort =
     // trunk port?
     with (tport in TrunkPort | tport.port == port.name) {
-        if pkt.vlan == VLANNone drop;
+        if (pkt.vlan == VLANNone) drop;
         var sport = with (x in LogicalPort | x.nested == NestedPort{port.name, pkt.vlan.vid}) x;
         pkt.vlan = VLANNone;
         sport
     } default {
         // drop packets with VLAN tags or multicast Ethernet source addresses
-        if pkt.vlan != VLANNone drop;
+        if (pkt.vlan != VLANNone) drop;
         port
     }
 
@@ -354,27 +358,33 @@ typedef ct_flow_state_t = CTNew
                         | CTInvalid
 
 // externally defined functions
-function ct_track_from(s: ct_state_t, p: Packet): ct_flow_state_t
-function ct_track_to(s: ct_state_t, p: Packet): ct_flow_state_t
-function ct_commit_from(s: ct_state_t, p: Packet): ()
-function ct_commit_to(s: ct_state_t, p: Packet): ()
+function ct_track_from(s: ct_state_t, p: Packet): (ct_state_t, ct_flow_state_t)
+function ct_track_to(s: ct_state_t, p: Packet): (ct_state_t, ct_flow_state_t)
+function ct_commit_from(s: ct_state_t, p: Packet): ct_state_t
+function ct_commit_to(s: ct_state_t, p: Packet): ct_state_t
 
 state table CTState ( port: port_id_t
                      , ctst: ct_state_t
                      , primary key (port))
 
 function iLogicalPort(port: LogicalPort): bool =
-    (isRegularPort(x.type) or isLocalnetPort(x.type)) and x.nested==NestedPortNone
-    
+    (isRegularPort(port.type) or isLocalnetPort(port.type)) and port.nested==NestedPortNone
+
 role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] = 
     // drop all packets if port is disabled
-    if not port.enabled drop;
+    if (not port.enabled) drop;
     // drop multicast packets
-    if not ethUnicastAddr(pkt.src) drop;
+    if (not ethUnicastAddr(pkt.src)) drop;
     var sport = sourcePort(port);
     // port security enabled? - check valid eth.src address
-    if LogicalPortSecured.find(sport.name) 
-        if not LogicalPortSecurity.find(sport, pkt.src) drop;
+
+    //TODO
+    //if (LogicalPortSecured.find(sport.name))
+    //    if (not LogicalPortSecurity.find(sport, pkt.src)) drop;
+    with (p1 in LogicalPortSecured | p1.port == sport.name) {
+        with (p2 in LogicalPortSecurity | p2.port==sport.name and p2.mac == pkt.src) ()
+        default drop
+    };
 
     // send to connection tracker
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
@@ -382,25 +392,25 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     with (x in CTState | x.port==sport) {
         (x.ctst, cts) = ct_track_from(x.ctst, pkt)
     } default {
-        (var st, cts) = ct_track_from(ct_state_new(), pkt);
-        CTState.insert(sport, st)
+        (var st, cts) = ct_track_from(ct_state_new(), pkt)
+        //CTState.insert(sport, st)
     };
 
     // invalid - drop
-    if cts == CTInvalid drop;
+    if (cts == CTInvalid) drop;
     // established | committed -- pass through
-    if cts != CTEstablished and cts != CTRelated {
+    if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
         var action = with (r in ACLFrom | r.switch_id == port.sw and r.port==sport and r.packet==pkt) {
-                         x.action
+                         r.action
                      } default ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (x in CTState | x.port == sport) x.ctst = ct_commit_from(x.ctst, pkt),
+            ActionAllowRelated -> with (x in CTState | x.port == sport) (x.ctst = ct_commit_from(x.ctst, pkt)),
             _                  -> drop
         }
-    }
-    if ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst) {
+    };
+    if (ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst)) {
         // multicast | broadcast -- send to all ports
         fork (dport in LogicalPort | dport.switch_id == port.sw and dport.name != port.name)
             deliver(dport, sport)
@@ -414,31 +424,31 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
             deliver(dport, sport)
     }
 
-procedure deliver(port: LogicalPort, fromport: port_id_t): () =
-    (var sw, var nested, var enabled) = with (p in LogicalPort | p.port == port) (p.switch_id, p.nested, p.enabled);
+procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // send to connection tracker
     var cts : ct_flow_state_t;
     with (s in CTState | s.port == port.name) {
         (s.ctst, cts) = ct_track_to(s.ctst, pkt)
     } default {
-        (var st, cts) = ct_track_to(ct_state_new(), pkt);
-        CTState.insert(sport, st)
+        (var st, cts) = ct_track_to(ct_state_new(), pkt)
+        //insert(CTState, sport, st)
     };
     // invalid - drop
-    if cts == CTInvalid drop;
+    if (cts == CTInvalid) drop;
     // established | committed -- pass through
-    if cts != CTEstablished and cts != CTRelated {
+    if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
-        var action = with (r in ACLTo | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) {
+        var action = with (r in ACLTo | r.switch_id == port.switch_id and r.port==port.name and r.from == fromport and r.packet == pkt) {
                           r.action
-                     } default 
-                          ActionAllowRelated;
+                     } default {
+                          ActionAllowRelated
+                     };
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (s in CTState | s.port == port.name) s.ctst = ct_commit_to(s.ctst, pkt),
+            ActionAllowRelated -> with (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
             _                  -> drop
         }
-    }
+    };
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address
@@ -448,24 +458,27 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): () =
         } default ()
     };
     // add VLAN encapsulation for nested ports
-    match (nested) {
-        NestedPortNone         -> send lportSendOut(port),
+    match (port.nested) {
+        NestedPortNone         -> lportSendOut(port),
         NestedPort{pport, tag} -> {
             pkt.vlan = VLAN{0, 0, tag};
-            send lportSendOut(pport)
+            with (outport in LogicalPort | outport.name == pport)
+                lportSendOut(outport)
         }
     }
 
-procedure lportSendOut(port: LogicalPort): () =
+procedure lportSendOut(port: LogicalPort): sink =
     if iLogicalPort(port) {
         send LogicalPortOut[port]
     } else {
-        var rport = with (lp in LogicalPort | lp.port==port) lp.type.rport;
-        send RouterPortIn[rport]
+        with (rp in LogicalRouterPort | rp.name==port.type.rport)
+            send RouterPortIn[rp]
     }
 
 role LogicalPortOut[port in LogicalPort | iLogicalPort(port)] = drop
 
+// TODO
+role RouterPortIn[port in LogicalRouterPort] = drop
 
 /*
 Logical Switch Datapaths

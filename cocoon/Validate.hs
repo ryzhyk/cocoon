@@ -362,8 +362,9 @@ exprValidate2 r _   (ESlice p e h l)    = case typ' r e of
                                                               assertR r (h < w) p
                                                                       $ "Upper bound of the slice cannot exceed argument width"
                                                _        -> errR r (pos e) $ "Expression is not a bit vector"
-exprValidate2 r _   (EMatch _ _ cs)     = let t = snd $ head cs in
-                                          mapM_ ((\e -> matchType (pos e) r t e) . snd) $ tail cs
+exprValidate2 r _   (EMatch _ _ cs)     = let cs' = filter ((/= tSink) . typ' r . snd) cs 
+                                              t = snd $ head cs' in
+                                          mapM_ ((\e -> matchType (pos e) r t e) . snd) cs'
                                           -- TODO: pattern structure matches 
 exprValidate2 r _   (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
 exprValidate2 r _   (EBinOp p op e1 e2) = case op of 
@@ -388,13 +389,14 @@ exprValidate2 r _   (EBinOp p op e1 e2) = case op of
           isbit1 = assertR r (isBit r e1) (pos e1) $ "Not a bit vector"
           isbit2 = assertR r (isBit r e2) (pos e2) $ "Not a bit vector"
           isbool = assertR r (isBool r e1) (pos e1) $ "Not a Boolean"
-exprValidate2 r ctx (EVarDecl p _)      = assertR r (isJust $ ctxExpectType r ctx) p $ "Variable type is unknown"
-exprValidate2 r _  (EITE _ _ t Nothing) = matchType (pos t) r t (tTuple [])
-exprValidate2 r _ (EITE _ _ t (Just t'))= matchType (pos t') r t t'
+exprValidate2 r ctx (EVarDecl p x)      = assertR r (isJust $ ctxExpectType r ctx) p $ "Cannot determine type of variable " ++ x -- Context: " ++ show ctx
+exprValidate2 r _  (EITE _ _ t e)       = let e' = maybe (tTuple []) id e
+                                              cs' = filter ((/= tSink) . typ' r) [e', t] in
+                                          mapM_ (\x -> matchType (pos x) r (head cs') x) cs'
 exprValidate2 _ _   _                   = return ()
 
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) $ "Expression " ++ show e ++ " is not an l-value " -- in context " ++ show ctx
+checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) $ "Expression " ++ show e ++ " is not an l-value" -- in context " ++ show ctx
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects p r ctx =
@@ -418,7 +420,7 @@ ctxCheckSideEffects p r ctx =
          CtxRelPred _ _ _  -> complain
          CtxRefine         -> complain
          _                 -> ctxCheckSideEffects p r (ctxParent ctx)
-    where complain = err p $ "Side effects are not allowed in this context"-- ++ show ctx
+    where complain = err p $ "Side effects are not allowed in this context " ++ show ctx
 
 ctxCheckPkt :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckPkt p r ctx =

@@ -79,7 +79,9 @@ exprType'' _ _   (EMatch _ _ cs)       = snd $ head cs
 exprType'' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
 exprType'' _ _   (ESeq _ _ e2)         = e2
 exprType'' _ _   (EPar _ _ _)          = Just tSink
-exprType'' _ _   (EITE _ _ t _)        = t
+exprType'' r _   (EITE _ _ t e)        = if (maybe False (\t' -> typ' r t' == tSink) t)
+                                            then maybe (Just $ tTuple []) id e
+                                            else t
 exprType'' _ _   (EDrop _)             = Just tSink
 exprType'' _ _   (ESet _ _ _)          = Just $ tTuple []
 exprType'' _ _   (ESend  _ _)          = Just tSink
@@ -117,15 +119,16 @@ exprType'' _ _   (ERelPred _ _ _)       = Just tBool
 -- Unwrap typedef's down to actual type definition
 typ' :: (WithType a) => Refine -> a -> Type
 typ' r x = case typ x of
-                TUser _ n   -> typ' r $ fromJust $ tdefType $ getType r n
-                t           -> t
+                t@(TUser _ n) -> maybe t (typ' r) $ tdefType $ getType r n
+                t             -> t
 
 -- Similar to typ', but does not unwrap the last typedef if it is a struct
 typ'' :: (WithType a) => Refine -> a -> Type
 typ'' r x = case typ x of
-                 t'@(TUser _ n) -> case fromJust $ tdefType $ getType r n of
-                                        TStruct _ _ -> t'
-                                        t           -> typ'' r t
+                 t'@(TUser _ n) -> case tdefType $ getType r n of
+                                        (Just (TStruct _ _)) -> t'
+                                        Nothing              -> t'
+                                        Just t               -> typ'' r t
                  t         -> t
 
 isBool :: (WithType a) => Refine -> a -> Bool
@@ -174,6 +177,9 @@ matchType' r x y =
          (TArray _ a1 l1, TArray _ a2 l2) -> matchType' r a1 a2 && l1 == l2
          (TStruct _ cs1 , TStruct _ cs2)  -> (length cs1 == length cs2) &&
                                              (all (\(c1, c2) -> consName c1 == consName c2) $ zip cs1 cs2)
+         (TTuple _ fs1  , TTuple _ fs2)   -> (length fs1 == length fs2) &&
+                                             (all (\(f1, f2) -> matchType' r f1 f2) $ zip fs1 fs2)
+         (TUser _ u1    , TUser _ u2)     -> u1 == u2
          _                                -> False
     where t1 = typ' r x
           t2 = typ' r y
@@ -222,8 +228,9 @@ ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getR
 ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = let args = consArgs $ getConstructor r c in
                                                      if' (i < length args) (Just $ typ $ args !! i) Nothing
 ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of 
-                                                          Just t -> let TTuple _ fs = typ' r t in 
-                                                                    if' (i < length fs) (Just $ fs !! i) Nothing
+                                                          Just t -> case typ' r t of
+                                                                         TTuple _ fs -> if' (i < length fs) (Just $ fs !! i) Nothing
+                                                                         _           -> Nothing
                                                           Nothing -> Nothing
 ctxExpectType _ (CtxSlice _ _)                     = Nothing
 ctxExpectType _ (CtxMatchExpr _ _)                 = Nothing

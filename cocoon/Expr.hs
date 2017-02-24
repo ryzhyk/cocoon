@@ -51,6 +51,7 @@ import Data.Maybe
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
+import Debug.Trace
 
 import Syntax
 import NS
@@ -88,7 +89,7 @@ exprFoldCtxM' f ctx e@(EITE p i t me)     = f ctx =<< (liftM3 $ EITE p)
                                                       (exprFoldCtxM f (CtxITEThen e ctx) t) 
                                                       (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxITEElse e ctx)) me)
 exprFoldCtxM' f ctx   (EDrop p)           = f ctx $ EDrop p
-exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetR e ctx) l) (exprFoldCtxM f (CtxSetL e ctx) r)
+exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetL e ctx) l) (exprFoldCtxM f (CtxSetR e ctx) r)
 exprFoldCtxM' f ctx e@(ESend p d)         = f ctx =<< (liftM $ ESend p) (exprFoldCtxM f (CtxSend e ctx) d)
 exprFoldCtxM' f ctx e@(EBinOp p op l r)   = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
                                                                              (exprFoldCtxM f (CtxBinOpR e ctx) r)

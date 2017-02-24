@@ -39,7 +39,7 @@ syn keyword ccnConstant         true false
 syn keyword ccnOperator	        default
 
 "Keywords for ADTs
-syn keyword ccnType	        bool string int bit typedef
+syn keyword ccnType	        bool string int bit typedef sink
 
 syn sync lines=250
 
