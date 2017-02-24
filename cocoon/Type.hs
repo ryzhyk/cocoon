@@ -1,3 +1,19 @@
+{-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-}
+
 {-# LANGUAGE FlexibleContexts #-}
 
 module Type( WithType(..) 
@@ -37,34 +53,37 @@ exprType :: Refine -> ECtx -> Expr -> Type
 exprType r ctx e = maybe (error $ "exprType: expression " ++ show e ++ " has unknown type") id $ exprTypeMaybe r ctx e
 
 exprTypeMaybe :: Refine -> ECtx -> Expr -> Maybe Type
-exprTypeMaybe r ctx e = exprFoldCtx (exprType' r) ctx e
+exprTypeMaybe r ctx e = exprFoldCtx (\ctx' e' -> fmap ((flip atPos) (pos e')) $ exprType' r ctx' e') ctx e
 
 exprType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
-exprType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
+exprType' r ctx e = fmap ((flip atPos) (pos e)) $ exprType'' r ctx e
+
+exprType'' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
+exprType'' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
                                         fromJust $ lookup v $ lvs ++ rvs 
-exprType' _ _   (EPacket _)           = Just $ tUser packetTypeName
-exprType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
-exprType' r _   (EField _ e f)        = fmap (\e' -> let TStruct _ cs = typ' r e' in
+exprType'' _ _   (EPacket _)           = Just $ tUser packetTypeName
+exprType'' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
+exprType'' r _   (EField _ e f)        = fmap (\e' -> let TStruct _ cs = typ' r e' in
                                                      fieldType $ structGetField cs f) e
-exprType' _ _   (ELocation _ _ _)     = Just tLocation
-exprType' _ _   (EBool _ _)           = Just tBool
-exprType' r ctx (EInt _ _)            = case ctxExpectType r ctx of
+exprType'' _ _   (ELocation _ _ _)     = Just tLocation
+exprType'' _ _   (EBool _ _)           = Just tBool
+exprType'' r ctx (EInt _ _)            = case ctxExpectType r ctx of
                                              t@(Just (TBit _ _)) -> t
                                              _                   -> Just tInt
-exprType' _ _   (EString _ _)         = Just tString
-exprType' _ _   (EBit _ w _)          = Just $ tBit w
-exprType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
-exprType' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
-exprType' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
-exprType' _ _   (EMatch _ _ cs)       = snd $ head cs
-exprType' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
-exprType' _ _   (ESeq _ _ e2)         = e2
-exprType' _ _   (EPar _ _ _)          = Just tSink
-exprType' _ _   (EITE _ _ t _)        = t
-exprType' _ _   (EDrop _)             = Just tSink
-exprType' _ _   (ESet _ _ _)          = Just $ tTuple []
-exprType' _ _   (ESend  _ _)          = Just tSink
-exprType' r _   (EBinOp _ op (Just e1) (Just e2)) = 
+exprType'' _ _   (EString _ _)         = Just tString
+exprType'' _ _   (EBit _ w _)          = Just $ tBit w
+exprType'' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
+exprType'' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
+exprType'' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
+exprType'' _ _   (EMatch _ _ cs)       = snd $ head cs
+exprType'' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
+exprType'' _ _   (ESeq _ _ e2)         = e2
+exprType'' _ _   (EPar _ _ _)          = Just tSink
+exprType'' _ _   (EITE _ _ t _)        = t
+exprType'' _ _   (EDrop _)             = Just tSink
+exprType'' _ _   (ESet _ _ _)          = Just $ tTuple []
+exprType'' _ _   (ESend  _ _)          = Just tSink
+exprType'' r _   (EBinOp _ op (Just e1) (Just e2)) = 
                                   case op of
                                        Eq     -> Just tBool
                                        Neq    -> Just tBool
@@ -83,16 +102,16 @@ exprType' r _   (EBinOp _ op (Just e1) (Just e2)) =
                                        Concat -> Just $ tBit (typeWidth t1 + typeWidth t2)
     where t1 = typ' r e1
           t2 = typ' r e2
-exprType' _ _   (EBinOp _ ShiftR e1 _) = e1
-exprType' _ _   (EBinOp _ ShiftL e1 _) = e1
-exprType' _ _   (EBinOp _ _ _ _)       = Nothing
-exprType' _ _   (EUnOp _ Not _)        = Just tBool
-exprType' _ _   (EFork _ _ _ _ _)      = Just tSink
-exprType' _ _   (EWith _ _ _ _ b _)    = b
-exprType' _ _   (EAny  _ _ _ _ b _)    = b
-exprType' r ctx (EPHolder _)           = ctxExpectType r ctx
-exprType' _ _   (ETyped _ _ t)         = Just t
-exprType' _ _   (ERelPred _ _ _)       = Just tBool
+exprType'' _ _   (EBinOp _ ShiftR e1 _) = e1
+exprType'' _ _   (EBinOp _ ShiftL e1 _) = e1
+exprType'' _ _   (EBinOp _ _ _ _)       = Nothing
+exprType'' _ _   (EUnOp _ Not _)        = Just tBool
+exprType'' _ _   (EFork _ _ _ _ _)      = Just tSink
+exprType'' _ _   (EWith _ _ _ _ b _)    = b
+exprType'' _ _   (EAny  _ _ _ _ b _)    = b
+exprType'' r ctx (EPHolder _)           = ctxExpectType r ctx
+exprType'' _ _   (ETyped _ _ t)         = Just t
+exprType'' _ _   (ERelPred _ _ _)       = Just tBool
 
 
 -- Unwrap typedef's down to actual type definition
@@ -139,8 +158,8 @@ isArray r a = case typ' r a of
                    TArray _ _ _ -> True
                    _            -> False
 
-matchType :: (MonadError String me, WithType a, WithPos a, WithType b) => Refine -> a -> b -> me ()
-matchType r x y = assertR r (matchType' r x y) (pos x) $ "Incompatible types " ++ show (typ x) ++ " and " ++ show (typ y)
+matchType :: (MonadError String me, WithType a, WithType b) => Pos -> Refine -> a -> b -> me ()
+matchType p r x y = assertR r (matchType' r x y) p $ "Incompatible types " ++ show (typ x) ++ " and " ++ show (typ y)
 
 
 matchType' :: (WithType a, WithType b) => Refine -> a -> b -> Bool
@@ -199,7 +218,7 @@ ctxExpectType _ (CtxRuleR _ _)                     = Just tBool
 ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing
-ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r $ roleTable $ getRole r rl
+ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r CtxRefine $ roleTable $ getRole r rl
 ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = let args = consArgs $ getConstructor r c in
                                                      if' (i < length args) (Just $ typ $ args !! i) Nothing
 ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of 
@@ -208,7 +227,7 @@ ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of
                                                           Nothing -> Nothing
 ctxExpectType _ (CtxSlice _ _)                     = Nothing
 ctxExpectType _ (CtxMatchExpr _ _)                 = Nothing
-ctxExpectType r (CtxMatchPat e ctx _)              = ctxExpectType r (CtxMatchExpr e ctx)
+ctxExpectType r (CtxMatchPat e ctx _)              = exprTypeMaybe r (CtxMatchExpr e ctx) $ exprMatchExpr e
 ctxExpectType r (CtxMatchVal _ ctx _)              = ctxExpectType r ctx
 ctxExpectType _ (CtxSeq1 _ _)                      = Nothing
 ctxExpectType r (CtxSeq2 _ ctx)                    = ctxExpectType r ctx
@@ -264,6 +283,6 @@ ctxExpectType _ (CtxAnyCond _ _)                   = Just tBool
 ctxExpectType r (CtxAnyBody _ ctx)                 = ctxExpectType r ctx
 ctxExpectType r (CtxAnyDef _ ctx)                  = ctxExpectType r ctx
 ctxExpectType _ (CtxTyped (ETyped _ _ t) _)        = Just t
-ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r $ exprRel e in
+ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r CtxRefine $ exprRel e in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ ctx                                = error $ "ctxExpectType " ++ show ctx

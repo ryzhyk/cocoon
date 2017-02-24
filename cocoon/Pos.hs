@@ -34,8 +34,9 @@ instance WithPos Pos where
     atPos _ p = p
 
 spos :: (WithPos a) => a -> String
-spos x = let p = fst $ pos x
-         in sourceName p ++ ":" ++ (show $ sourceLine p) ++ ":" ++ (show $ sourceColumn p)
+spos x = let (s,e) = pos x
+         in sourceName s ++ ":" ++ (show $ sourceLine s) ++ ":" ++ (show $ sourceColumn s) ++ "-"
+                                ++ (show $ sourceLine e) ++ ":" ++ (show $ sourceColumn e)
 
 nopos::Pos 
 nopos = (initialPos "",initialPos "")

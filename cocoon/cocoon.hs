@@ -1,4 +1,5 @@
 {-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
 Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -80,16 +81,16 @@ main = do
         workdir = dir </> basename
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
-    _ <- case parse cocoonGrammar fname fdata of
-              Left  e    -> fail $ "Failed to parse input file: " ++ show e
-              Right spec -> return spec
+    spec <- case parse cocoonGrammar fname fdata of
+                 Left  e    -> fail $ "Failed to parse input file: " ++ show e
+                 Right spec -> return spec
     return ()
---    combined <- case validate spec of
---                     Left e   -> fail $ "Validation error: " ++ e
---                     Right rs -> return rs
+    combined <- case validate spec of
+                     Left e   -> fail $ "Validation error: " ++ e
+                     Right rs -> return rs
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
---    let final = last combined
---    putStrLn "Validation complete"
+    --let final = last combined
+    putStrLn "Validation complete"
 --
 --    let ps = pairs combined
 --

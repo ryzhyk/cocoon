@@ -1,4 +1,21 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
+Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-}
+
+{-# LANGUAGE FlexibleContexts, RecordWildCards #-}
 
 module Parse ( cocoonGrammar
              , cfgGrammar) where
@@ -133,9 +150,15 @@ spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many ref
 
 mkRefine :: [String] -> [SpecItem] -> Refine
 mkRefine targets items = Refine nopos targets types state funcs relations assumes roles nodes
-    where types = mapMaybe (\i -> case i of 
+    where relations = mapMaybe (\i -> case i of 
+                                           SpRelation r -> Just r
+                                           _            -> Nothing) items
+          types = mapMaybe (\i -> case i of 
                                        SpType t -> Just t
-                                       _        -> Nothing) items
+                                       _        -> Nothing) items 
+                  ++
+                  map (\Relation{..} -> TypeDef relPos relName $ Just $ TStruct relPos 
+                                                $ [Constructor relPos relName relArgs]) relations
           state = mapMaybe (\i -> case i of 
                                        SpState s -> Just s
                                        _         -> Nothing) items
@@ -145,9 +168,6 @@ mkRefine targets items = Refine nopos targets types state funcs relations assume
           roles = mapMaybe (\i -> case i of 
                                        SpRole r -> Just r
                                        _        -> Nothing) items
-          relations = mapMaybe (\i -> case i of 
-                                           SpRelation r -> Just r
-                                           _            -> Nothing) items
           assumes = mapMaybe (\i -> case i of 
                                        SpAssume a -> Just a
                                        _          -> Nothing) items
@@ -177,14 +197,12 @@ func = withPos $ Function nopos True <$  reserved "function"
                                      <*> funcIdent
                                      <*> (parens $ commaSep arg) 
                                      <*> (colon *> typeSpecSimple)
-                                     <*> (option (eBool True) (reservedOp "|" *> expr))
                                      <*> (optionMaybe $ reservedOp "=" *> expr)
 
 proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> funcIdent
                                       <*> (parens $ commaSep arg) 
                                       <*> (colon *> typeSpecSimple)
-                                      <*> (option (eBool True) (reservedOp "|" *> expr))
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
 relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
@@ -338,25 +356,25 @@ eint'   = (lookAhead $ char '\'' <|> digit) *> (do w <- width
 
 edrop   = eDrop    <$ reserved "drop"
 esend   = eSend    <$ reserved "send" <*> expr
-eite    = eITE     <$ reserved "if" <*> expr <*> expr <*> (optionMaybe $ reserved "else" *> expr)
+eite    = eITE     <$ reserved "if" <*> expr <*> term <*> (optionMaybe $ reserved "else" *> term)
 evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
-                   <*> expr
+                   <*> term
 ewith   = eWith    <$ reserved "with" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
-                   <*> expr
+                   <*> term
                    <*> (optionMaybe $ reserved "default" *> expr)
 
 eany    = eAny <$ reserved "any" 
                <*> (symbol "(" *> varIdent)
                <*> (reserved "in" *> relIdent) 
                <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
-               <*> expr
+               <*> term
                <*> (optionMaybe $ reserved "default" *> expr)
 epholder = ePHolder <$ reserved "_"
 

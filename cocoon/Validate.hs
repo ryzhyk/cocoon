@@ -1,4 +1,5 @@
 {-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
 Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,6 +21,7 @@ module Validate (validate) where
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
+import Debug.Trace
 
 import Syntax
 import NS
@@ -110,9 +112,6 @@ validate1 r@Refine{..} = do
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
     uniqNames (\n -> "Multiple definitions of node " ++ n) refineNodes
-    mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
-                                "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
-          refineRoles
     mapM_ (maybe (return ()) (typeValidate r) . tdefType) refineTypes
     uniqNames (\c -> "Multiple definitions of constructor " ++ c) $ concatMap typeCons $ refineStructs r
     -- each role occurs at most once as a port
@@ -129,6 +128,10 @@ validate1 r@Refine{..} = do
     mapM_ (assumeValidate r) refineAssumes
     -- TODO: check for cycles in the locations graph
     mapM_ (nodeValidate r)   refineNodes
+    mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
+                                "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
+          refineRoles
+
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
 typeValidate _ (TBit p w)     = assert (w>0) p "Integer width must be greater than 0"
@@ -152,7 +155,6 @@ funcValidate r f@Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
-    exprValidate r (CtxFunc f CtxRefine) funcDom
     case funcDef of
          Nothing  -> return ()
          Just def -> exprValidate r (CtxFunc f CtxRefine) def
@@ -185,7 +187,7 @@ constraintValidate r rel constr = do
                                        $ "Number of foreign fields does not match the number of local fields"
                                mapM_ (\(e1,e2) -> do let t1 = exprType r (CtxRelKey rel) e1
                                                      let t2 = exprType r (CtxRelForeign rel constr) e2
-                                                     matchType r t1 t2) $ zip constrFields constrFArgs
+                                                     matchType (pos e1) r t1 t2) $ zip constrFields constrFArgs
                                assertR r (relCheckKey frel constrFArgs) (pos constr)
                                        $ "Foreign fields do not form a primary or unique key"
           _              -> return () 
@@ -274,17 +276,19 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
                                               _               -> return ()) e
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-exprValidate r ctx e = do exprTraverseCtxM (exprValidate1 r) ctx e
+exprValidate r ctx e = --trace ("exprValidate " ++ show ctx ++ " " ++ show e) $ 
+                       do exprTraverseCtxM (exprValidate1 r) ctx e
                           exprTraverseTypeME r (exprValidate2 r) ctx e
 
 exprTraverseTypeME :: (MonadError String me) => Refine -> (ECtx -> ExprNode Type -> me ()) -> ECtx -> Expr -> me ()
 exprTraverseTypeME r = exprTraverseCtxWithM (\ctx e -> do 
     e' <- exprMap (return . Just) e
+    --trace ("exprTraverseTypeME " ++ show ctx ++ "\n    " ++ show e) $ return ()
     case exprType' r ctx e' of
          Just t  -> do case ctxExpectType r ctx of
                             Nothing -> return ()
                             Just t' -> assertR r (matchType' r t t') (pos e) 
-                                               $ "Couldn't match expected type " ++ show t' ++ " with actual type " ++ show t
+                                               $ "Couldn't match expected type " ++ show t' ++ " with actual type " ++ show t {-++ " (context: " ++ show ctx ++ ")"-}
                        return t
          Nothing -> error $ "Expression " ++ show e ++ " has unknown type") 
 
@@ -293,7 +297,7 @@ exprTraverseTypeME r = exprTraverseCtxWithM (\ctx e -> do
 exprValidate1 :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me ()
 exprValidate1 r ctx (EVar p v)          = do _ <- checkVar p r ctx v
                                              return ()
-exprValidate1 r ctx (EPacket p)         = ctxCheckSideEffects p r ctx
+exprValidate1 r ctx (EPacket p)         = ctxCheckPkt p r ctx
 exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
                                                      $ "Number of arguments does not match function declaration"
@@ -348,21 +352,21 @@ checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p
 -- Traverse again with types.  This pass ensures that all sub-expressions
 -- have well-defined types that match their context
 exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
-exprValidate2 r _   (EField p e f)      = case e of
+exprValidate2 r _   (EField p e f)      = case typ' r e of
                                                t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
                                                                           $ "Unknown field " ++ f
                                                _               -> errR r (pos e) $ "Expression is not a struct"
-exprValidate2 r _   (ESlice p e h l)    = case e of
+exprValidate2 r _   (ESlice p e h l)    = case typ' r e of
                                                TBit _ w -> do assertR r (h >= l) p 
                                                                       $ "Upper bound of the slice must be greater than lower bound"
                                                               assertR r (h < w) p
                                                                       $ "Upper bound of the slice cannot exceed argument width"
                                                _        -> errR r (pos e) $ "Expression is not a bit vector"
 exprValidate2 r _   (EMatch _ _ cs)     = let t = snd $ head cs in
-                                          mapM_ (matchType r t . snd) $ tail cs
+                                          mapM_ ((\e -> matchType (pos e) r t e) . snd) $ tail cs
                                           -- TODO: pattern structure matches 
 exprValidate2 r _   (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
-exprValidate2 r _   (EBinOp _ op e1 e2) = case op of 
+exprValidate2 r _   (EBinOp p op e1 e2) = case op of 
                                                Eq     -> m
                                                Neq    -> m
                                                Lt     -> do {m; isint1}
@@ -378,18 +382,19 @@ exprValidate2 r _   (EBinOp _ op e1 e2) = case op of
                                                ShiftL -> do {isint1; isint2}
                                                Mod    -> do {isint1; isint2}
                                                Concat -> do {isbit1; isbit2}
-    where m = matchType r e1 e2
+    where m = matchType p r e1 e2
           isint1 = assertR r (isInt r e1 || isBit r e1) (pos e1) $ "Not an integer"
           isint2 = assertR r (isInt r e2 || isBit r e2) (pos e2) $ "Not an integer"
           isbit1 = assertR r (isBit r e1) (pos e1) $ "Not a bit vector"
           isbit2 = assertR r (isBit r e2) (pos e2) $ "Not a bit vector"
           isbool = assertR r (isBool r e1) (pos e1) $ "Not a Boolean"
 exprValidate2 r ctx (EVarDecl p _)      = assertR r (isJust $ ctxExpectType r ctx) p $ "Variable type is unknown"
-exprValidate2 r _   (EITE _ _ t me)     = matchType r t $ maybe (tTuple []) id me
+exprValidate2 r _  (EITE _ _ t Nothing) = matchType (pos t) r t (tTuple [])
+exprValidate2 r _ (EITE _ _ t (Just t'))= matchType (pos t') r t t'
 exprValidate2 _ _   _                   = return ()
 
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) "Expression is not an l-value"
+checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) $ "Expression " ++ show e ++ " is not an l-value " -- in context " ++ show ctx
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects p r ctx =
@@ -413,10 +418,29 @@ ctxCheckSideEffects p r ctx =
          CtxRelPred _ _ _  -> complain
          CtxRefine         -> complain
          _                 -> ctxCheckSideEffects p r (ctxParent ctx)
-    where complain = err p "Side effects are not allowed in this context"
+    where complain = err p $ "Side effects are not allowed in this context"-- ++ show ctx
 
+ctxCheckPkt :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
+ctxCheckPkt p r ctx =
+    case ctx of 
+         CtxRole _         -> return ()
+         CtxFunc f _       -> when (funcPure f) complain
+         CtxRelPred _ _ _  -> complain
+         CtxRefine         -> complain
+         _                 -> ctxCheckPkt p r (ctxParent ctx)
+    where complain = err p $ "pkt is not available in this context" -- ++ show ctx
+
+
+-- Relational predicates are allowed in the RHS of rules (at the top level) 
+-- and anywhere inside assumptions
 ctxCheckRelPred :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
-ctxCheckRelPred = error "ctxCheckRelPred is undefined"
+ctxCheckRelPred _ _ (CtxRuleR _ _) = return ()
+ctxCheckRelPred p r ctx            = ctxCheckRelPred' p r ctx
+
+ctxCheckRelPred' :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
+ctxCheckRelPred' _ _ (CtxAssume _) = return ()
+ctxCheckRelPred' p r CtxRefine     = errR r p "Relational predicate is not allowed in this context"
+ctxCheckRelPred' p r ctx           = ctxCheckRelPred' p r (ctxParent ctx)
 
 structArgs :: Type -> [Field]
 structArgs (TStruct _ cs) = nub $ concatMap consArgs cs

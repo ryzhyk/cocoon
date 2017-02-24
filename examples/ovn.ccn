@@ -113,20 +113,26 @@ function isLocalnetPort(t: port_type_t): bool =
 typedef nested_port_t = NestedPortNone
                       | NestedPort {parent: string, tag: vlan_id_t}
 
+function is_nested(nested: nested_port_t): bool = 
+    match (nested) {
+        NestedPortNone -> false,
+        _              -> true
+    }
+
 table LogicalPort( name      : port_id_t
-                  , switch_id : uuid_t
-                  , type      : port_type_t
-                  , nested    : nested_port_t
-                  , enabled   : bool
-                  , primary key (name)
-                  , foreign key (switch_id)                 references LogicalSwitch(uuid)
-                  , foreign key (type.rport)                references LogicalRouterPort(name)
-                  , foreign key (type.network_name)         references LocalNetwork(name)
+                 , switch_id : uuid_t
+                 , type      : port_type_t
+                 , nested    : nested_port_t
+                 , enabled   : bool
+                 , primary key (name)
+                 , foreign key (switch_id)                 references LogicalSwitch(uuid)
+                 , foreign key (type.rport)                references LogicalRouterPort(name)
+                 , foreign key (type.network_name)         references LocalNetwork(name)
 //                  , foreign key (type.vtep_physical_switch) references physical_network(name)
 //                  , foreign key (type.vtep_LogicalSwitch)  references LogicalSwitch(uuid)
-                  , foreign key (nested.parent)             references LogicalPort(name)
-                  , unique (nested.parsw, nested.tag) /* Siblings must have different tags */
-                  , check (is_nested(nested) => not is_router(type)))
+                 , foreign key (nested.parent)             references LogicalPort(name)
+                 , unique (nested.parent, nested.tag) /* Siblings must have different tags */
+                 , check (is_nested(nested) => not isRouterPort(type)))
 
 view ParentPort( child_name    : port_id_t
                 , child_switch  : uuid_t
@@ -139,8 +145,8 @@ view ParentPort( child_name    : port_id_t
                 , check child_switch == parent_switch
                 , check parent_nested == NestedPortNone{})
 
-ParentPort(cn: port_id_t, cs: uuid_t, ct, pn, ps, pt, pnest) :- LogicalPort(cn, _, ct, NestedPort{pn, _}, _),
-                                                                LogicalPort(pn, _, pt, pnest, _)
+ParentPort(cn: port_id_t, cs: uuid_t, ct, pn, ps, pt, pnest) :- LogicalPort(cn, cs, ct, NestedPort{pn, _}, _),
+                                                                LogicalPort(pn, ps, pt, pnest, _)
    
 view TrunkPort(port: port_id_t)
 TrunkPort(p) :- LogicalPort(_, _, _, NestedPort{p, _}, _)
@@ -195,8 +201,8 @@ table LogicalPort_up( port: port_id_t
 
 typedef port_addr_t = PortAddressUnknown
                     | PortAddressMAC {mac: mac_addr_t}
-                    | PortAddressMACIP4 {mac: mac_addr_t, ip: ip4_addr_t}
-                    | PortAddressMACIP6 {mac: mac_addr_t, ip: ip6_addr_t}
+                    | PortAddressMACIP4 {mac: mac_addr_t, ip4: ip4_addr_t}
+                    | PortAddressMACIP6 {mac: mac_addr_t, ip6: ip6_addr_t}
 
 table LogicalPort_address( port: port_id_t
                           , addr: port_addr_t
@@ -209,10 +215,10 @@ LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMAC{mac})
 
 // Eth and mac addresses must be unique with logical switch
 view LogicalSwitch_mac( switch_id : uuid_t
-                       , port      : port_id_t
-                       , mac       : mac_addr_t
-                       , unique(switch_id, mac))
-LogicalSwitch_mac(sw, port, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
+                      , port      : port_id_t
+                      , mac       : mac_addr_t
+                      , unique(switch_id, mac))
+LogicalSwitch_mac(sw, p, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
 
 view LogicalSwitch_accepts_unknown( switch_id : uuid_t
                                    , port      : port_id_t)
@@ -306,35 +312,35 @@ typedef acl_action_t = ActionAllow
                      | ActionReject // Not implemented--currently treated as drop
 
 table ACLFrom ( switch_id : uuid_t
-               , port      : port_id_t
-               , packet    : Packet
-               , action    : acl_action_t 
-               , foreign key (switch_id) references LogicalSwitch(uuid)
-               , foreign key (port)      references LogicalPort(name)
-               , unique (switch_id, port, direction, packet))
+              , port      : port_id_t
+              , packet    : Packet
+              , action    : acl_action_t 
+              , foreign key (switch_id) references LogicalSwitch(uuid)
+              , foreign key (port)      references LogicalPort(name)
+              , unique (switch_id, port, packet))
 
 table ACLTo   ( switch_id : uuid_t
-               , port      : port_id_t
-               , from      : port_id_t
-               , packet    : Packet
-               , action    : acl_action_t 
-               , foreign key (switch_id) references LogicalSwitch(uuid)
-               , foreign key (port)      references LogicalPort(name)
-               , foreign key (from)      references LogicalPort(name)
-               , unique (switch_id, port, direction, packet))
+              , port      : port_id_t
+              , from      : port_id_t
+              , packet    : Packet
+              , action    : acl_action_t 
+              , foreign key (switch_id) references LogicalSwitch(uuid)
+              , foreign key (port)      references LogicalPort(name)
+              , foreign key (from)      references LogicalPort(name)
+              , unique (switch_id, port, packet))
 
 
 
-function sourcePort(port: LogicalPort, p:Packet): LogicalPort =
+procedure sourcePort(port: LogicalPort): LogicalPort =
     // trunk port?
-    with (tport in TrunkPort | tport.name == port.name) {
-        if p.vlan == VLANNone drop;
-        var sport = with (x in LogicalPort | x.nested == NestedPort{name, p.vlan.vid}) x;
-        p.vlan = VLANNone;
+    with (tport in TrunkPort | tport.port == port.name) {
+        if pkt.vlan == VLANNone drop;
+        var sport = with (x in LogicalPort | x.nested == NestedPort{port.name, pkt.vlan.vid}) x;
+        pkt.vlan = VLANNone;
         sport
     } default {
         // drop packets with VLAN tags or multicast Ethernet source addresses
-        if p.vlan != VLANNone drop;
+        if pkt.vlan != VLANNone drop;
         port
     }
 
@@ -385,8 +391,9 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
-        var action = with (r in ACLFrom | r.switch_id == port.sw and r.port==sport and r.packet==pkt) x.action
-                     default ActionAllowRelated;
+        var action = with (r in ACLFrom | r.switch_id == port.sw and r.port==sport and r.packet==pkt) {
+                         x.action
+                     } default ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
             ActionAllowRelated -> with (x in CTState | x.port == sport) x.ctst = ct_commit_from(x.ctst, pkt),
@@ -422,9 +429,9 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): () =
     // established | committed -- pass through
     if cts != CTEstablished and cts != CTRelated {
         // apply ACL
-        var action = with (r in ACLTo | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) 
+        var action = with (r in ACLTo | r.switch_id == sw and r.port==port.name and r.from == fromport and r.packet == pkt) {
                           r.action
-                     default 
+                     } default 
                           ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),

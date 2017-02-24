@@ -1,3 +1,19 @@
+{-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-}
+
 {-# LANGUAGE ImplicitParams #-}
 
 module Expr ( exprMap
@@ -39,7 +55,7 @@ import Control.Monad.State
 import Syntax
 import NS
 import Util
-
+import Name
 
 -- depth-first fold of an expression
 exprFoldCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> Expr -> m b
@@ -72,7 +88,7 @@ exprFoldCtxM' f ctx e@(EITE p i t me)     = f ctx =<< (liftM3 $ EITE p)
                                                       (exprFoldCtxM f (CtxITEThen e ctx) t) 
                                                       (maybe (return Nothing) ((liftM Just) . exprFoldCtxM f (CtxITEElse e ctx)) me)
 exprFoldCtxM' f ctx   (EDrop p)           = f ctx $ EDrop p
-exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetR e ctx) r) (exprFoldCtxM f (CtxSetL e ctx) l)
+exprFoldCtxM' f ctx e@(ESet p l r)        = f ctx =<< (liftM2 $ ESet p) (exprFoldCtxM f (CtxSetR e ctx) l) (exprFoldCtxM f (CtxSetL e ctx) r)
 exprFoldCtxM' f ctx e@(ESend p d)         = f ctx =<< (liftM $ ESend p) (exprFoldCtxM f (CtxSend e ctx) d)
 exprFoldCtxM' f ctx e@(EBinOp p op l r)   = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
                                                                              (exprFoldCtxM f (CtxBinOpR e ctx) r)
@@ -133,7 +149,7 @@ exprFold :: (ExprNode b -> b) -> Expr -> b
 exprFold f e = runIdentity $ exprFoldM (return . f) e
 
 exprTraverseCtxWithM :: (Monad m) => (ECtx -> ExprNode a -> m a) -> (ECtx -> ExprNode a -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseCtxWithM g f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; g ctx e'}) ctx e; return ()}
+exprTraverseCtxWithM g f ctx e = do {_ <- exprFoldCtxM (\ctx' e' -> do {f ctx' e'; g ctx' e'}) ctx e; return ()}
 
 exprTraverseCtxM :: (Monad m) => (ECtx -> ENode -> m ()) -> ECtx -> Expr -> m ()
 exprTraverseCtxM = exprTraverseCtxWithM (\_ x -> return $ E x)
@@ -291,65 +307,4 @@ isLVar :: Refine -> ECtx -> String -> Bool
 isLVar r ctx v = isJust $ lookup v $ fst $ ctxVars r ctx
 
 isLRel :: Refine -> ECtx -> String -> Bool
-isLRel r ctx rel = elem rel $ fst $ ctxRels r ctx
-
-{-
-exprScalars :: Refine -> ECtx -> Expr -> [Expr]
-exprScalars r c e = 
-    case typ' r c e of
-         TStruct _ fs -> concatMap (exprScalars r c . EField nopos e . name) fs
-         _            -> [e]
--}
-
--- expression must be evaluated with evalExpr before calling this function
--- to eliminate subexpressions of the form structname{v1,v2}.f1
-{-
-exprDeps :: Expr -> [Expr]
-exprDeps = nub . exprDeps' True
-
-exprDeps' :: Bool -> Expr -> [Expr]
-exprDeps' flag e@(EVar _ _)         = if' flag [e] []
-exprDeps' flag e@(EDotVar _ _)      = if' flag [e] []
-exprDeps' flag e@(EPacket _)        = if' flag [e] []
-exprDeps' _      (EApply _ _ as)    = concatMap (exprDeps' True) as
-exprDeps' _      (EBuiltin _ _ as)  = concatMap (exprDeps' True) as
-exprDeps' flag e@(EField _ e' _)    = (if' (flag && isdep e) [e] []) ++ (exprDeps' False e')
-    where isdep x = case x of
-                         EVar _ _      -> True
-                         EDotVar _ _   -> True
-                         EPacket _     -> True
-                         EField _ x' _ -> isdep x'
-                         _             -> False
-exprDeps' _      (ELocation _ _ _)  = error "Not implemented: exprDeps' ELocation"
-exprDeps' _      (EBool _ _)        = []
-exprDeps' _      (EInt _ _ _)       = []
-exprDeps' _      (EStruct _ _ fs)   = concatMap (exprDeps' True) fs
-exprDeps' _      (EBinOp _ _ e1 e2) = exprDeps' True e1 ++ exprDeps' True e2
-exprDeps' _      (EUnOp _ _ e)      = exprDeps' True e
-exprDeps' _      (ESlice _ e _ _)   = exprDeps' True e
-exprDeps' _      (ECond _ cs d)     = (concatMap (\(c,v) -> exprDeps' True c ++ exprDeps' True v) cs) ++ exprDeps' True d
-
-exprSubst :: Expr -> Expr -> Expr -> Expr
-exprSubst arg val e               | e == arg = val
-exprSubst _   _   e@(EVar _ _)               = e
-exprSubst _   _   e@(EDotVar _ _)            = e
-exprSubst _   _   e@(EPacket _)              = e
-exprSubst arg val   (EApply _ f as)          = EApply nopos f $ map (exprSubst arg val) as
-exprSubst arg val   (EBuiltin _ f as)        = EBuiltin nopos f $ map (exprSubst arg val) as
-exprSubst arg val   (EField _ s f)           = EField nopos (exprSubst arg val s) f
-exprSubst _   _     (ELocation _ _ _)        = error "Not implemented: exprSubst ELocation"
-exprSubst _   _   e@(EBool _ _)              = e
-exprSubst _   _   e@(EInt _ _ _)             = e
-exprSubst arg val   (EStruct _ n fs)         = EStruct nopos n $ map (exprSubst arg val) fs
-exprSubst arg val   (EBinOp _ op e1 e2)      = EBinOp nopos op (exprSubst arg val e1) (exprSubst arg val e2)
-exprSubst arg val   (EUnOp _ op e)           = EUnOp nopos op $ exprSubst arg val e
-exprSubst arg val   (ESlice _ e h l)         = ESlice nopos (exprSubst arg val e) h l
-exprSubst arg val   (ECond _ cs d)           = ECond nopos (map (\(c,e) -> (exprSubst arg val c, exprSubst arg val e)) cs) $ exprSubst arg val d
-
-combineCascades :: ([Expr] -> Expr) -> [Expr] -> Expr
-combineCascades f es  = combineCascades' f es []
-
-combineCascades' f ((ECond _ cs d):es) es' = ECond nopos (map (mapSnd (\v -> combineCascades' f (v:es) es')) cs) (combineCascades' f (d:es) es')
-combineCascades' f (v:es) es'              = combineCascades' f es (es' ++ [v])
-combineCascades' f [] es'                  = f es'
--}
+isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx

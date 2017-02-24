@@ -1,4 +1,5 @@
 {-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
 Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -79,7 +80,8 @@ getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
 lookupVar :: Refine -> ECtx -> String -> Maybe Field
-lookupVar = error "lookupVar is undefined"
+lookupVar r ctx n = fmap (\(Just t) -> Field nopos n t) 
+                    $ lookup n $ (\(lvs, rvs) -> lvs ++ rvs) $ ctxVars r ctx
 
 checkVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Field
 checkVar p r c n = case lookupVar r c n of
@@ -91,33 +93,6 @@ getVar r c n = fromJust $ lookupVar r c n
 
 isGlobalVar :: Refine -> String -> Bool
 isGlobalVar r v = isJust $ find ((==v) . name) $ refineState r
-
-{-
-lookupLocalVar :: Role -> String -> Maybe Field
-lookupLocalVar role n = find ((==n) . name) $ roleLocals role
-
-checkLocalVar :: (MonadError String me) => Pos -> Role -> String -> me Field
-checkLocalVar p rl n = case lookupLocalVar rl n of
-                            Nothing -> err p $ "Unknown local variable: " ++ n
-                            Just v  -> return v
-
-getLocalVar :: Role -> String -> Field
-getLocalVar rl n = fromJust $ lookupLocalVar rl n
--}
-
-{-
-lookupKey :: Role -> String -> Maybe Field
-lookupKey rl n = find ((==n) . name) $ roleKeys rl
-
-checkKey :: (MonadError String me) => Pos -> Role -> String -> me Field
-checkKey p rl n = case lookupKey rl n of
-                       Nothing -> err p $ "Unknown key: " ++ n
-                       Just k  -> return k
-
-getKey :: Role -> String -> Field
-getKey rl n = fromJust $ lookupKey rl n
--}
-
 
 lookupNode :: Refine -> String -> Maybe Node
 lookupNode Refine{..} n = find ((==n) . name) refineNodes
@@ -131,23 +106,31 @@ getNode :: Refine -> String -> Node
 getNode r n = fromJust $ lookupNode r n
 
 lookupConstructor :: Refine -> String -> Maybe Constructor
-lookupConstructor = error "lookupConstructor is undefined"
+lookupConstructor r c = 
+    find ((== c) . name) 
+    $ concatMap (\td -> case tdefType td of       
+                             Just (TStruct _ cs) -> cs
+                             _                   -> [])
+    $ refineTypes r 
 
 checkConstructor :: (MonadError String me) => Pos -> Refine -> String -> me Constructor
-checkConstructor = error "lookupConstructor is undefined"
+checkConstructor p r c = case lookupConstructor r c of
+                              Nothing   -> errR r p $ "Unknown constructor: " ++ c
+                              Just cons -> return cons
 
 getConstructor :: Refine -> String -> Constructor
-getConstructor = error "getConstructor is undefined"
+getConstructor r c = fromJust $ lookupConstructor r c
 
-lookupRelation :: Refine -> String -> Maybe Relation
-lookupRelation = error "lookupRelation is undefined"
+lookupRelation :: Refine -> ECtx -> String -> Maybe Relation
+lookupRelation r ctx n = find ((==n) . name) $ (\(rw,ro) -> rw ++ ro) $ ctxRels r ctx
 
 checkRelation :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Relation
-checkRelation = error "lookupRelation is undefined"
+checkRelation p r ctx n = case lookupRelation r ctx n of
+                               Nothing  -> errR r p $ "Unknown relation: " ++ n -- ++ " in context " ++ show ctx
+                               Just rel -> return rel
 
-getRelation :: Refine -> String -> Relation
-getRelation = error "getRelation is undefined"
-
+getRelation :: Refine -> ECtx -> String -> Relation
+getRelation r ctx n = fromJust $ lookupRelation r ctx n
 
 -- All variables available in the scope: (l-vars, read-only vars)
 type MField = (String, Maybe Type)
@@ -157,8 +140,8 @@ ctxVars :: Refine -> ECtx -> ([MField], [MField])
 ctxVars r ctx = 
     case ctx of
          CtxRefine            -> (map f2mf $ refineState r, [])
-         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
-         CtxRoleGuard rl      -> ([], (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : plvars ++ prvars)
+         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl) : prvars)
+         CtxRoleGuard rl      -> ([], (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl) : plvars ++ prvars)
          CtxFunc f _          -> let plvars' = filter (isGlobalVar r . fst) plvars 
                                      prvars' = filter (isGlobalVar r . fst) prvars in
                                  if funcPure f    
@@ -167,7 +150,7 @@ ctxVars r ctx =
          CtxAssume a          -> ([], vartypes $ exprVars ctx $ assExpr a)
          CtxRelKey rel        -> ([], map f2mf $ relArgs rel)
          CtxRelForeign _ con  -> let ForeignKey _ _ fname _ = con 
-                                     frel = getRelation r fname in
+                                     frel = getRelation r CtxRefine fname in
                                  ([], map f2mf $ relArgs frel)
          CtxCheck rel         -> ([], map f2mf $ relArgs rel)
          CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
@@ -215,7 +198,7 @@ ctxVars r ctx =
          CtxTyped _ _         -> (plvars, prvars)
          CtxRelPred _ _ _     -> ([], plvars ++ prvars)
     where (plvars, prvars) = ctxVars r $ ctxParent ctx 
-          frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r $ exprTable e)
+          frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r CtxRefine $ exprTable e)
           vartypes :: [(String, ECtx)] -> [MField]
           vartypes vs = map (\gr -> case filter (isJust . snd) $ map (mapSnd $ ctxExpectType r) gr of
                                          []  -> (fst $ head gr, Nothing)
@@ -224,23 +207,24 @@ ctxVars r ctx =
 
 -- Fork, with, any: relations become unavailable
 -- Fork, Par: all relations become read-only
-ctxRels :: Refine -> ECtx -> ([String], [String])
+ctxRels :: Refine -> ECtx -> ([Relation], [Relation])
 ctxRels r ctx = 
     case ctx of
-         CtxRefine         -> (\(rw,ro) -> (map name rw, map name ro)) $ partition relMutable $ refineRels r
+         CtxRefine         -> partition relMutable $ refineRels r
          CtxRelKey _       -> ([],[])
          CtxRelForeign _ _ -> ([],[])
          CtxCheck _        -> ([],[])
          CtxPar1 _ _       -> ([], plrels ++ prrels)
          CtxPar2 _ _       -> ([], plrels ++ prrels)
          CtxForkCond _ _   -> ([], [])
-         CtxForkBody e _   -> ([], delete (exprTable e) $ plrels ++ prrels)
+         CtxForkBody e _   -> ([], del (exprTable e) $ plrels ++ prrels)
          CtxWithCond _ _   -> ([], [])
-         CtxWithBody e _   -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         CtxWithBody e _   -> (del (exprTable e) plrels, del (exprTable e) prrels)
          CtxAnyCond _ _    -> ([], [])
-         CtxAnyBody e _    -> (delete (exprTable e) plrels, delete (exprTable e) prrels)
+         CtxAnyBody e _    -> (del (exprTable e) plrels, del (exprTable e) prrels)
          _                 -> (plrels, prrels)
     where (plrels, prrels) = ctxRels r $ ctxParent ctx
+          del t rels = filter ((/=t) . name) rels
 
 {-
 lookupBuiltin :: String -> Maybe Builtin
