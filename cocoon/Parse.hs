@@ -34,7 +34,7 @@ import Syntax
 import Pos
 import Util
 
-reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<"]
+reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#"]
 reservedNames = ["_",
                  "and",
                  "any",
@@ -49,7 +49,6 @@ reservedNames = ["_",
                  "foreign",
                  "fork",
                  "function",
-                 "host",
                  "if",
                  "in",
                  "int",
@@ -68,6 +67,7 @@ reservedNames = ["_",
                  "state",
                  "string",
                  "switch",
+                 "switch_port",
                  "table",
                  "true",
                  "typedef",
@@ -140,7 +140,6 @@ data SpecItem = SpType         TypeDef
               | SpAssume       Assume
               | SpFunc         Function
               | SpRole         Role
-              | SpNode         Node
 
 
 cocoonGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
@@ -149,7 +148,7 @@ cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types state funcs relations assumes roles nodes
+mkRefine targets items = Refine nopos targets types state funcs relations assumes roles
     where relations = mapMaybe (\i -> case i of 
                                            SpRelation r -> Just r
                                            _            -> Nothing) items
@@ -171,9 +170,6 @@ mkRefine targets items = Refine nopos targets types state funcs relations assume
           assumes = mapMaybe (\i -> case i of 
                                        SpAssume a -> Just a
                                        _          -> Nothing) items
-          nodes = mapMaybe (\i -> case i of 
-                                       SpNode n -> Just n
-                                       _        -> Nothing) items
 
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep roleIdent)
@@ -186,7 +182,8 @@ decl =  (SpType         <$> typeDef)
     <|> (SpFunc         <$> proc)
     <|> (SpRole         <$> role)
     <|> (SpAssume       <$> assume)
-    <|> (SpNode         <$> node)
+--    <|> (SpNode         <$> node)
+
 
 
 typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (optionMaybe $ reservedOp "=" *> typeSpec)
@@ -205,24 +202,30 @@ proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> (colon *> (typeSpecSimple <|> (withPos $ tSink <$ reserved "sink")))
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
-relation = withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
-                                   <|>
-                                   (False <$ reserved "table")
-                        n <- relIdent
-                        (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
-                        return $ Relation nopos mutable n as cs Nothing
-                 <|> do reserved "view" 
-                        n <- relIdent
-                        (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
-                        rs <- many1 $ withPos $ do 
-                                      try $ lookAhead $ relIdent *> (parens $ commaSep expr) *> reservedOp ":-"
-                                      rn <- relIdent
-                                      when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
-                                      rargs <- parens $ commaSep expr
-                                      reservedOp ":-"
-                                      rhs <- commaSep expr 
-                                      return $ Rule nopos rargs rhs
-                        return $ Relation nopos False n as cs $ Just rs
+relannot = withPos $
+           ((try $ lookAhead $ reservedOp "#" *> (reserved "switch" <|> reserved "switch_port")) *> reservedOp "#") *>
+           ((RelSwitch nopos <$ reserved "switch")
+        <|> (RelPort   nopos <$ reserved "switch_port" <*> ((,) <$> (symbol "(" *> roleIdent) <*> (comma *> roleIdent <* symbol ")"))))
+
+relation = do annot <- optionMaybe relannot
+              withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
+                                      <|>
+                                      (False <$ reserved "table")
+                           n <- relIdent
+                           (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
+                           return $ Relation nopos mutable n as cs annot Nothing
+                    <|> do reserved "view" 
+                           n <- relIdent
+                           (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
+                           rs <- many1 $ withPos $ do 
+                                         try $ lookAhead $ relIdent *> (parens $ commaSep expr) *> reservedOp ":-"
+                                         rn <- relIdent
+                                         when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
+                                         rargs <- parens $ commaSep expr
+                                         reservedOp ":-"
+                                         rhs <- commaSep expr 
+                                         return $ Rule nopos rargs rhs
+                           return $ Relation nopos False n as cs annot $ Just rs
 
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
@@ -246,9 +249,11 @@ role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
 
+{-
 node = withPos $ Node nopos <$> ((NodeSwitch <$ reserved "switch") <|> (NodeHost <$ reserved "host"))
                             <*> identifier 
                             <*> (parens $ commaSep1 $ parens $ (,) <$> roleIdent <* comma <*> roleIdent)
+-}
 
 arg = withPos $ (Field nopos) <$> varIdent <*> (colon *> typeSpecSimple)
 

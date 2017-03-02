@@ -24,12 +24,11 @@ module Syntax( pktVar
              , Field(..)
              , Role(..)
              , Relation(..)
+             , RelAnnotation(..)
              , Constraint(..)
              , Constructor(..)
              , consType
              , Rule(..)
-             , NodeType(..)
-             , Node(..)
              , Function(..)
              , Assume(..)
              , Type(..)
@@ -74,7 +73,6 @@ data Refine = Refine { refinePos       :: Pos
                      , refineRels      :: [Relation]
                      , refineAssumes   :: [Assume]
                      , refineRoles     :: [Role]
-                     , refineNodes     :: [Node]
                      }
 
 instance WithPos Refine where
@@ -94,9 +92,7 @@ instance PP Refine where
                              $$
                              (vcat $ map pp refineAssumes)
                              $$
-                             (vcat $ map pp refineRoles)
-                             $$
-                             (vcat $ map pp refineNodes))
+                             (vcat $ map pp refineRoles))
                     $$
                     rbrace
 
@@ -154,30 +150,6 @@ instance PP Role where
 instance Show Role where
     show = render . pp
 
-data NodeType = NodeSwitch
-              | NodeHost
-              deriving Eq
-
-data Node = Node { nodePos   :: Pos
-                 , nodeType  :: NodeType
-                 , nodeName  :: String
-                 , nodePorts :: [(String, String)]
-                 }
-
-instance WithPos Node where
-    pos = nodePos
-    atPos s p = s{nodePos = p}
-
-instance WithName Node where
-    name = nodeName
-
-instance PP Node where
-    pp Node{..} = case nodeType of
-                       NodeSwitch -> pp "switch"
-                       NodeHost   -> pp "host"
-                  <+>
-                  (parens $ hcat $ punctuate comma $ map (\(i,o) -> parens $ pp i <> comma <+> pp o) nodePorts)
-
 data Constraint = PrimaryKey {constrPos :: Pos, constrFields :: [Expr]}
                 | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [Expr]}
                 | Unique     {constrPos :: Pos, constrFields :: [Expr]}
@@ -199,12 +171,27 @@ instance PP Constraint where
 instance Show Constraint where
     show = render . pp
 
-data Relation = Relation { relPos     :: Pos
-                         , relMutable :: Bool
-                         , relName    :: String
-                         , relArgs    :: [Field]
+data RelAnnotation = RelPort   {annotPos :: Pos, annotRoles :: (String, String)}
+                   | RelSwitch {annotPos :: Pos}
+
+instance WithPos RelAnnotation where
+    pos = annotPos
+    atPos a p = a{annotPos = p}
+
+instance PP RelAnnotation where
+    pp (RelPort _ (inport, outport)) = pp "#switch_port" <> (parens $ pp inport <> comma <> pp outport)
+    pp (RelSwitch _)                 = pp "#switch"
+
+instance Show RelAnnotation where
+    show = render . pp
+
+data Relation = Relation { relPos         :: Pos
+                         , relMutable     :: Bool
+                         , relName        :: String
+                         , relArgs        :: [Field]
                          , relConstraints :: [Constraint]
-                         , relDef     :: Maybe [Rule]}
+                         , relAnnotation  :: Maybe RelAnnotation
+                         , relDef         :: Maybe [Rule]}
 
 instance WithPos Relation where
     pos = relPos
@@ -214,7 +201,8 @@ instance WithName Relation where
     name = relName
 
 instance PP Relation where
-    pp Relation{..} = if' relMutable (pp "state") empty <+>
+    pp Relation{..} = (maybe empty pp relAnnotation) $$
+                      if' relMutable (pp "state") empty <+>
                       (maybe (pp "table") (\_ -> pp "view") relDef) <+> pp relName <+> 
                       (parens $ hsep $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <+>
                       (maybe empty (\_ -> pp "=") relDef) $$

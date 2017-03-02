@@ -139,15 +139,15 @@ table LogicalPort( name      : port_id_t
                  , check (is_nested(nested) => not isRouterPort(type)))
 
 view ParentPort( child_name    : port_id_t
-                , child_switch  : uuid_t
-                , child_type    : port_type_t
-                , parent_name   : port_id_t
-                , parent_switch : uuid_t
-                , parent_type   : port_type_t
-                , parent_nested : nested_port_t
-                , check child_type == parent_type
-                , check child_switch == parent_switch
-                , check parent_nested == NestedPortNone{})
+               , child_switch  : uuid_t
+               , child_type    : port_type_t
+               , parent_name   : port_id_t
+               , parent_switch : uuid_t
+               , parent_type   : port_type_t
+               , parent_nested : nested_port_t
+               , check child_type == parent_type
+               , check child_switch == parent_switch
+               , check parent_nested == NestedPortNone{})
 
 ParentPort(cn: port_id_t, cs: uuid_t, ct, pn, ps, pt, pnest) :- LogicalPort(cn, cs, ct, NestedPort{pn, _}, _),
                                                                 LogicalPort(pn, ps, pt, pnest, _)
@@ -382,9 +382,12 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     //if (LogicalPortSecured.find(sport.name))
     //    if (not LogicalPortSecurity.find(sport, pkt.src)) drop;
     with (p1 in LogicalPortSecured | p1.port == sport.name) {
-        with (p2 in LogicalPortSecurity | p2.port==sport.name and p2.mac == pkt.src) ()
-        default drop
-    };
+        with (p2 in LogicalPortSecurity | p2.port==sport.name and p2.mac == pkt.src) {
+            ()
+        } default {
+            drop
+        }
+    } default ();
 
     // send to connection tracker
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
@@ -406,7 +409,9 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
                      } default ActionAllowRelated;
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (x in CTState | x.port == sport.name) (x.ctst = ct_commit_from(x.ctst, pkt)),
+            ActionAllowRelated -> with (x in CTState | x.port == sport.name) {
+                                       x.ctst = ct_commit_from(x.ctst, pkt)
+                                  },
             _                  -> drop
         }
     };

@@ -19,9 +19,7 @@ limitations under the License.
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
-          --lookupLocalVar, checkLocalVar, getLocalVar,
           lookupRole, checkRole, getRole,
-          lookupNode, checkNode, getNode,
           lookupConstructor, checkConstructor, getConstructor,
           lookupRelation, checkRelation, getRelation,
           ctxVars, ctxRels,
@@ -93,17 +91,6 @@ getVar r c n = fromJust $ lookupVar r c n
 
 isGlobalVar :: Refine -> String -> Bool
 isGlobalVar r v = isJust $ find ((==v) . name) $ refineState r
-
-lookupNode :: Refine -> String -> Maybe Node
-lookupNode Refine{..} n = find ((==n) . name) refineNodes
-
-checkNode :: (MonadError String me) => Pos -> Refine -> String -> me Node
-checkNode p r n = case lookupNode r n of
-                        Nothing -> errR r p $ "Unknown switch: " ++ n
-                        Just sw -> return sw
-
-getNode :: Refine -> String -> Node
-getNode r n = fromJust $ lookupNode r n
 
 lookupConstructor :: Refine -> String -> Maybe Constructor
 lookupConstructor r c = 
