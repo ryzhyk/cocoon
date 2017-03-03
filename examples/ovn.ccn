@@ -315,23 +315,22 @@ typedef acl_action_t = ActionAllow
                      | ActionDrop
                      | ActionReject // Not implemented--currently treated as drop
 
-table ACLFrom ( switch_id : uuid_t
-              , port      : port_id_t
-              , packet    : Packet
-              , action    : acl_action_t 
-              , foreign key (switch_id) references LogicalSwitch(uuid)
-              , foreign key (port)      references LogicalPort(name)
-              , unique (switch_id, port, packet))
+function aclFrom ( switch_id : uuid_t
+                 , port      : port_id_t
+                 , packet    : Packet) : acl_action_t 
 
-table ACLTo   ( switch_id : uuid_t
-              , port      : port_id_t
-              , from      : port_id_t
-              , packet    : Packet
-              , action    : acl_action_t 
-              , foreign key (switch_id) references LogicalSwitch(uuid)
-              , foreign key (port)      references LogicalPort(name)
-              , foreign key (from)      references LogicalPort(name)
-              , unique (switch_id, port, packet))
+//              , foreign key (switch_id) references LogicalSwitch(uuid)
+//              , foreign key (port)      references LogicalPort(name))
+
+function aclTo ( switch_id : uuid_t
+               , port      : port_id_t
+               , from      : port_id_t
+               , packet    : Packet) : acl_action_t 
+
+//              , foreign key (switch_id) references LogicalSwitch(uuid)
+//              , foreign key (port)      references LogicalPort(name)
+//              , foreign key (from)      references LogicalPort(name)
+//              , unique (switch_id, port, packet))
 
 
 
@@ -404,9 +403,7 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     // established | committed -- pass through
     if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
-        var action = with (r in ACLFrom | r.switch_id == port.switch_id and r.port==sport.name and r.packet==pkt) {
-                         r.action
-                     } default ActionAllowRelated;
+        var action = aclFrom(port.switch_id, sport.name, pkt);
         match (action) {
             ActionAllow        -> (),
             ActionAllowRelated -> with (x in CTState | x.port == sport.name) {
@@ -450,11 +447,7 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // established | committed -- pass through
     if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
-        var action = with (r in ACLTo | r.switch_id == port.switch_id and r.port==port.name and r.from == fromport and r.packet == pkt) {
-                          r.action
-                     } default {
-                          ActionAllowRelated
-                     };
+        var action = aclTo(port.switch_id, port.name, fromport, pkt);
         match (action) {
             ActionAllow        -> (),
             ActionAllowRelated -> with (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
