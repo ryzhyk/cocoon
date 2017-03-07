@@ -25,7 +25,7 @@ module Syntax( pktVar
              , Role(..)
              , Relation(..)
              , RelAnnotation(..)
-             , Constraint(..)
+             , Constraint(..), isPrimaryKey, isForeignKey, isUnique, isCheck
              , Constructor(..)
              , consType
              , Rule(..)
@@ -33,7 +33,7 @@ module Syntax( pktVar
              , Assume(..)
              , Type(..)
              , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink
-             , structGetField
+             , structGetField, structFields
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
@@ -155,6 +155,21 @@ data Constraint = PrimaryKey {constrPos :: Pos, constrFields :: [Expr]}
                 | Unique     {constrPos :: Pos, constrFields :: [Expr]}
                 | Check      {constrPos :: Pos, constrCond :: Expr}
                 
+isPrimaryKey :: Constraint -> Bool
+isPrimaryKey PrimaryKey{} = True
+isPrimaryKey _            = False
+
+isForeignKey :: Constraint -> Bool
+isForeignKey ForeignKey{} = True
+isForeignKey _            = False
+
+isUnique :: Constraint -> Bool
+isUnique Unique{} = True
+isUnique _        = False
+
+isCheck :: Constraint -> Bool
+isCheck Check{} = True
+isCheck _       = False
 
 instance WithPos Constraint where
     pos = constrPos
@@ -320,6 +335,9 @@ tSink     = TSink     nopos
 structGetField :: [Constructor] -> String -> Field
 structGetField cs f = trace ("structGetField " ++ show f ++ " " ++ show cs) $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
 
+structFields :: [Constructor] -> [Field]
+structFields cs = nub $ concatMap consArgs cs
+
 instance Eq Type where
     (==) (TLocation _)      (TLocation _)       = True
     (==) (TBool _)          (TBool _)           = True
@@ -461,7 +479,7 @@ instance PP e => PP (ExprNode e) where
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
     pp (EFork _ v t c b)   = (pp "fork" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
-    pp (EWith _ v t c b d) = (pp "with" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
+    pp (EWith _ v t c b d) = (pp "the" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
                              $$ (nest' $ pp b)
                              $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
     pp (EAny _ v t c b d)  = (pp "any" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 

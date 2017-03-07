@@ -168,9 +168,7 @@ relValidate r Relation{..} = do
 
 relValidate2 :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate2 r rel@Relation{relAnnotation=annot, ..} = do 
-    assertR r ((length $ filter (\c -> case c of
-                                            PrimaryKey _ _ -> True
-                                            _              -> False) relConstraints) <= 1) relPos $ "Multiple primary keys are not allowed"
+    assertR r ((length $ filter isPrimaryKey relConstraints) <= 1) relPos $ "Multiple primary keys are not allowed"
     mapM_ (constraintValidate r rel) relConstraints
     maybe (return ()) (mapM_ (ruleValidate r rel)) relDef
     case annot of

@@ -217,7 +217,7 @@ LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP4{mac, _})
 LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP6{mac, _})
 LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMAC{mac})
 
-// Eth and mac addresses must be unique with logical switch
+// Eth and mac addresses must be unique the logical switch
 view LogicalSwitchMAC( switch_id : uuid_t
                       , port      : port_id_t
                       , mac       : mac_addr_t
@@ -291,9 +291,9 @@ logical_router_port_peered(p) :- LogicalRouterPort(p, _, _, _, _, PeerRouter{_})
 //assume LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}) and LogicalRouterPort(peer, _, _, _, _, PeerRouter{_})
 
 /*assume p: port_id_t 
-with (lrp in LogicalRouterPort | lrp.name == p) {
+the (lrp in LogicalRouterPort | lrp.name == p) {
     match lrp.peer {
-        PeerRouter{peer} -> with (peered in logical_router_port_peered | port == peer) true 
+        PeerRouter{peer} -> the (peered in logical_router_port_peered | port == peer) true 
                             default false,
         _                -> true
     }
@@ -336,13 +336,13 @@ function aclTo ( switch_id : uuid_t
 
 procedure sourcePort(port: LogicalPort): LogicalPort =
     // trunk port?
-    with (tport in TrunkPort | tport.port == port.name) {
+    the (tport in TrunkPort | tport.port == port.name) {
         if (pkt.vlan == VLANNone) drop;
-        var sport = with (x in LogicalPort | x.nested == NestedPort{port.name, pkt.vlan.vid}) x;
+        var sport = the (x in LogicalPort | x.nested == NestedPort{port.name, pkt.vlan.vid}) x;
         pkt.vlan = VLANNone;
         sport
     } default {
-        // drop packets with VLAN tags or multicast Ethernet source addresses
+        // drop packets the VLAN tags or multicast Ethernet source addresses
         if (pkt.vlan != VLANNone) drop;
         port
     }
@@ -380,8 +380,8 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     //TODO
     //if (LogicalPortSecured.find(sport.name))
     //    if (not LogicalPortSecurity.find(sport, pkt.src)) drop;
-    with (p1 in LogicalPortSecured | p1.port == sport.name) {
-        with (p2 in LogicalPortSecurity | p2.port==sport.name and p2.mac == pkt.src) {
+    the (p1 in LogicalPortSecured | p1.port == sport.name) {
+        the (p2 in LogicalPortSecurity | p2.port==sport.name and p2.mac == pkt.src) {
             ()
         } default {
             drop
@@ -391,7 +391,7 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     // send to connection tracker
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
     var cts: ct_flow_state_t;
-    with (x in CTState | x.port==sport.name) {
+    the (x in CTState | x.port==sport.name) {
         (x.ctst, cts) = ct_track_from(x.ctst, pkt)
     } default {
         (var st, cts) = ct_track_from(ct_state_new(), pkt)
@@ -406,7 +406,7 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
         var action = aclFrom(port.switch_id, sport.name, pkt);
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (x in CTState | x.port == sport.name) {
+            ActionAllowRelated -> the (x in CTState | x.port == sport.name) {
                                        x.ctst = ct_commit_from(x.ctst, pkt)
                                   },
             _                  -> drop
@@ -419,14 +419,14 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     } else {
         // knownAddr(port.sw, pkt.dst) {
         // unicast to known destination
-        with (dportmac in LogicalSwitchMAC | dportmac.switch_id==port.switch_id and dportmac.mac == pkt.dst) {
-            with (dport in LogicalPort | dport.name == dportmac.port) {
+        the (dportmac in LogicalSwitchMAC | dportmac.switch_id==port.switch_id and dportmac.mac == pkt.dst) {
+            the (dport in LogicalPort | dport.name == dportmac.port) {
                 deliver(dport, sport.name)
             }
         } default {
             // otherwise, multicast to all ports that accept packets for unknown destinations
             fork (accepts in LogicalSwitchAcceptsUnknown | accepts.switch_id==port.switch_id) {
-                with (dport in LogicalPort | dport.name == accepts.port) {
+                the (dport in LogicalPort | dport.name == accepts.port) {
                     deliver(dport, sport.name)
                 }
             }
@@ -436,7 +436,7 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
 procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // send to connection tracker
     var cts : ct_flow_state_t;
-    with (s in CTState | s.port == port.name) {
+    the (s in CTState | s.port == port.name) {
         (s.ctst, cts) = ct_track_to(s.ctst, pkt)
     } default {
         (var st, cts) = ct_track_to(ct_state_new(), pkt)
@@ -450,15 +450,15 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
         var action = aclTo(port.switch_id, port.name, fromport, pkt);
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> with (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
+            ActionAllowRelated -> the (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
             _                  -> drop
         }
     };
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address
-        with (p in LogicalPortSecured | p.port == port.name) {
-            with (x in LogicalPortSecurity | x.port == port.name and x.mac == pkt.dst) ()
+        the (p in LogicalPortSecured | p.port == port.name) {
+            the (x in LogicalPortSecurity | x.port == port.name and x.mac == pkt.dst) ()
             default drop
         } default ()
     };
@@ -467,7 +467,7 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
         NestedPortNone         -> lportSendOut(port),
         NestedPort{pport, tag} -> {
             pkt.vlan = VLAN{0, 0, tag};
-            with (outport in LogicalPort | outport.name == pport)
+            the (outport in LogicalPort | outport.name == pport)
                 lportSendOut(outport)
         }
     }
@@ -476,7 +476,7 @@ procedure lportSendOut(port: LogicalPort): sink =
     if iLogicalPort(port) {
         send LogicalPortOut[port]
     } else {
-        with (rp in LogicalRouterPort | rp.name==port.type.rport)
+        the (rp in LogicalRouterPort | rp.name==port.type.rport)
             send RouterPortIn[rp]
     }
 
@@ -491,7 +491,7 @@ Logical Switch Datapaths
 Ingress Table 0: Admission Control and Ingress Port Security
 
 Ingress table 0 contains these logical flows:
-· Priority 100 flows to drop packets with VLAN tags or multicast 
+· Priority 100 flows to drop packets the VLAN tags or multicast 
 Ethernet source addresses.
 · Priority 50 flows that implement ingress port security for each 
 enabled logical port.  For logical ports on which port security is 
@@ -516,12 +516,12 @@ Ingress table 2: from-lport ACLs
 
 Logical flows in this table closely reproduce those in the ACL table 
 in the OVN_Northbound database for the from-lport direction.  allow 
-ACLs translate into logical flows with the next; action, allow-related 
-ACLs translate into logical flows with the ct_next; action, other ACLs 
+ACLs translate into logical flows the the next; action, allow-related 
+ACLs translate into logical flows the the ct_next; action, other ACLs 
 translate to drop;.  The priority values from the ACL table are used 
 directly.
 
-Ingress  table  2  also  contains  a priority 0 flow with action 
+Ingress  table  2  also  contains  a priority 0 flow the action 
 next;, so that ACLs allow packets by default.  If the logical datapath 
 has a statetful ACL, the following flows will also be added:
 
@@ -546,9 +546,9 @@ Ingress Table 3: Destination Lookup
 This table implements switching behavior.  It contains these logical 
 flows:
 
-· A priority-100 flow that outputs all packets with an Ethernet 
+· A priority-100 flow that outputs all packets the an Ethernet 
 broadcast or multicast eth.dst to the MC_FLOOD multicast  group,  
-which ovn-northd populates with all enabled logical ports.
+which ovn-northd populates the all enabled logical ports.
 
 · One priority-50 flow that matches each known Ethernet address 
 against eth.dst and outputs the packet to the single associated output 
@@ -556,7 +556,7 @@ port.
 
 · One  priority-0 fallback flow that matches all packets and outputs 
 them to the MC_UNKNOWN multicast group, which ovn-northd populates 
-with all enabled logical ports that accept unknown destination 
+the all enabled logical ports that accept unknown destination 
 packets.  As a small optimization, if no logical ports accept unknown 
 destination packets, ovn-northd omits this multicast group and logical 
 flow.
@@ -572,14 +572,14 @@ This is similar to ingress table 2 except for to-lport ACLs.
 Egress Table 2: Egress Port Security
 
 This is similar to the ingress port security logic in ingress table 0, 
-but with important differences.  Most obviously, outport and eth.dst 
+but the important differences.  Most obviously, outport and eth.dst 
 are checked instead of inport and eth.src.  Second, packets directed 
 to broadcast or multicast eth.dst are always accepted instead of being 
 subject to the port security rules; this is implemented through a 
-priority-100 flow that matches on eth.mcast with action output;.  
+priority-100 flow that matches on eth.mcast the action output;.  
 Finally, to ensure that even broadcast and multicast packets are not 
 delivered to disabled logical ports, a priority-150 flow for each 
-disabled logical outport overrides the priority-100 flow with a drop; 
+disabled logical outport overrides the priority-100 flow the a drop; 
 action.
 
 Logical Router Datapaths
@@ -588,12 +588,12 @@ Ingress Table 0: L2 Admission Control
 This table drops packets that the router shouldn’t see at all based on 
 their Ethernet headers.  It contains the following flows:
 
-· Priority-100 flows to drop packets with VLAN tags or multicast 
+· Priority-100 flows to drop packets the VLAN tags or multicast 
 Ethernet source addresses.
 
-· For each enabled router port P with Ethernet address E, a 
+· For each enabled router port P the Ethernet address E, a 
 priority-50 flow that matches inport == P && (eth.mcast || eth.dst == 
-E), with action next;.
+E), the action next;.
 
 Other packets are implicitly dropped.
 
@@ -633,7 +633,7 @@ inport, and use the same actions in which S is a function of inport.
     · ARP reply.  These flows reply to ARP requests for the router’s 
 own IP address.  For each router port P that owns IP address A and 
 Ethernet address E, a priority-90 flow matches inport == P && arp.tpa 
-== A && arp.op == 1 (ARP request) with the following actions:
+== A && arp.op == 1 (ARP request) the the following actions:
 
                      eth.dst = eth.src;
                      eth.src = E;
@@ -651,7 +651,7 @@ unreachable messages in reply to UDP datagrams directed to the
 router’s IP address.  The logical router doesn’t accept any UDP 
 traffic so it always generates such a reply.
 
-These flows should not match IP fragments with nonzero offset.
+These flows should not match IP fragments the nonzero offset.
 
 Details TBD.  Not yet implemented.
 
@@ -660,7 +660,7 @@ to TCP datagrams directed to the router’s IP address.  The logical
 router doesn’t accept any TCP traffic so it always generates such a 
 reply.
 
-These flows should not match IP fragments with nonzero offset.
+These flows should not match IP fragments the nonzero offset.
 
 Details TBD.  Not yet implemented.
 
@@ -668,31 +668,31 @@ Details TBD.  Not yet implemented.
 unreachable messages in reply to packets directed to the router’s IP 
 address on IP protocols other than UDP, TCP, and ICMP.
 
-These flows should not match IP fragments with nonzero offset.
+These flows should not match IP fragments the nonzero offset.
 
 Details TBD.  Not yet implemented.
 
 · Drop other IP traffic to this router.  These flows drop any other 
 traffic destined to an IP address of this router that is not already 
 handled by one of the flows  above, which amounts to ICMP (other than 
-echo requests) and fragments with nonzero offsets.  For each IP 
+echo requests) and fragments the nonzero offsets.  For each IP 
 address A owned by the router, a priority-60 flow matches ip4.dst == A 
 and drops the traffic.
 
 The flows above handle all of the traffic that might be directed to 
-the router itself.  The following flows (with lower priorities) handle 
+the router itself.  The following flows (the lower priorities) handle 
 the remaining traffic, potentially for forwarding:
 
-· Drop Ethernet local broadcast.  A priority-50 flow with match 
+· Drop Ethernet local broadcast.  A priority-50 flow the match 
 eth.bcast drops traffic destined to the local Ethernet broadcast 
 address.  By definition this traffic should not be forwarded.
 
-·  Drop IP multicast.  A priority-50 flow with match ip4.mcast drops 
+·  Drop IP multicast.  A priority-50 flow the match ip4.mcast drops 
 IP multicast traffic.
 
 · ICMP time exceeded.  For each router port P, whose IP address is A, 
-a priority-40 flow with match inport == P && ip.ttl == {0, 1} && 
-!ip.later_frag matches packets whose TTL has expired, with the 
+a priority-40 flow the match inport == P && ip.ttl == {0, 1} && 
+!ip.later_frag matches packets whose TTL has expired, the the 
 following actions to send an ICMP time exceeded reply:
 
                      icmp4 {
@@ -706,9 +706,9 @@ following actions to send an ICMP time exceeded reply:
 
 Not yet implemented.
 
-· TTL  discard.   A  priority-30  flow with match ip.ttl == {0, 1} and 
+· TTL  discard.   A  priority-30  flow the match ip.ttl == {0, 1} and 
 actions drop; drops other packets whose TTL has expired, that should 
-not receive a ICMP error reply (i.e. fragments with nonzero offset).
+not receive a ICMP error reply (i.e. fragments the nonzero offset).
 
 · Next table.  A priority-0 flows match all packets that aren’t 
 already handled and uses actions next; to feed them to the ingress 
@@ -724,8 +724,8 @@ resolution.
 
 This table contains the following logical flows:
 
-· Routing table. For each route to IPv4 network N with netmask M, a 
-logical flow with match ip4.dst == N/M, whose priority is the number 
+· Routing table. For each route to IPv4 network N the netmask M, a 
+logical flow the match ip4.dst == N/M, whose priority is the number 
 of 1-bits in M, has the following actions:
 
                      ip.ttl--;
@@ -739,7 +739,7 @@ If the route has a gateway, G is the gateway IP address, otherwise it
 is ip4.dst.
 
 · Destination unreachable.  For each router port P, which owns IP 
-address A, a priority-0 logical flow with match in_port == P && 
+address A, a priority-0 logical flow the match in_port == P && 
 !ip.later_frag && !icmp has the following actions:
 
                      icmp4 {
@@ -755,7 +755,7 @@ address A, a priority-0 logical flow with match in_port == P &&
 message itself cannot be routed.)
 
 These flows are omitted if the logical router has a default route, 
-that is, a route with netmask 0.0.0.0.
+that is, a route the netmask 0.0.0.0.
 
 Ingress Table 3: ARP Resolution
 
@@ -765,8 +765,8 @@ resolves the IP address in reg0 into an output port in outport and an
 Ethernet address in eth.dst, using the following flows:
 
 · Known MAC bindings.  For each IP address A whose host is known to 
-have Ethernet address HE and reside on router port P with Ethernet 
-address  PE,  a  priority-200 flow with match reg0 == A has the 
+have Ethernet address HE and reside on router port P the Ethernet 
+address  PE,  a  priority-200 flow the match reg0 == A has the 
 following actions:
 
                      eth.src = PE;
@@ -782,8 +782,8 @@ logical routers, MAC bindings can be known statically from the mac and
 network column in the Logical_Router_Port table.
 
 · Unknown MAC bindings.  For each non-gateway route to IPv4 network N 
-with netmask M on router port P that owns IP address A and Ethernet 
-address E, a logical flow with match ip4.dst == N/M, whose priority is 
+the netmask M on router port P that owns IP address A and Ethernet 
+address E, a logical flow the match ip4.dst == N/M, whose priority is 
 the number of 1-bits in M, has the following actions:
 
                      arp {
@@ -808,7 +808,7 @@ Not yet implemented.
 
 Packets that reach this table are ready for delivery.  It contains 
 priority-100 logical flows that match packets on each enabled logical 
-router port, with action output;.
+router port, the action output;.
 
 */
 /*

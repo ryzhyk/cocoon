@@ -74,7 +74,7 @@ reservedNames = ["_",
                  "unique",
                  "var",
                  "view",
-                 "with"]
+                 "the"]
 
 
 ccnDef = emptyDef { T.commentStart      = "/*"
@@ -369,7 +369,7 @@ efork   = eFork    <$ reserved "fork"
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
-ewith   = eWith    <$ reserved "with" 
+ewith   = eWith    <$ reserved "the" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
