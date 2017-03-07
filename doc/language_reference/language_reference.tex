@@ -315,14 +315,18 @@ that can only be manipulated by external functions.
 \end{bnflisting}
 
 \begin{bnflisting}{}
-<bitType>    := "bit" "<" <decimal> ">"
-<intType>    := "int"
+<bitType>    := "bit" "<" <decimal> ">"            // bit-vector
+<intType>    := "int"                              // mathematical integer
 <stringType> := "string"
 <boolType>   := "bool"
-<userType>   := <typeName>
-<arrType>    := "[" <typeSpec> ";" <decimal> "]"
-<structType> := <constructor> ("|" constructor)* 
-<tupleType>  := "(" <typeSpec-list> ")"
+<userType>   := <typeName>                         // type alias
+<arrType>    := "[" <typeSpec> ";" <decimal> "]"   // fixed-size array
+<structType> := <constructor> ("|" <constructor>)*
+<tupleType>  := "(" <typeSpec-list> ")"            // tuple
+
+<constructor> := <constructorName>                 // constructor without arguments
+               | <constructorName> "{"<arg-list>"}"// constructor with arguments
+<arg> := <varName> ":" <typeSpec>
 \end{bnflisting}
 
 Note:
@@ -410,9 +414,9 @@ or to delay function definition to subsequent refinements or to run time.
 Undefined functions and treated as uninterpreted functions by the verifier.
 
 \begin{bnflisting}{}
-<funcDecl> := "function" <functionName> "(" [<arg> ("," <arg>)*] ")" ":" <typeSpec>
+<funcDecl> := "function" <functionName> "(" [<arg-list>] ")" ":" <typeSpec>
                          ["=" <expression>] // optional function body
-<procDecl> := "procedure" <functionName> "(" [<arg> ("," <arg>)* ] ")" ":" <typeSpec>
+<procDecl> := "procedure" <functionName> "(" [<arg-list>] ")" ":" <typeSpec>
                          "=" <expression>   // mandatory procedure body
 <arg> := <varName> ":" <typeSpec>
 \end{bnflisting}
