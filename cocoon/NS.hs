@@ -128,7 +128,9 @@ ctxVars r ctx =
     case ctx of
          CtxRefine            -> (map f2mf $ refineState r, [])
          CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl) : prvars)
-         CtxRoleGuard rl      -> ([], (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl) : plvars ++ prvars)
+         CtxRoleGuard rl      -> ([], [(roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl)])
+         CtxPktGuard rl       -> ([], [ (pktVar, Just $ tUser packetTypeName)
+                                      , (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl)])
          CtxFunc f _          -> let plvars' = filter (isGlobalVar r . fst) plvars 
                                      prvars' = filter (isGlobalVar r . fst) prvars in
                                  if funcPure f    
@@ -198,6 +200,8 @@ ctxRels :: Refine -> ECtx -> ([Relation], [Relation])
 ctxRels r ctx = 
     case ctx of
          CtxRefine         -> partition relMutable $ refineRels r
+         CtxRoleGuard _    -> ([],[])
+         CtxPktGuard _     -> ([],[])
          CtxRelKey _       -> ([],[])
          CtxRelForeign _ _ -> ([],[])
          CtxCheck _        -> ([],[])

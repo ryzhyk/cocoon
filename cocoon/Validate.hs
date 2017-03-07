@@ -245,7 +245,7 @@ roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
                                 assertR r (not $ relMutable rel) rolePos 
                                         $ "Mutable relation " ++ name rel ++ " cannot be used in role declaration"
                                 exprValidate r (CtxRoleGuard rl) roleCond
-                                exprValidate r (CtxRoleGuard rl) rolePktGuard
+                                exprValidate r (CtxPktGuard rl) rolePktGuard
                                 exprValidate r (CtxRole rl) roleBody
 
 roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
