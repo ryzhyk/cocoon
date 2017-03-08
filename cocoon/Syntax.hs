@@ -33,7 +33,7 @@ module Syntax( pktVar
              , Assume(..)
              , Type(..)
              , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink
-             , structGetField, structFields, structFieldConstructors
+             , structGetField, structFields, structFieldConstructors, structFieldGuarded
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
@@ -338,22 +338,27 @@ structGetField cs f = trace ("structGetField " ++ show f ++ " " ++ show cs) $ fr
 structFields :: [Constructor] -> [Field]
 structFields cs = nub $ concatMap consArgs cs
 
+-- All constructors that contain the field
 structFieldConstructors :: [Constructor] -> String -> [Constructor]
-structFieldConstructors cs f = filter (\c -> isJust $ find ((==f) . name) $ consArgs c) cs
+structFieldConstructors cs f = filter (isJust . find ((==f) . name) . consArgs) cs
+
+-- True iff the field is defined in all constructors
+structFieldGuarded :: [Constructor] -> String -> Bool
+structFieldGuarded cs f = all (isJust . find ((==f) . name) . consArgs) cs
 
 instance Eq Type where
-    (==) (TLocation _)      (TLocation _)       = True
-    (==) (TBool _)          (TBool _)           = True
-    (==) (TInt _)           (TInt _)            = True
-    (==) (TString _)        (TString _)         = True
-    (==) (TBit _ w1)        (TBit _ w2)         = w1 == w2
-    (==) (TArray _ t1 l1)   (TArray _ t2 l2)    = t1 == t2 && l1 == l2
-    (==) (TStruct _ cs1)    (TStruct _ cs2)     = cs1 == cs2
-    (==) (TTuple _ ts1)     (TTuple _ ts2)      = ts1 == ts2
-    (==) (TOpaque _ n1)     (TOpaque _ n2)      = n1 == n2
-    (==) (TUser _ n1)       (TUser _ n2)        = n1 == n2
-    (==) (TSink _)          (TSink _)           = True
-    (==) _                  _                   = False
+    (==) (TLocation _)    (TLocation _)    = True
+    (==) (TBool _)        (TBool _)        = True
+    (==) (TInt _)         (TInt _)         = True
+    (==) (TString _)      (TString _)      = True
+    (==) (TBit _ w1)      (TBit _ w2)      = w1 == w2
+    (==) (TArray _ t1 l1) (TArray _ t2 l2) = t1 == t2 && l1 == l2
+    (==) (TStruct _ cs1)  (TStruct _ cs2)  = cs1 == cs2
+    (==) (TTuple _ ts1)   (TTuple _ ts2)   = ts1 == ts2
+    (==) (TOpaque _ n1)   (TOpaque _ n2)   = n1 == n2
+    (==) (TUser _ n1)     (TUser _ n2)     = n1 == n2
+    (==) (TSink _)        (TSink _)        = True
+    (==) _                _                = False
 
 instance WithPos Type where
     pos = typePos

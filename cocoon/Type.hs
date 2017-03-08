@@ -17,7 +17,7 @@ limitations under the License.
 {-# LANGUAGE FlexibleContexts #-}
 
 module Type( WithType(..) 
-           , exprType, exprType', exprTypeMaybe
+           , exprType, exprType', exprTypeMaybe, exprNodeType
            , exprTraverseTypeM
            , typ', typ''
            , isBool, isBit, isInt, isLocation, isStruct, isArray
@@ -48,47 +48,50 @@ instance WithType Field where
     typ = fieldType
 
 exprTraverseTypeM :: (Monad m) => Refine -> (ECtx -> ExprNode (Maybe Type) -> m ()) -> ECtx -> Expr -> m ()
-exprTraverseTypeM r = exprTraverseCtxWithM (\ctx e -> return $ exprType' r ctx e) 
+exprTraverseTypeM r = exprTraverseCtxWithM (\ctx e -> return $ exprNodeType r ctx e) 
 
 exprType :: Refine -> ECtx -> Expr -> Type
 exprType r ctx e = maybe (error $ "exprType: expression " ++ show e ++ " has unknown type") id $ exprTypeMaybe r ctx e
 
+exprType' :: Refine -> ECtx -> Expr -> Type
+exprType' r ctx e = typ' r $ exprType r ctx e
+
 exprTypeMaybe :: Refine -> ECtx -> Expr -> Maybe Type
-exprTypeMaybe r ctx e = exprFoldCtx (\ctx' e' -> fmap ((flip atPos) (pos e')) $ exprType' r ctx' e') ctx e
+exprTypeMaybe r ctx e = exprFoldCtx (\ctx' e' -> fmap ((flip atPos) (pos e')) $ exprNodeType r ctx' e') ctx e
 
-exprType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
-exprType' r ctx e = fmap ((flip atPos) (pos e)) $ exprType'' r ctx e
+exprNodeType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
+exprNodeType r ctx e = fmap ((flip atPos) (pos e)) $ exprNodeType' r ctx e
 
-exprType'' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
-exprType'' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
+exprNodeType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
+exprNodeType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
                                          fromJust $ lookup v $ lvs ++ rvs 
-exprType'' _ _   (EPacket _)           = Just $ tUser packetTypeName
-exprType'' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
-exprType'' r _   (EField _ e f)        = case e of
+exprNodeType' _ _   (EPacket _)           = Just $ tUser packetTypeName
+exprNodeType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
+exprNodeType' r _   (EField _ e f)        = case e of
                                               Nothing -> Nothing
                                               Just e' -> let TStruct _ cs = typ' r e' in
                                                          fmap fieldType $ find ((==f) . name) $ concatMap consArgs cs
-exprType'' _ _   (ELocation _ _ _)     = Just tLocation
-exprType'' _ _   (EBool _ _)           = Just tBool
-exprType'' r ctx (EInt _ _)            = case ctxExpectType r ctx of
+exprNodeType' _ _   (ELocation _ _ _)     = Just tLocation
+exprNodeType' _ _   (EBool _ _)           = Just tBool
+exprNodeType' r ctx (EInt _ _)            = case ctxExpectType r ctx of
                                              t@(Just (TBit _ _)) -> t
                                              _                   -> Just tInt
-exprType'' _ _   (EString _ _)         = Just tString
-exprType'' _ _   (EBit _ w _)          = Just $ tBit w
-exprType'' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
-exprType'' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
-exprType'' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
-exprType'' _ _   (EMatch _ _ cs)       = snd $ head cs
-exprType'' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
-exprType'' _ _   (ESeq _ _ e2)         = e2
-exprType'' _ _   (EPar _ _ _)          = Just tSink
-exprType'' r _   (EITE _ _ t e)        = if (maybe False (\t' -> typ' r t' == tSink) t)
+exprNodeType' _ _   (EString _ _)         = Just tString
+exprNodeType' _ _   (EBit _ w _)          = Just $ tBit w
+exprNodeType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
+exprNodeType' _ _   (ETuple _ fs)         = fmap tTuple $ sequence fs
+exprNodeType' _ _   (ESlice _ _ h l)      = Just $ tBit $ h - l + 1
+exprNodeType' _ _   (EMatch _ _ cs)       = snd $ head cs
+exprNodeType' r ctx (EVarDecl _ _)        = ctxExpectType r ctx
+exprNodeType' _ _   (ESeq _ _ e2)         = e2
+exprNodeType' _ _   (EPar _ _ _)          = Just tSink
+exprNodeType' r _   (EITE _ _ t e)        = if (maybe False (\t' -> typ' r t' == tSink) t)
                                             then maybe (Just $ tTuple []) id e
                                             else t
-exprType'' _ _   (EDrop _)             = Just tSink
-exprType'' _ _   (ESet _ _ _)          = Just $ tTuple []
-exprType'' _ _   (ESend  _ _)          = Just tSink
-exprType'' r _   (EBinOp _ op (Just e1) (Just e2)) = 
+exprNodeType' _ _   (EDrop _)             = Just tSink
+exprNodeType' _ _   (ESet _ _ _)          = Just $ tTuple []
+exprNodeType' _ _   (ESend  _ _)          = Just tSink
+exprNodeType' r _   (EBinOp _ op (Just e1) (Just e2)) = 
                                   case op of
                                        Eq     -> Just tBool
                                        Neq    -> Just tBool
@@ -107,16 +110,16 @@ exprType'' r _   (EBinOp _ op (Just e1) (Just e2)) =
                                        Concat -> Just $ tBit (typeWidth t1 + typeWidth t2)
     where t1 = typ' r e1
           t2 = typ' r e2
-exprType'' _ _   (EBinOp _ ShiftR e1 _) = e1
-exprType'' _ _   (EBinOp _ ShiftL e1 _) = e1
-exprType'' _ _   (EBinOp _ _ _ _)       = Nothing
-exprType'' _ _   (EUnOp _ Not _)        = Just tBool
-exprType'' _ _   (EFork _ _ _ _ _)      = Just tSink
-exprType'' _ _   (EWith _ _ _ _ b _)    = b
-exprType'' _ _   (EAny  _ _ _ _ b _)    = b
-exprType'' r ctx (EPHolder _)           = ctxExpectType r ctx
-exprType'' _ _   (ETyped _ _ t)         = Just t
-exprType'' _ _   (ERelPred _ _ _)       = Just tBool
+exprNodeType' _ _   (EBinOp _ ShiftR e1 _) = e1
+exprNodeType' _ _   (EBinOp _ ShiftL e1 _) = e1
+exprNodeType' _ _   (EBinOp _ _ _ _)       = Nothing
+exprNodeType' _ _   (EUnOp _ Not _)        = Just tBool
+exprNodeType' _ _   (EFork _ _ _ _ _)      = Just tSink
+exprNodeType' _ _   (EWith _ _ _ _ b _)    = b
+exprNodeType' _ _   (EAny  _ _ _ _ b _)    = b
+exprNodeType' r ctx (EPHolder _)           = ctxExpectType r ctx
+exprNodeType' _ _   (ETyped _ _ t)         = Just t
+exprNodeType' _ _   (ERelPred _ _ _)       = Just tBool
 
 
 -- Unwrap typedef's down to actual type definition
