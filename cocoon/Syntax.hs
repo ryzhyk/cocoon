@@ -33,7 +33,7 @@ module Syntax( pktVar
              , Assume(..)
              , Type(..)
              , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink
-             , structGetField, structFields
+             , structGetField, structFields, structFieldConstructors
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
@@ -337,6 +337,9 @@ structGetField cs f = trace ("structGetField " ++ show f ++ " " ++ show cs) $ fr
 
 structFields :: [Constructor] -> [Field]
 structFields cs = nub $ concatMap consArgs cs
+
+structFieldConstructors :: [Constructor] -> String -> [Constructor]
+structFieldConstructors cs f = filter (\c -> isJust $ find ((==f) . name) $ consArgs c) cs
 
 instance Eq Type where
     (==) (TLocation _)      (TLocation _)       = True

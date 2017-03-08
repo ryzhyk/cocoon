@@ -215,6 +215,7 @@ typeEnumerate r t =
 -- Infer expected type from context
 ctxExpectType :: Refine -> ECtx -> Maybe Type
 ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
+ctxExpectType _ (CtxPktGuard _)                    = Just tBool
 ctxExpectType _ (CtxRole _)                        = Just tSink
 ctxExpectType _ (CtxFunc f _)                      = Just $ funcType f
 ctxExpectType _ (CtxAssume _)                      = Just tBool

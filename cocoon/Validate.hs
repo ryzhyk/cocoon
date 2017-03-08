@@ -211,21 +211,32 @@ constraintValidate r rel Check{..} = exprValidate r (CtxCheck rel) constrCond
 constraintValidate r rel constr = do
     -- TODO: should all keys be different?
     mapM_ (exprValidate r (CtxRelKey rel)) $ constrFields constr
+    let parent (E (EField _ p _)) = Just p
+        parent _                  = Nothing
+    let field  (E (EField _ _ f)) = f
+        field  e                  = error $ "constraintValidate.field " ++ show e
+    let (f0 : fs) = constrFields constr
+    mapM_ (\f -> assertR r (parent f == parent f0) (pos f) 
+                 $ "Columns in a key or unique constraint must be members of the same struct") fs
+    mapM_ (\f -> assertR r (maybe True (\e -> let TStruct _ cs = typ' r $ exprType r (CtxRelKey rel) e in
+                                              structFieldConstructors cs (field f) == structFieldConstructors cs (field f0)) $ parent f) (pos f) 
+                 $ "Columns in a key or unique constraint must belong to the same constructor") fs
     case constr of 
-          ForeignKey{..} -> do frel <- checkRelation (pos constr) r CtxRefine constrForeign
-                               mapM_ (exprValidate r (CtxRelForeign rel constr)) constrFArgs
-                               assertR r (length constrFArgs == length constrFields) (pos constr)
-                                       $ "Number of foreign fields does not match the number of local fields"
-                               mapM_ (\(e1,e2) -> do let t1 = exprType r (CtxRelKey rel) e1
-                                                     let t2 = exprType r (CtxRelForeign rel constr) e2
-                                                     matchType (pos e1) r t1 t2) $ zip constrFields constrFArgs
-                               assertR r (relCheckKey frel constrFArgs) (pos constr)
-                                       $ "Foreign fields do not form a primary or unique key"
-          _              -> return () 
+         ForeignKey{..} -> do frel <- checkRelation (pos constr) r CtxRefine constrForeign
+                              mapM_ (exprValidate r (CtxRelForeign rel constr)) constrFArgs
+                              assertR r (length constrFArgs == length constrFields) (pos constr)
+                                      $ "Number of foreign fields does not match the number of local fields"
+                              mapM_ (\(e1,e2) -> do let t1 = exprType r (CtxRelKey rel) e1
+                                                    let t2 = exprType r (CtxRelForeign rel constr) e2
+                                                    matchType (pos e1) r t1 t2) $ zip constrFields constrFArgs
+                              assertR r (relCheckKey frel constrFArgs) (pos constr)
+                                      $ "Foreign fields do not form a primary key"
+         PrimaryKey{..} -> -- all columns are not guarded
+         _              -> return () 
 
 relCheckKey :: Relation -> [Expr] -> Bool
 relCheckKey Relation{..} fs = isJust $ find check relConstraints
-    where check (Unique _ fs')     = fs' == fs
+    where check (Unique _ _)       = False -- fs' == fs
           check (PrimaryKey _ fs') = fs' == fs
           check _                  = False
 
