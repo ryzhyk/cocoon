@@ -24,6 +24,7 @@ import System.Console.GetOpt
 
 import Parse
 import Validate
+import SQL
 
 data TOption = CCN String
              | Bound String
