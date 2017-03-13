@@ -32,6 +32,7 @@ import Name
 import Expr
 import Refine
 import Relation
+import SQL
 --import Statement
 --import Builtins
 
@@ -144,9 +145,20 @@ typeValidate r (TStruct _ cs) = do uniqNames (\c -> "Multiple definitions of con
                                                                      "Argument " ++ name a1 ++ " is re-declared with a different types. Previous declaration: " ++ (show $ pos a1)) 
                                                        $ zip as $ tail as)
                                            $ sortAndGroup name $ concatMap consArgs cs
+typeValidate r (TTuple _ ts)  = mapM_ (typeValidate r) ts
+typeValidate r (TArray _ t _) = typeValidate r t
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
+
+relTypeValidate :: (MonadError String me) => Refine -> Pos -> Type -> me ()
+relTypeValidate r p   TArray{}       = errR r p "Arrays are not allowed in relations"
+relTypeValidate r p   TTuple{}       = errR r p "Tuples are not allowed in relations"
+relTypeValidate r p   TOpaque{}      = errR r p "Opaque columns are not allowed in relations"
+relTypeValidate r p   TInt{}         = errR r p "Arbitrary-precision integers are not allowed in relations"
+relTypeValidate r p   (TStruct _ cs) = mapM_ (relTypeValidate r p . typ) $ structFields cs
+relTypeValidate r p   t@TUser{}      = relTypeValidate r p $ typ' r t
+relTypeValidate _ _   _              = return ()
 
 consValidate :: (MonadError String me) => Refine -> Constructor -> me ()
 consValidate r Constructor{..} = do
@@ -170,6 +182,7 @@ relValidate :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate r Relation{..} = do 
     uniqNames (\a -> "Multiple definitions of column " ++ a) relArgs
     mapM_ (typeValidate r . fieldType) relArgs
+    mapM_ ((\t -> relTypeValidate r (pos t) t) . fieldType) relArgs
 
 relValidate2 :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate2 r rel@Relation{relAnnotation=annot, ..} = do 
@@ -427,22 +440,25 @@ exprValidate2 r _   (EMatch _ _ cs)     = let cs' = filter ((/= tSink) . typ' r 
                                           mapM_ ((\e -> matchType (pos e) r t e) . snd) cs'
                                           -- TODO: pattern structure matches 
 exprValidate2 r _   (ESeq _ e1 e2)      = assertR r (e1 /= tSink) (pos e2) $ "Expression appears after a sink expression"
-exprValidate2 r _   (EBinOp p op e1 e2) = case op of 
-                                               Eq     -> m
-                                               Neq    -> m
-                                               Lt     -> do {m; isint1}
-                                               Gt     -> do {m; isint1}
-                                               Lte    -> do {m; isint1}
-                                               Gte    -> do {m; isint1}
-                                               And    -> do {m; isbool}
-                                               Or     -> do {m; isbool}
-                                               Impl   -> do {m; isbool}
-                                               Plus   -> do {m; isint1} 
-                                               Minus  -> do {m; isint1}
-                                               ShiftR -> do {isint1; isint2} 
-                                               ShiftL -> do {isint1; isint2}
-                                               Mod    -> do {isint1; isint2}
-                                               Concat -> do {isbit1; isbit2}
+exprValidate2 r _   (EBinOp p op e1 e2) = do case op of 
+                                                  Eq     -> m
+                                                  Neq    -> m
+                                                  Lt     -> do {m; isint1}
+                                                  Gt     -> do {m; isint1}
+                                                  Lte    -> do {m; isint1}
+                                                  Gte    -> do {m; isint1}
+                                                  And    -> do {m; isbool}
+                                                  Or     -> do {m; isbool}
+                                                  Impl   -> do {m; isbool}
+                                                  Plus   -> do {m; isint1} 
+                                                  Minus  -> do {m; isint1}
+                                                  ShiftR -> do {isint1; isint2} 
+                                                  ShiftL -> do {isint1; isint2}
+                                                  Mod    -> do {isint1; isint2}
+                                                  Concat -> do {isbit1; isbit2}
+                                             when (elem op [Lt, Gt, Lte, Gte, Plus, Minus, Mod] && isBit r e1) $
+                                                  assertR r ((typeWidth $ typ' r e1) <= sqlMaxIntWidth) p 
+                                                           $ "Cannot perform arithmetic operations on bit vectors wider than " ++ show sqlMaxIntWidth ++ " bits"
     where m = matchType p r e1 e2
           isint1 = assertR r (isInt r e1 || isBit r e1) (pos e1) $ "Not an integer"
           isint2 = assertR r (isInt r e2 || isBit r e2) (pos e2) $ "Not an integer"

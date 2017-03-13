@@ -18,7 +18,7 @@ limitations under the License.
 
 -- Cocoon's SQL backend
 
-module SQL (mkSchema) where
+module SQL (sqlMaxIntWidth, mkSchema) where
 
 import Data.List
 import Data.List.Utils
@@ -38,6 +38,9 @@ import Expr
 import Type
 import NS
 import Relation
+
+sqlMaxIntWidth :: Int
+sqlMaxIntWidth = 63
 
 commaSep = hsep . punctuate comma . filter (not . isEmpty)
 vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
@@ -141,9 +144,7 @@ mkRule r rel rule@Rule{..} =
     (pp "where") $$
     (nest' $ vandSep [predconstr, eqconstr, arithconstr])
   where 
-    (preds, conds) = partition (\case
-                                 E ERelPred{} -> True
-                                 _            -> False) ruleRHS
+    (preds, conds) = partition exprIsRelPred ruleRHS
     prednames :: [(ENode, String)]
     prednames = evalState (mapM (\(E p) -> do (i::Int) <- (liftM $ maybe 0 (+1)) $ gets (M.lookup (exprRel p))
                                               modify $ M.insert (exprRel p) i

@@ -44,8 +44,10 @@ module Syntax( pktVar
              , eVar, ePacket, eApply, eField, eLocation, eBool, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
              , eWith, eAny, ePHolder, eTyped, eRelPred
+             , exprIsRelPred
              , ECtx(..)
-             , ctxParent
+             , ctxParent, ctxAncestors
+             , ctxIsRuleL, ctxInRuleL
              , conj
              , disj) where
 
@@ -549,6 +551,10 @@ ePHolder            = E $ EPHolder  nopos
 eTyped e t          = E $ ETyped    nopos e t
 eRelPred rel as     = E $ ERelPred  nopos rel as
 
+exprIsRelPred :: Expr -> Bool
+exprIsRelPred (E (ERelPred{})) = True
+exprIsRelPred _                = False
+
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= eBool True)
 
@@ -622,3 +628,14 @@ ctxParent (CtxCheck _)        = CtxRefine
 ctxParent (CtxRuleL _ _ _)    = CtxRefine
 ctxParent (CtxRuleR _ _)      = CtxRefine
 ctxParent ctx                 = ctxPar ctx
+
+ctxAncestors :: ECtx -> [ECtx]
+ctxAncestors CtxRefine = [CtxRefine]
+ctxAncestors ctx       = ctx : (ctxAncestors $ ctxParent ctx)
+
+ctxIsRuleL :: ECtx -> Bool
+ctxIsRuleL CtxRuleL{} = True
+ctxIsRuleL _          = False
+
+ctxInRuleL :: ECtx -> Bool
+ctxInRuleL ctx = any ctxIsRuleL $ ctxAncestors ctx

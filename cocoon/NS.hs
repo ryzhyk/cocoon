@@ -149,8 +149,8 @@ ctxMVars r ctx =
                                      frel = getRelation r fname in
                                  ([], map f2mf $ relArgs frel)
          CtxCheck rel         -> ([], map f2mf $ relArgs rel)
-         CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
-         CtxRuleR _ rl        -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
+         CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
+         CtxRuleR _ rl        -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
          CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
          CtxField _ _         -> (plvars, prvars)
          CtxLocation _ _      -> ([], plvars ++ prvars)

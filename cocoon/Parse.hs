@@ -218,12 +218,12 @@ relation = do annot <- optionMaybe relannot
                            n <- relIdent
                            (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
                            rs <- many1 $ withPos $ do 
-                                         try $ lookAhead $ relIdent *> (parens $ commaSep expr) *> reservedOp ":-"
+                                         try $ lookAhead $ relIdent *> (parens $ commaSep rexpr) *> reservedOp ":-"
                                          rn <- relIdent
                                          when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
-                                         rargs <- parens $ commaSep expr
+                                         rargs <- parens $ commaSep rexpr
                                          reservedOp ":-"
-                                         rhs <- commaSep expr 
+                                         rhs <- commaSep $ erelpred <|> rexpr
                                          return $ Rule nopos rargs rhs
                            return $ Relation nopos False n as cs annot $ Just rs
 
@@ -300,7 +300,6 @@ term  =  elhs
      <|> term'
 term' = withPos $
          eapply
-     <|> elhs
      <|> eloc
      <|> erelpred
      <|> estruct
@@ -450,9 +449,42 @@ sbinary n fun = Infix $ (\l  r  -> E $ fun (fst $ pos l, snd $ pos r) l r) <$ re
 
 assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="
 
+{- F-expression (variable of field name) -}
 fexpr =  buildExpressionParser fetable fterm
     <?> "column or field name"
 
 fterm  =  withPos $ evar
 
 fetable = [[postf postField]]
+
+
+{- expression allowed in a Datalog rule -}
+
+rexpr =  buildExpressionParser retable rterm
+    <?> "simple expression"
+
+rterm  = withPos $
+         estruct
+     <|> eint
+     <|> ebool
+     <|> estring
+     <|> evar
+
+retable = [[postf $ choice [postSlice, postType]]
+         ,[pref  $ choice [prefix "not" Not]]
+         ,[binary "%" Mod AssocLeft]
+         ,[binary "+" Plus AssocLeft,
+           binary "-" Minus AssocLeft]
+         ,[binary ">>" ShiftR AssocLeft,
+           binary "<<" ShiftL AssocLeft]
+         ,[binary "++" Concat AssocLeft]
+         ,[binary "==" Eq  AssocLeft,          
+           binary "!=" Neq AssocLeft,          
+           binary "<"  Lt  AssocNone, 
+           binary "<=" Lte AssocNone, 
+           binary ">"  Gt  AssocNone, 
+           binary ">=" Gte AssocNone]
+         ,[binary "and" And AssocLeft]
+         ,[binary "or" Or AssocLeft]
+         ,[binary "=>" Impl AssocLeft]
+         ]
