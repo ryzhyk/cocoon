@@ -18,6 +18,7 @@ limitations under the License.
 
 import System.Environment
 import Text.Parsec.Prim
+import Text.PrettyPrint
 import System.FilePath.Posix
 import System.Directory
 import System.Console.GetOpt
@@ -92,6 +93,11 @@ main = do
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
     --let final = last combined
     putStrLn "Validation complete"
+
+    let schema = mkSchema basename $ head combined
+    writeFile (workdir </> addExtension basename "schema") $ render schema
+    putStrLn "Schema written to file"
+    
 --
 --    let ps = pairs combined
 --

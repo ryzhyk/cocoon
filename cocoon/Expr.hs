@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE ImplicitParams, LambdaCase #-}
 
 module Expr ( exprMap
             , exprFold
@@ -227,9 +227,9 @@ exprFuncs :: Expr -> [String]
 exprFuncs e = exprFuncs' [] e
 
 exprFuncs' :: [String] -> Expr -> [String]
-exprFuncs' acc e = nub $ exprCollect (\e' -> case e' of
-                                                  EApply _ f _ -> if' (elem f acc) [] [f]
-                                                  _            -> []) 
+exprFuncs' acc e = nub $ exprCollect (\case
+                                       EApply _ f _ -> if' (elem f acc) [] [f]
+                                       _            -> []) 
                                      (++) e
 
 -- Recursively enumerate all functions invoked by the expression
@@ -247,37 +247,37 @@ exprRefersToPkt r e = exprRefersToPkt' e ||
                       (any (maybe False exprRefersToPkt' . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprRefersToPkt' :: Expr -> Bool
-exprRefersToPkt' e = exprCollect (\e' -> case e' of
-                                              EPacket _    -> True
-                                              _            -> False) (||) e
+exprRefersToPkt' e = exprCollect (\case
+                                   EPacket _    -> True
+                                   _            -> False) (||) e
 
 exprIsDeterministic :: Refine -> Expr -> Bool
 exprIsDeterministic r e = exprIsDeterministic' e &&
                           (all (maybe True exprIsDeterministic' . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprIsDeterministic' :: Expr -> Bool
-exprIsDeterministic' e = exprCollect (\e' -> case e' of
-                                                  EAny _ _ _ _ _ _ -> False
-                                                  _                -> True) (&&) e
+exprIsDeterministic' e = exprCollect (\case
+                                       EAny _ _ _ _ _ _ -> False
+                                       _                -> True) (&&) e
 
 exprIsMulticast :: Refine -> Expr -> Bool
 exprIsMulticast r e = exprIsMulticast' e || 
                       (any (maybe False exprIsMulticast' . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprIsMulticast' :: Expr -> Bool
-exprIsMulticast' e = exprCollect (\e' -> case e' of
-                                              EPar _ _ _      -> True
-                                              EFork _ _ _ _ _ -> True
-                                              _               -> False) (||) e
+exprIsMulticast' e = exprCollect (\case
+                                   EPar _ _ _      -> True
+                                   EFork _ _ _ _ _ -> True
+                                   _               -> False) (||) e
 
 exprSendsToRoles :: Refine -> Expr -> [String]
 exprSendsToRoles r e = nub $ exprSendsToRoles' e ++
                              (concatMap (maybe [] (exprSendsToRoles r) . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprSendsToRoles' :: Expr -> [String]
-exprSendsToRoles' e = exprCollect (\e' -> case e' of
-                                               ELocation _ rl _ -> [rl]
-                                               _                -> []) 
+exprSendsToRoles' e = exprCollect (\case
+                                    ELocation _ rl _ -> [rl]
+                                    _                -> []) 
                                   (++) e
 
 exprSendsTo :: Refine -> Expr -> [Expr]
@@ -285,9 +285,9 @@ exprSendsTo r e = nub $ exprSendsTo' e ++
                         (concatMap (maybe [] (exprSendsTo r) . funcDef . getFunc r) $ exprFuncsRec r e)
 
 exprSendsTo' :: Expr -> [Expr]
-exprSendsTo' e = execState (exprTraverseM (\e' -> case e' of
-                                                       ESend _ loc -> modify (loc:)
-                                                       _           -> return ()) e) []
+exprSendsTo' e = execState (exprTraverseM (\case
+                                            ESend _ loc -> modify (loc:)
+                                            _           -> return ()) e) []
 
 
 isLExpr :: Refine -> ECtx -> Expr -> Bool
@@ -305,7 +305,7 @@ isLExpr' _ _   (ETyped _ e _)   = e
 isLExpr' _ _   _                = False
 
 isLVar :: Refine -> ECtx -> String -> Bool
-isLVar r ctx v = isJust $ lookup v $ fst $ ctxVars r ctx
+isLVar r ctx v = isJust $ find ((==v) . name) $ fst $ ctxVars r ctx
 
 isLRel :: Refine -> ECtx -> String -> Bool
 isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx

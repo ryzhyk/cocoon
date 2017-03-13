@@ -22,7 +22,8 @@ module NS(lookupType, checkType, getType,
           lookupRole, checkRole, getRole,
           lookupConstructor, checkConstructor, getConstructor,
           lookupRelation, checkRelation, getRelation,
-          ctxVars, ctxRels,
+          ctxMVars, ctxVars, ctxAllVars, 
+          ctxRels,
           isLVar, isLRel,
           --lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
@@ -78,8 +79,7 @@ getRole :: Refine -> String -> Role
 getRole r n = fromJust $ lookupRole r n
 
 lookupVar :: Refine -> ECtx -> String -> Maybe Field
-lookupVar r ctx n = fmap (\(Just t) -> Field nopos n t) 
-                    $ lookup n $ (\(lvs, rvs) -> lvs ++ rvs) $ ctxVars r ctx
+lookupVar r ctx n = find ((==n) . name) $ ctxAllVars r ctx
 
 checkVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me Field
 checkVar p r c n = case lookupVar r c n of
@@ -116,21 +116,28 @@ checkRelation p r ctx n = case lookupRelation r ctx n of
                                Nothing  -> errR r p $ "Unknown relation: " ++ n -- ++ " in context " ++ show ctx
                                Just rel -> return rel
 
-getRelation :: Refine -> ECtx -> String -> Relation
-getRelation r ctx n = fromJust $ lookupRelation r ctx n
+getRelation :: Refine -> String -> Relation
+getRelation r n = fromJust $ lookupRelation r CtxRefine n
 
 -- All variables available in the scope: (l-vars, read-only vars)
 type MField = (String, Maybe Type)
 f2mf f = (name f, Just $ fieldType f)
 
-ctxVars :: Refine -> ECtx -> ([MField], [MField])
-ctxVars r ctx = 
+ctxAllVars :: Refine -> ECtx -> [Field]
+ctxAllVars r ctx = let (lvs, rvs) = ctxVars r ctx in lvs ++ rvs
+
+ctxVars :: Refine -> ECtx -> ([Field], [Field])
+ctxVars r ctx = let (lvs, rvs) = ctxMVars r ctx in
+                (map (\(n, Just t) -> Field nopos n t) lvs, map (\(n, Just t) -> Field nopos n t) rvs)
+
+ctxMVars :: Refine -> ECtx -> ([MField], [MField])
+ctxMVars r ctx = 
     case ctx of
          CtxRefine            -> (map f2mf $ refineState r, [])
-         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl) : prvars)
-         CtxRoleGuard rl      -> ([], [(roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl)])
+         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
+         CtxRoleGuard rl      -> ([], [(roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl)])
          CtxPktGuard rl       -> ([], [ (pktVar, Just $ tUser packetTypeName)
-                                      , (roleKey rl, Just $ relRecordType $ getRelation r CtxRefine $ roleTable rl)])
+                                      , (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl)])
          CtxFunc f _          -> let plvars' = filter (isGlobalVar r . fst) plvars 
                                      prvars' = filter (isGlobalVar r . fst) prvars in
                                  if funcPure f    
@@ -139,7 +146,7 @@ ctxVars r ctx =
          CtxAssume a          -> ([], vartypes $ exprVars ctx $ assExpr a)
          CtxRelKey rel        -> ([], map f2mf $ relArgs rel)
          CtxRelForeign _ con  -> let ForeignKey _ _ fname _ = con 
-                                     frel = getRelation r CtxRefine fname in
+                                     frel = getRelation r fname in
                                  ([], map f2mf $ relArgs frel)
          CtxCheck rel         -> ([], map f2mf $ relArgs rel)
          CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ ruleRHS rl)
@@ -186,8 +193,8 @@ ctxVars r ctx =
          CtxAnyDef _ _        -> (plvars, prvars)
          CtxTyped _ _         -> (plvars, prvars)
          CtxRelPred _ _ _     -> ([], plvars ++ prvars)
-    where (plvars, prvars) = ctxVars r $ ctxParent ctx 
-          frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r CtxRefine $ exprTable e)
+    where (plvars, prvars) = ctxMVars r $ ctxParent ctx 
+          frkvar e = (exprFrkVar e, Just $ relRecordType $ getRelation r $ exprTable e)
           vartypes :: [(String, ECtx)] -> [MField]
           vartypes vs = map (\gr -> case filter (isJust . snd) $ map (mapSnd $ ctxExpectType r) gr of
                                          []  -> (fst $ head gr, Nothing)

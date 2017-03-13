@@ -63,8 +63,8 @@ exprNodeType :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
 exprNodeType r ctx e = fmap ((flip atPos) (pos e)) $ exprNodeType' r ctx e
 
 exprNodeType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
-exprNodeType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxVars r ctx in
-                                         fromJust $ lookup v $ lvs ++ rvs 
+exprNodeType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxMVars r ctx in
+                                            fromJust $ lookup v $ lvs ++ rvs 
 exprNodeType' _ _   (EPacket _)           = Just $ tUser packetTypeName
 exprNodeType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
 exprNodeType' r _   (EField _ e f)        = case e of
@@ -231,7 +231,7 @@ ctxExpectType _ (CtxRuleR _ _)                     = Just tBool
 ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing
-ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r CtxRefine $ roleTable $ getRole r rl
+ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r $ roleTable $ getRole r rl
 ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = let args = consArgs $ getConstructor r c in
                                                      if' (i < length args) (Just $ typ $ args !! i) Nothing
 ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of 
@@ -297,6 +297,6 @@ ctxExpectType _ (CtxAnyCond _ _)                   = Just tBool
 ctxExpectType r (CtxAnyBody _ ctx)                 = ctxExpectType r ctx
 ctxExpectType r (CtxAnyDef _ ctx)                  = ctxExpectType r ctx
 ctxExpectType _ (CtxTyped (ETyped _ _ t) _)        = Just t
-ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r CtxRefine $ exprRel e in
+ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r $ exprRel e in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ ctx                                = error $ "ctxExpectType " ++ show ctx

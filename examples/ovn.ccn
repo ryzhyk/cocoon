@@ -348,7 +348,7 @@ procedure sourcePort(port: LogicalPort): LogicalPort =
     }
 
 // opaque type
-typedef ct_state_t
+typedef ct_state_t = bit<64>
 function ct_state_new(): ct_state_t
 
 typedef ct_flow_state_t = CTNew

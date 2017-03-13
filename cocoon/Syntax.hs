@@ -550,14 +550,21 @@ eTyped e t          = E $ ETyped    nopos e t
 eRelPred rel as     = E $ ERelPred  nopos rel as
 
 conj :: [Expr] -> Expr
-conj []     = eBool True
-conj [e]    = e
-conj (e:es) = eBinOp And e (conj es)
+conj = conj' . filter (/= eBool True)
+
+conj' :: [Expr] -> Expr
+conj' []     = eBool True
+conj' [e]    = e
+conj' (e:es) = eBinOp And e (conj' es)
+
 
 disj :: [Expr] -> Expr
-disj []     = eBool False
-disj [e]    = e
-disj (e:es) = eBinOp Or e (disj es)
+disj = disj' . filter (/= eBool False)
+
+disj' :: [Expr] -> Expr
+disj' []     = eBool False
+disj' [e]    = e
+disj' (e:es) = eBinOp Or e (disj' es)
 
 data ECtx = CtxRefine
           | CtxRole      {ctxRole::Role}

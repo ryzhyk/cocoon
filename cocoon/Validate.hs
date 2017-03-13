@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE RecordWildCards, FlexibleContexts #-}
+{-# LANGUAGE RecordWildCards, FlexibleContexts, LambdaCase #-}
 
 module Validate (validate) where
 
@@ -31,6 +31,7 @@ import Pos
 import Name
 import Expr
 import Refine
+import Relation
 --import Statement
 --import Builtins
 
@@ -121,6 +122,10 @@ validate1 r@Refine{..} = do
 --         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
     mapM_ (relValidate r)    refineRels
     mapM_ (relValidate2 r)   refineRels
+    maybe (return ()) 
+          (\cyc -> errR r (pos $ getRelation r $ snd $ head cyc) 
+                     $ "Dependency cycle among relations: " ++ (intercalate ", " $ map (name . snd) cyc))
+          $ (grCycle $ relGraph r)
     mapM_ (stateValidate r)  refineState
     mapM_ (funcValidate r)   refineFuncs
     mapM_ (roleValidate r)   refineRoles
@@ -171,6 +176,8 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
     assertR r ((length $ filter isPrimaryKey relConstraints) <= 1) relPos $ "Multiple primary keys are not allowed"
     mapM_ (constraintValidate r rel) relConstraints
     maybe (return ()) (mapM_ (ruleValidate r rel)) relDef
+    maybe (return ()) (\rules -> assertR r (any (not . ruleIsRecursive rel) rules) relPos 
+                                         "View must have at least one non-recursive rule") relDef
     case annot of
          Nothing                      -> return ()
          Just (RelSwitch _)           -> return ()
@@ -186,21 +193,21 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
              assertR r (isJust $ find ((== "switch") . name) relArgs) p 
                      "Relation with #switch_port annotation must have a column named \"switch\""
              maybe (errR r p "The \"switch\" column much be declared as foreign key")
-                   (\(ForeignKey p' _ n _) -> do let rel' = getRelation r CtxRefine n
+                   (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
                                                  assertR r (case relAnnotation rel' of
                                                                     Just (RelSwitch _) -> True
                                                                     _                  -> False) p' 
                                                          "The \"switch\" column must refer to a table with \"#switch\" annotation")
-                   $ find (\c -> case c of
-                                      ForeignKey _ [f] _ _ -> f == eVar "switch"
-                                      _                    -> False) relConstraints
+                   $ find (\case 
+                            ForeignKey _ [f] _ _ -> f == eVar "switch"
+                            _                    -> False) relConstraints
              portnum <- maybe (errR r p "Relation with #switch_port annotation must have a column named \"portnum\"")
                               return
                               (find ((== "portnum") . name) relArgs) 
              assertR r (isBit r portnum) p "The portnum column must be of type bit<N>"
-             assertR r (isJust $ find (\c -> case c of
-                                      Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
-                                      _                -> False) relConstraints) p
+             assertR r (isJust $ find (\case
+                                        Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
+                                        _                -> False) relConstraints) p
                        "The following constraint is required in a #switch_port table: unique (switch,portnum)"
                         
 
@@ -255,6 +262,7 @@ ruleValidate r rel@Relation{..} rl@Rule{..} = do
             $ "Number of arguments in the left-hand-side of the rule does not match the number of fields in relation " ++ name rel
     mapIdxM_ (\e i -> exprValidate r (CtxRuleL rel rl i) e) ruleLHS
     mapM_ (exprValidate r (CtxRuleR rel rl)) ruleRHS
+
 
 stateValidate :: (MonadError String me) => Refine -> Field -> me ()
 stateValidate r = typeValidate r . fieldType
