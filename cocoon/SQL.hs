@@ -72,7 +72,7 @@ vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
 -- TODO: for purely local state (only read and written by a single switch),
 -- store the table on switche's local controller
 mkSchema :: String -> Refine -> Doc
-mkSchema dbname r@Refine{..} = createdb $$ (vcat $ map mk $ map (getRelation r) ordered)
+mkSchema dbname r@Refine{..} = createdb $$ (vcat $ intersperse (pp "") $ map mk $ map (getRelation r) ordered)
     where ordered = reverse $ G.topsort' $ relGraph r
           createdb = pp "drop database if exists" <+> pp dbname <> semi
                      $$
