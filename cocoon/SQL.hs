@@ -217,20 +217,27 @@ mkNormalizedExprF ctx = let ?sep = pp "."
                         in mkNormalizedExpr ctx
 
 mkNormalizedExpr :: (?r::Refine, ?sep::Doc) => ECtx -> Expr -> Doc
-mkNormalizedExpr ctx e = exprFoldCtx mkNormalizedExpr' ctx e
+mkNormalizedExpr ctx e = exprFoldCtx mkNormalizedExprRet ctx e
+
+
+mkNormalizedExprRet :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode Doc -> Doc
+mkNormalizedExprRet ctx e | ctxMustReturn ctx && not (exprIsStatement e) = pp "return" <+> e' <> semi
+                          | ctxExpectsStat ctx && not (exprIsStatement e) = pp "perform" <+> e' <> semi
+                          | otherwise                                    = e'
+    where e' = mkNormalizedExpr' ctx e
 
 mkNormalizedExpr' :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode Doc -> Doc
-mkNormalizedExpr' ctx@(CtxMatchExpr (EMatch _ m' _) parctx) _ =
-    pp "declare" $$ (nest' $ pp matchvar <+> mkType mtype <+> pp ":=" <+> mkNormalizedExpr parctx m' <> semi)
+mkNormalizedExpr' ctx@(CtxMatchExpr (EMatch _ m' _) _) m =
+    pp "declare" $$ (nest' $ pp matchvar <+> mkType mtype <+> pp ":=" <+> mkNormalizedExpr' CtxRefine m <> semi)
     where mtype = exprType ?r ctx m'
-mkNormalizedExpr' ctx@(CtxMatchPat (EMatch _ _ cs') parctx i) _ = 
-    pp "when" <+> mkNormalizedExpr parctx cond <+> pp "then" $$
+mkNormalizedExpr' ctx@(CtxMatchPat (EMatch _ _ cs') _ i) _ = 
+    pp "when" <+> mkNormalizedExpr CtxRefine cond <+> pp "then" $$
     (nest' $ if' (null decls) empty (pp "declare" $$ (nest' $ vcat $ decls)))
     where pat = fst $ cs' !! i
           mtype = exprType ?r ctx pat
           cond  = pattern2Constr (eVar matchvar) mtype pat
           decls = map (\(x, ctx') -> pp x <+> mkType (fromJust $ ctxExpectType ?r ctx') <+> pp ":=" <+> 
-                                     (mkNormalizedExpr parctx $ ctx2Field (eVar matchvar) ctx') <> semi) 
+                                     (mkNormalizedExpr CtxRefine $ ctx2Field (eVar matchvar) ctx') <> semi) 
                       $ exprVarDecls ctx pat
 mkNormalizedExpr' _    (EVar _ v)          = pp v
 mkNormalizedExpr' _    (EField _ s f)      = s <> (if' (isUpper s0 && notElem '.' s') (pp ".") ?sep) <> pp f

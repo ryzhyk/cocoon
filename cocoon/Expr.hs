@@ -42,6 +42,9 @@ module Expr ( exprMap
             , isLRel
             , exprSplitLHS
             , expr2Statement
+            , ctxExpectsStat
+            , ctxMustReturn
+            , exprIsStatement
             --, exprScalars
             --, exprDeps
             --, exprSubst
@@ -407,3 +410,51 @@ setfield _ lhs              _   rhs        = Just $ eSet lhs rhs
 allocVar :: State Int String
 allocVar = do modify (1+)
               liftM (("v#"++) . show) get
+
+ctxExpectsStat :: ECtx -> Bool
+ctxExpectsStat CtxRole{}     = True
+ctxExpectsStat CtxFunc{}     = True
+ctxExpectsStat CtxMatchVal{} = True
+ctxExpectsStat CtxSeq1{}     = True
+ctxExpectsStat CtxSeq2{}     = True
+ctxExpectsStat CtxPar1{}     = True
+ctxExpectsStat CtxPar2{}     = True
+ctxExpectsStat CtxITEThen{}  = True
+ctxExpectsStat CtxITEElse{}  = True
+ctxExpectsStat CtxForkBody{} = True
+ctxExpectsStat CtxWithBody{} = True
+ctxExpectsStat CtxWithDef{}  = True
+ctxExpectsStat CtxAnyBody{}  = True
+ctxExpectsStat CtxAnyDef{}   = True
+ctxExpectsStat _             = False
+
+ctxMustReturn :: ECtx -> Bool
+ctxMustReturn     CtxRole{}       = True
+ctxMustReturn     CtxFunc{}       = True
+ctxMustReturn     CtxSeq1{}       = False
+ctxMustReturn     CtxPar1{}       = True
+ctxMustReturn     CtxPar2{}       = True
+ctxMustReturn     CtxForkBody{}   = True
+ctxMustReturn ctx@CtxMatchVal{}   = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxSeq2{}       = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxITEThen{}    = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxITEElse{}    = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxWithBody{}   = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxWithDef{}    = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxAnyBody{}    = ctxMustReturn $ ctxParent ctx
+ctxMustReturn ctx@CtxAnyDef{}     = ctxMustReturn $ ctxParent ctx
+ctxMustReturn _                   = False
+
+exprIsStatement :: ExprNode a -> Bool
+exprIsStatement (EMatch   {}) = True
+exprIsStatement (EVarDecl {}) = True
+exprIsStatement (ESeq     {}) = True
+exprIsStatement (EPar     {}) = True
+exprIsStatement (EITE     {}) = True
+exprIsStatement (EDrop    {}) = True
+exprIsStatement (ESet     {}) = True
+exprIsStatement (ESend    {}) = True
+exprIsStatement (EFork    {}) = True
+exprIsStatement (EWith    {}) = True
+exprIsStatement (EAny     {}) = True
+exprIsStatement _             = False
