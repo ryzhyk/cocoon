@@ -108,31 +108,6 @@ mkExpr ctx e = mkNormalizedExprF ctx e'
     e' = evalState (do e1 <- expr2Statement ?r ctx e
                        exprSplitLHS ?r ctx e1) 0
 
-{-
-CREATE FUNCTION somefunc() RETURNS integer AS $$
-<< outerblock >>
-DECLARE
-    quantity integer := 30;
-BEGIN
-    RAISE NOTICE 'Quantity here is %', quantity;  -- Prints 30
-    quantity := 50;
-    --
-    -- Create a subblock
-    --
-    DECLARE
-        quantity integer := 80;
-    BEGIN
-        RAISE NOTICE 'Quantity here is %', quantity;  -- Prints 80
-        RAISE NOTICE 'Outer quantity here is %', outerblock.quantity;  -- Prints 50
-    END;
-
-    RAISE NOTICE 'Quantity here is %', quantity;  -- Prints 50
-
-    RETURN quantity;
-END;
-$$ LANGUAGE plpgsql;
--}
-
 mkRel :: (?r::Refine) => Relation -> Doc
 mkRel rel@Relation{..} = pp "create table" <+> pp relName <+> pp "("
                          $$
@@ -258,7 +233,8 @@ mkNormalizedExpr' ctx@(CtxMatchPat (EMatch _ _ cs') parctx i) _ =
                                      (mkNormalizedExpr parctx $ ctx2Field (eVar matchvar) ctx') <> semi) 
                       $ exprVarDecls ctx pat
 mkNormalizedExpr' _    (EVar _ v)          = pp v
-mkNormalizedExpr' _    (EField _ s f)      = s <> (if' (isUpper $ head $ render s) (pp ".") ?sep) <> pp f
+mkNormalizedExpr' _    (EField _ s f)      = s <> (if' (isUpper s0 && notElem '.' s') (pp ".") ?sep) <> pp f
+                                                where s0:s' = render s
 mkNormalizedExpr' _  e@(EBool _ _)         = mkVal e
 mkNormalizedExpr' _  e@(EString _ _)       = mkVal e
 mkNormalizedExpr' _  e@(EBit _ _ _)        = mkVal e
