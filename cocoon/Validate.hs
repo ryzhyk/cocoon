@@ -391,7 +391,11 @@ exprValidate1 r _   (EStruct p c as)    = do cons <- checkConstructor p r c
 exprValidate1 _ _   (ETuple _ _)        = return ()
 exprValidate1 _ _   (ESlice _ _ _ _)    = return ()
 exprValidate1 _ _   (EMatch _ _ _)      = return ()
-exprValidate1 r ctx (EVarDecl p v)      = checkNoVar p r ctx v
+exprValidate1 r ctx (EVarDecl p v) | ctxInSetL ctx || ctxInMatchPat ctx = 
+                                             checkNoVar p r ctx v
+                                   | otherwise = do assertR r (ctxIsTyped ctx) p $ "Variable declared without a type"
+                                                    assertR r (ctxIsSeq1 $ ctxParent ctx) p 
+                                                            $ "Variable declaration is not allowed in this context"
 exprValidate1 _ _   (ESeq _ _ _)        = return ()
 exprValidate1 r ctx (EPar p _ _)        = ctxCheckSideEffects p r ctx
 exprValidate1 _ _   (EITE _ _ _ _)      = return ()

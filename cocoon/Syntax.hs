@@ -48,8 +48,13 @@ module Syntax( pktVar
              , ECtx(..)
              , ctxParent, ctxAncestors
              , ctxIsRuleL, ctxInRuleL
+             , ctxIsMatchPat, ctxInMatchPat
+             , ctxIsSetL, ctxInSetL
+             , ctxIsSeq1, ctxInSeq1
+             , ctxIsTyped
              , conj
-             , disj) where
+             , disj
+             , exprSequence) where
 
 import Control.Monad.Except
 import Text.PrettyPrint
@@ -563,7 +568,6 @@ conj' []     = eBool True
 conj' [e]    = e
 conj' (e:es) = eBinOp And e (conj' es)
 
-
 disj :: [Expr] -> Expr
 disj = disj' . filter (/= eBool False)
 
@@ -571,6 +575,11 @@ disj' :: [Expr] -> Expr
 disj' []     = eBool False
 disj' [e]    = e
 disj' (e:es) = eBinOp Or e (disj' es)
+
+exprSequence :: [Expr] -> Expr
+exprSequence []     = error "exprSequence []" 
+exprSequence [e]    = e
+exprSequence (e:es) = eSeq e (exprSequence es)
 
 data ECtx = CtxRefine
           | CtxRole      {ctxRole::Role}
@@ -639,3 +648,28 @@ ctxIsRuleL _          = False
 
 ctxInRuleL :: ECtx -> Bool
 ctxInRuleL ctx = any ctxIsRuleL $ ctxAncestors ctx
+
+ctxIsMatchPat :: ECtx -> Bool
+ctxIsMatchPat CtxMatchPat{} = True
+ctxIsMatchPat _             = False
+
+ctxInMatchPat :: ECtx -> Bool
+ctxInMatchPat ctx = any ctxIsMatchPat $ ctxAncestors ctx
+
+ctxIsSetL :: ECtx -> Bool
+ctxIsSetL CtxSetL{} = True
+ctxIsSetL _         = False
+
+ctxInSetL :: ECtx -> Bool
+ctxInSetL ctx = any ctxIsSetL $ ctxAncestors ctx
+
+ctxIsSeq1 :: ECtx -> Bool
+ctxIsSeq1 CtxSeq1{} = True
+ctxIsSeq1 _         = False
+
+ctxInSeq1 :: ECtx -> Bool
+ctxInSeq1 ctx = any ctxIsSeq1 $ ctxAncestors ctx
+
+ctxIsTyped :: ECtx -> Bool
+ctxIsTyped CtxTyped{} = True
+ctxIsTyped _          = False

@@ -40,6 +40,8 @@ module Expr ( exprMap
             , isLExpr
             , isLVar
             , isLRel
+            , exprSplitLHS
+            , expr2Statement
             --, exprScalars
             --, exprDeps
             --, exprSubst
@@ -57,6 +59,7 @@ import Syntax
 import NS
 import Util
 import Name
+import {-# SOURCE #-} Type
 
 -- depth-first fold of an expression
 exprFoldCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> Expr -> m b
@@ -309,3 +312,98 @@ isLVar r ctx v = isJust $ find ((==v) . name) $ fst $ ctxVars r ctx
 
 isLRel :: Refine -> ECtx -> String -> Bool
 isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx
+
+-- every variable must be declared in a separate statement, e.g.,
+-- (x, var y) = ...  ===> var y: Type; (x,y) = ...
+--exprNormalizeVarDecls :: Refine -> ECtx -> Expr -> Expr
+--exprNormalizeVarDecls = error "exprNormalizeVarDecls is undefined"
+
+
+-- Convert expression to "statement" form, in which it can 
+-- be easily translated into a statement-based language
+expr2Statement :: Refine -> ECtx -> Expr -> State Int Expr
+expr2Statement r ctx e = exprFoldCtxM (expr2Statement' r) ctx e
+
+expr2Statement' :: Refine -> ECtx -> ENode -> State Int Expr
+expr2Statement' r ctx e@(EApply _ f as)     = do (ps, as') <- (liftM unzip) $ mapIdxM (\a' i -> exprPrecompute r (CtxApply e ctx i) a') as
+                                                 return $ exprSequence $ (catMaybes ps) ++ [eApply f as']
+expr2Statement' _ _     (EField _ e f)      = return $ exprModifyResult (\e' -> eField e' f) e
+expr2Statement' r ctx e@(ELocation _ l k)   = do (pre, k') <- exprPrecompute r (CtxLocation e ctx) k
+                                                 return $ exprSequence $ (maybeToList pre) ++ [eLocation l k']
+expr2Statement' r ctx e@(EStruct _ c fs)    = do (ps, fs') <- (liftM unzip) $ mapIdxM (\f i -> exprPrecompute r (CtxStruct e ctx i) f) fs
+                                                 return $ exprSequence $ (catMaybes ps) ++ [eStruct c fs']
+expr2Statement' r ctx e@(ETuple _ fs)       = do (ps, fs') <- (liftM unzip) $ mapIdxM (\f i -> exprPrecompute r (CtxTuple e ctx i) f) fs
+                                                 return $ exprSequence $ (catMaybes ps) ++ [eTuple fs']
+expr2Statement' _ _     (ESlice _ e h l)    = return $ exprModifyResult (\e' -> eSlice e' h l) e
+expr2Statement' r ctx e@(EMatch _ m cs)     = do (pre, m') <- exprPrecompute r (CtxMatchExpr e ctx) m
+                                                 return $ exprSequence $ (maybeToList pre) ++ [eMatch m' cs]
+expr2Statement' r ctx e@(EITE _ i t me)     = do (pre, i') <- exprPrecompute r (CtxITEIf e ctx) i
+                                                 return $ exprSequence $ (maybeToList pre) ++ [eITE i' t me]
+expr2Statement' _ _     (ESet _ l v)        = return $ exprModifyResult (eSet l) v
+expr2Statement' _ _     (ESend _ d)         = return $ exprModifyResult eSend d
+expr2Statement' r ctx e@(EBinOp _ op e1 e2) = do (pre1, e1') <- exprPrecompute r (CtxSetL e ctx) e1
+                                                 (pre2, e2') <- exprPrecompute r (CtxSetR e ctx) e2
+                                                 return $ exprSequence $ (catMaybes [pre1, pre2]) ++ [eBinOp op e1' e2']
+expr2Statement' _ _     (EUnOp _ op e)      = return $ exprModifyResult (eUnOp op) e
+expr2Statement' _ _     (ETyped _ e t)      = return $ exprModifyResult (\e' -> eTyped e' t) e
+expr2Statement' _ _     e                   = return $ E e
+
+exprModifyResult :: (Expr -> Expr) -> Expr -> Expr
+exprModifyResult f (E e) = exprModifyResult' f e
+
+exprModifyResult' :: (Expr -> Expr) -> ENode -> Expr
+exprModifyResult' f (EMatch _ m cs)      = eMatch m $ map (mapSnd $ exprModifyResult f) cs
+exprModifyResult' f (ESet _ e1 e2)       = exprSequence [eSet e1 e2, f $ eTuple []]
+exprModifyResult' f (ESeq _ e1 e2)       = eSeq e1 $ exprModifyResult f e2
+exprModifyResult' f (EITE _ i t me)      = eITE i (exprModifyResult f t) (fmap (exprModifyResult f) me)
+exprModifyResult' f (EWith _ v t c b md) = eWith v t c (exprModifyResult f b) (fmap (exprModifyResult f) md)
+exprModifyResult' f (EAny _ v t c b md)  = eAny v t c (exprModifyResult f b) (fmap (exprModifyResult f) md)
+exprModifyResult' f e                    = f $ E e
+
+exprPrecompute :: Refine -> ECtx -> Expr -> State Int (Maybe Expr, Expr)
+exprPrecompute r ctx = exprPrecompute' r ctx . enode
+
+exprPrecompute' :: Refine -> ECtx -> ENode -> State Int (Maybe Expr, Expr)
+exprPrecompute' r ctx e@EMatch{}        = exprPrecomputeVar r ctx e
+exprPrecompute' _ _   e@(EVarDecl _ vn) = return (Just $ E e, eVar vn)
+exprPrecompute' r ctx e@(ESeq _ e1 e2)  = do (pre, e') <- exprPrecompute' r (CtxSeq2 e ctx) $ enode e2
+                                             return (Just $ exprSequence $ e1 : maybeToList pre, e')
+exprPrecompute' r ctx e@EITE{}          = exprPrecomputeVar r ctx e
+exprPrecompute' _ _   e@ESet{}          = return (Just $ E e, eTuple [])
+exprPrecompute' r ctx e@EWith{}         = exprPrecomputeVar r ctx e
+exprPrecompute' r ctx e@EAny{}          = exprPrecomputeVar r ctx e
+exprPrecompute' _ _   e                 = return (Nothing, E e)
+
+exprPrecomputeVar :: Refine -> ECtx -> ENode -> State Int (Maybe Expr, Expr)
+exprPrecomputeVar r ctx e = do let t = exprType r ctx $ E e
+                               v <- allocVar
+                               let vdecl = eTyped (eVarDecl v) t
+                               return (Just $ exprSequence [vdecl, exprModifyResult (eSet $ eVar v) $ E e], eVar v)
+
+-- no structs or tuples in the LHS of an assignment, e.g.,
+-- C{x,y} = f() ===> var z = f(); x = z.f1; y = z.f2
+exprSplitLHS :: Refine -> ECtx -> Expr -> State Int Expr
+exprSplitLHS r ctx e = exprFoldCtxM (exprSplitLHS' r) ctx e
+
+exprSplitLHS' :: Refine -> ECtx -> ENode -> State Int Expr
+exprSplitLHS' r ctx e@(ESet _ e'@(E (EStruct _ _ _)) rhs) = do 
+    let t = exprType r (CtxSetR e ctx) rhs
+    v <- allocVar
+    let vdecl = eTyped (eVarDecl v) t
+    let assigns = maybeToList $ setfield r (eVar v) (CtxSetL e ctx) e'
+    return $ exprSequence $ vdecl : assigns
+exprSplitLHS' _ _   e = return $ E e
+
+setfield :: Refine -> Expr -> ECtx -> Expr -> Maybe Expr
+setfield r (E e@(EStruct _ c fs)) ctx rhs  = 
+    case catMaybes $ mapIdx (\(a, f) i -> setfield r f (CtxStruct e ctx i) (eField rhs $ name a)) $ zip as fs of
+       [] -> Nothing
+       es -> Just $ exprSequence es
+    where Constructor _ _ as = getConstructor r c
+setfield _ (E (EPHolder _)) _   _          = Nothing
+setfield _ lhs              _   rhs        = Just $ eSet lhs rhs
+
+
+allocVar :: State Int String
+allocVar = do modify (1+)
+              liftM (("v#"++) . show) get

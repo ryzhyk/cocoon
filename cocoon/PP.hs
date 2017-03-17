@@ -28,6 +28,9 @@ ppshift = 4
 class PP a where
     pp :: a -> Doc
 
+instance PP Doc where
+    pp = id
+
 instance PP String where
     pp s = text s
 
