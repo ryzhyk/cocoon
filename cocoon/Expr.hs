@@ -16,7 +16,8 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, LambdaCase #-}
 
-module Expr ( exprMap
+module Expr ( exprMapM
+            , exprMap
             , exprFold
             , exprFoldM
             , exprTraverseCtxWithM
@@ -41,6 +42,7 @@ module Expr ( exprMap
             , isLVar
             , isLRel
             , exprSplitLHS
+            , exprSplitVDecl
             , expr2Statement
             , ctxExpectsStat
             , ctxMustReturn
@@ -115,8 +117,8 @@ exprFoldCtxM' f ctx e@(ETyped p x t)      = do x' <- exprFoldCtxM f (CtxTyped e 
                                                f ctx $ ETyped p x' t
 exprFoldCtxM' f ctx e@(ERelPred p rel as) = f ctx =<< (liftM $ ERelPred p rel) (mapIdxM (\a i -> exprFoldCtxM f (CtxRelPred e ctx i) a) as)
 
-exprMap :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
-exprMap g e = case e of
+exprMapM :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
+exprMapM g e = case e of
                    EVar p v          -> return $ EVar p v
                    EPacket p         -> return $ EPacket p
                    EApply p f as     -> (liftM $ EApply p f) $ mapM g as
@@ -145,6 +147,10 @@ exprMap g e = case e of
                    EPHolder p        -> return $ EPHolder p
                    ETyped p v t      -> (liftM $ \v' -> ETyped p v' t) (g v)
                    ERelPred p rel as -> (liftM $ ERelPred p rel) $ mapM g as
+
+
+exprMap :: (a -> b) -> ExprNode a -> ExprNode b
+exprMap f e = runIdentity $ exprMapM (\e' -> return $ f e') e
 
 exprFoldCtx :: (ECtx -> ExprNode b -> b) -> ECtx -> Expr -> b
 exprFoldCtx f ctx e = runIdentity $ exprFoldCtxM (\ctx' e' -> return $ f ctx' e') ctx e
@@ -295,7 +301,6 @@ exprSendsTo' e = execState (exprTraverseM (\case
                                             ESend _ loc -> modify (loc:)
                                             _           -> return ()) e) []
 
-
 isLExpr :: Refine -> ECtx -> Expr -> Bool
 isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
 
@@ -333,6 +338,7 @@ expr2Statement' r ctx e@(EApply _ f as)     = do (ps, as') <- (liftM unzip) $ ma
 expr2Statement' _ _     (EField _ e f)      = return $ exprModifyResult (\e' -> eField e' f) e
 expr2Statement' r ctx e@(ELocation _ l k)   = do (pre, k') <- exprPrecompute r (CtxLocation e ctx) k
                                                  return $ exprSequence $ (maybeToList pre) ++ [eLocation l k']
+expr2Statement' _ ctx e@EStruct{}           | ctxInMatchPat ctx = return $ E e
 expr2Statement' r ctx e@(EStruct _ c fs)    = do (ps, fs') <- (liftM unzip) $ mapIdxM (\f i -> exprPrecompute r (CtxStruct e ctx i) f) fs
                                                  return $ exprSequence $ (catMaybes ps) ++ [eStruct c fs']
 expr2Statement' r ctx e@(ETuple _ fs)       = do (ps, fs') <- (liftM unzip) $ mapIdxM (\f i -> exprPrecompute r (CtxTuple e ctx i) f) fs
@@ -411,6 +417,28 @@ allocVar :: State Int String
 allocVar = do modify (1+)
               liftM (("v#"++) . show) get
 
+-- no structs or tuples in the LHS of an assignment, e.g.,
+-- C{x,y} = f() ===> var z = f(); x = z.f1; y = z.f2
+exprSplitVDecl :: Refine -> ECtx -> Expr -> Expr
+exprSplitVDecl r ctx e = exprFoldCtx (exprSplitVDecl' r) ctx e'
+    where e' = exprFoldCtx (exprVDeclSetType r) ctx e
+ 
+exprVDeclSetType :: Refine -> ECtx -> ENode -> Expr
+exprVDeclSetType r ctx decl@(EVarDecl _ _) =
+    case ctx of
+        CtxTyped{} -> E decl
+        _          -> eTyped (E decl) $ exprType r ctx $ E decl
+exprVDeclSetType _ _   e = E e
+
+exprSplitVDecl' :: Refine -> ECtx -> ENode -> Expr
+exprSplitVDecl' _ _ (ESeq _ (E (ESet _ decl@(E (ETyped _ (E (EVarDecl _ v)) _)) rhs)) e2) = 
+    eSeq decl (eSeq (eSet (eVar v) rhs) e2)
+exprSplitVDecl' _ ctx eset@(ESet _ decl@(E (ETyped _ (E (EVarDecl _ v)) _)) rhs) = 
+    case ctx of
+        CtxSeq1 ESeq{} _ -> E eset
+        _                -> eSeq decl (eSet (eVar v) rhs)
+exprSplitVDecl' _ _   e = E e
+
 ctxExpectsStat :: ECtx -> Bool
 ctxExpectsStat CtxRole{}     = True
 ctxExpectsStat CtxFunc{}     = True
@@ -445,16 +473,17 @@ ctxMustReturn ctx@CtxAnyBody{}    = ctxMustReturn $ ctxParent ctx
 ctxMustReturn ctx@CtxAnyDef{}     = ctxMustReturn $ ctxParent ctx
 ctxMustReturn _                   = False
 
-exprIsStatement :: ExprNode a -> Bool
-exprIsStatement (EMatch   {}) = True
-exprIsStatement (EVarDecl {}) = True
-exprIsStatement (ESeq     {}) = True
-exprIsStatement (EPar     {}) = True
-exprIsStatement (EITE     {}) = True
-exprIsStatement (EDrop    {}) = True
-exprIsStatement (ESet     {}) = True
-exprIsStatement (ESend    {}) = True
-exprIsStatement (EFork    {}) = True
-exprIsStatement (EWith    {}) = True
-exprIsStatement (EAny     {}) = True
-exprIsStatement _             = False
+exprIsStatement :: ENode -> Bool
+exprIsStatement (EMatch   {})                 = True
+exprIsStatement (EVarDecl {})                 = True
+exprIsStatement (ESeq     {})                 = True
+exprIsStatement (EPar     {})                 = True
+exprIsStatement (EITE     {})                 = True
+exprIsStatement (EDrop    {})                 = True
+exprIsStatement (ESet     {})                 = True
+exprIsStatement (ESend    {})                 = True
+exprIsStatement (EFork    {})                 = True
+exprIsStatement (EWith    {})                 = True
+exprIsStatement (EAny     {})                 = True
+exprIsStatement (ETyped _ (E (EVarDecl{})) _) = True
+exprIsStatement _                             = False

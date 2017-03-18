@@ -33,7 +33,7 @@ module Syntax( pktVar
              , Assume(..)
              , Type(..)
              , tLocation, tBool, tInt, tString, tBit, tArray, tStruct, tTuple, tOpaque, tUser, tSink
-             , structGetField, structFields, structFieldConstructors, structFieldGuarded
+             , structGetField, structFields, structFieldConstructors, structFieldGuarded, structTypeDef
              , TypeDef(..)
              , BOp(..)
              , UOp(..)
@@ -353,6 +353,10 @@ structFieldConstructors cs f = filter (isJust . find ((==f) . name) . consArgs) 
 structFieldGuarded :: [Constructor] -> String -> Bool
 structFieldGuarded cs f = all (isJust . find ((==f) . name) . consArgs) cs
 
+structTypeDef :: Refine -> Type -> TypeDef
+structTypeDef r TStruct{..} = consType r $ name $ head typeCons
+structTypeDef _ t           = error $ "structTypeDef " ++ show t
+
 instance Eq Type where
     (==) (TLocation _)    (TLocation _)    = True
     (==) (TBool _)        (TBool _)        = True
@@ -398,6 +402,12 @@ instance WithPos TypeDef where
 
 instance WithName TypeDef where
     name = tdefName
+
+instance PP TypeDef where
+    pp TypeDef{..} = pp "typedef" <+> pp tdefName <+> maybe empty ((pp "=" <+>) . pp)  tdefType
+
+instance Show TypeDef where
+    show = render . pp
 
 data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EPacket   {exprPos :: Pos}

@@ -75,8 +75,9 @@ vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
 mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
                                vcat $ intersperse (pp "") $ createdb : 
+                                                            (map mkTypeDef types) ++ 
                                                             (map (mk . getRelation r) ordered) ++
-                                                            (map (mkFun . getFunc r) funs)
+                                                            (map mkFun funs)
                                                             
     where ordered = reverse $ G.topsort' $ relGraph r
           createdb = pp "drop database if exists" <+> pp dbname <> semi
@@ -87,11 +88,27 @@ mkSchema dbname r@Refine{..} = let ?r = r in
           mk rel = case relDef rel of
                         Nothing -> mkRel rel
                         _       -> mkView rel
-          funs = nub $ concatMap (concatMap (\case
-                                              Check _ c -> exprFuncsRec r c
-                                              _         -> []) 
-                                            . relConstraints) 
-                                  refineRels
+          funs = map (getFunc r) $ nub 
+                 $ concatMap (concatMap (\case
+                                          Check _ c -> exprFuncsRec r c
+                                          _         -> []) 
+                                        . relConstraints) 
+                             refineRels
+          types = mapMaybe (\t -> case t of
+                                       TStruct{..} -> Just $ structTypeDef r t
+                                       _           -> Nothing)
+                  $ nub $ concatMap (map (typ' r) . typeSubtypesRec r)
+                  $ concatMap (\f -> funcType f : (map typ $ funcArgs f) ++ (exprTypes r (CtxFunc f CtxRefine) $ fromJust $ funcDef f))
+                              funs
+
+mkTypeDef :: (?r::Refine) => TypeDef -> Doc
+mkTypeDef (TypeDef _ n (Just (TStruct _ cs))) = 
+    pp "create type" <+> pp n <+> pp "as (" $$
+    (nest' $ vcommaSep $ t ++ (map (\f -> pp (name f) <+> (mkType $ typ f)) $ structFields cs)) $$
+    pp ");"
+    where needtag = length cs > 1
+          t = (if' needtag [pp tag <+> (mkType $ tagType cs)] [])
+mkTypeDef t = error $ "SQL.mkTypeDef " ++ show t
 
 mkFun :: (?r::Refine) => Function -> Doc
 mkFun f@Function{..} = 
@@ -106,7 +123,8 @@ mkExpr :: (?r::Refine) => ECtx -> Expr -> Doc
 mkExpr ctx e = mkNormalizedExprF ctx e'
     where
     e' = evalState (do e1 <- expr2Statement ?r ctx e
-                       exprSplitLHS ?r ctx e1) 0
+                       e2 <- exprSplitLHS ?r ctx e1
+                       return $ exprSplitVDecl ?r ctx e2) 0
 
 mkRel :: (?r::Refine) => Relation -> Doc
 mkRel rel@Relation{..} = pp "create table" <+> pp relName <+> pp "("
@@ -188,11 +206,13 @@ mkRule rel rule@Rule{..} =
 
 --- r, m, Cons1{_,_,Cons2{x,_}} ===> m.f1.f2
 ctx2Field :: (?r::Refine) => Expr -> ECtx -> Expr
+ctx2Field pref CtxMatchPat{}                         = pref
+ctx2Field pref (CtxTyped _ pctx)                     = ctx2Field pref pctx
 ctx2Field pref (CtxRelPred (ERelPred _ rname _) _ i) = let rel' = getRelation ?r rname in
                                                        eField pref $ name $ relArgs rel' !! i
 ctx2Field pref (CtxStruct (EStruct _ c _) pctx i)    = let cons = getConstructor ?r c in
                                                        eField (ctx2Field pref pctx) $ name $ consArgs cons !! i
-ctx2Field _    ctx                                   = error $ "SQL.ctx2Field " ++ show ctx
+ctx2Field pref ctx                                   = error $ "SQL.ctx2Field " ++ show pref ++ " " ++ show ctx
 
 
 pattern2Constr :: (?r::Refine) => Expr -> Type -> Expr -> Expr
@@ -217,76 +237,81 @@ mkNormalizedExprF ctx = let ?sep = pp "."
                         in mkNormalizedExpr ctx
 
 mkNormalizedExpr :: (?r::Refine, ?sep::Doc) => ECtx -> Expr -> Doc
-mkNormalizedExpr ctx e = exprFoldCtx mkNormalizedExprRet ctx e
+mkNormalizedExpr ctx e = snd $ exprFoldCtx (\ctx' en -> let d =  mkNormalizedExprRet ctx' en
+                                                            e' = E $ exprMap fst en
+                                                        in (e', d)) ctx e
 
-
-mkNormalizedExprRet :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode Doc -> Doc
-mkNormalizedExprRet ctx e | ctxMustReturn ctx && not (exprIsStatement e) = pp "return" <+> e' <> semi
-                          | ctxExpectsStat ctx && not (exprIsStatement e) = pp "perform" <+> e' <> semi
-                          | otherwise                                    = e'
+mkNormalizedExprRet :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode (Expr, Doc) -> Doc
+mkNormalizedExprRet ctx e | ctxMustReturn ctx && not (exprIsStatement $ enode ex)  = pp "return" <+> e' <> semi
+                          | ctxExpectsStat ctx && not (exprIsStatement $ enode ex) = pp "perform" <+> e' <> semi
+                          | otherwise                                              = e'
     where e' = mkNormalizedExpr' ctx e
+          ex = E $ exprMap fst e
 
-mkNormalizedExpr' :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode Doc -> Doc
-mkNormalizedExpr' ctx@(CtxMatchExpr (EMatch _ m' _) _) m =
-    pp "declare" $$ (nest' $ pp matchvar <+> mkType mtype <+> pp ":=" <+> mkNormalizedExpr' CtxRefine m <> semi)
-    where mtype = exprType ?r ctx m'
-mkNormalizedExpr' ctx@(CtxMatchPat (EMatch _ _ cs') _ i) _ = 
-    pp "when" <+> mkNormalizedExpr CtxRefine cond <+> pp "then" $$
-    (nest' $ if' (null decls) empty (pp "declare" $$ (nest' $ vcat $ decls)))
-    where pat = fst $ cs' !! i
-          mtype = exprType ?r ctx pat
-          cond  = pattern2Constr (eVar matchvar) mtype pat
-          decls = map (\(x, ctx') -> pp x <+> mkType (fromJust $ ctxExpectType ?r ctx') <+> pp ":=" <+> 
-                                     (mkNormalizedExpr CtxRefine $ ctx2Field (eVar matchvar) ctx') <> semi) 
-                      $ exprVarDecls ctx pat
-mkNormalizedExpr' _    (EVar _ v)          = pp v
-mkNormalizedExpr' _    (EField _ s f)      = s <> (if' (isUpper s0 && notElem '.' s') (pp ".") ?sep) <> pp f
-                                                where s0:s' = render s
-mkNormalizedExpr' _  e@(EBool _ _)         = mkVal e
-mkNormalizedExpr' _  e@(EString _ _)       = mkVal e
-mkNormalizedExpr' _  e@(EBit _ _ _)        = mkVal e
-mkNormalizedExpr' _    (EUnOp _ Not e)     = parens $ pp "not" <+> e
-mkNormalizedExpr' _    (EBinOp _ op l r)   = parens $ 
+mkNormalizedExpr' :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode (Expr, Doc) -> Doc
+mkNormalizedExpr' _    (EVar _ v)                    = pp v
+mkNormalizedExpr' _    (EField _ (_, s') f)          = s' <> (if' (isUpper s0 && notElem '.' ss) (pp ".") ?sep) <> pp f
+    where s0:ss = render s'
+mkNormalizedExpr' _    (EBool _ b)                   = mkVal $ enode $ eBool b
+mkNormalizedExpr' _    (EString _ s)                 = mkVal $ enode $ eString s
+mkNormalizedExpr' _    (EBit _ w v)                  = mkVal $ enode $ eBit w v
+mkNormalizedExpr' _    (EUnOp _ Not (_,e'))          = parens $ pp "not" <+> e'
+mkNormalizedExpr' _    (EBinOp _ op (_,l') (_, r'))  = parens $ 
     case op of
-         Eq     -> l <+> pp "="   <+> r
-         Neq    -> l <+> pp "<>"  <+> r
-         Lt     -> l <+> pp "<"   <+> r
-         Gt     -> l <+> pp ">"   <+> r
-         Lte    -> l <+> pp "<="  <+> r
-         Gte    -> l <+> pp ">="  <+> r
-         And    -> l <+> pp "and" <+> r
-         Or     -> l <+> pp "or"  <+> r
-         Impl   -> parens (pp "not" <+> l) <+> pp "or"  <+> r
-         Plus   -> l <+> pp "+"   <+> r
-         Minus  -> l <+> pp "-"   <+> r
-         Mod    -> l <+> pp "%"   <+> r
-         ShiftR -> l <+> pp ">>"  <+> r
-         ShiftL -> l <+> pp "<<"  <+> r
+         Eq     -> l' <+> pp "="   <+> r'
+         Neq    -> l' <+> pp "<>"  <+> r'
+         Lt     -> l' <+> pp "<"   <+> r'
+         Gt     -> l' <+> pp ">"   <+> r'
+         Lte    -> l' <+> pp "<="  <+> r'
+         Gte    -> l' <+> pp ">="  <+> r'
+         And    -> l' <+> pp "and" <+> r'
+         Or     -> l' <+> pp "or"  <+> r'
+         Impl   -> parens (pp "not" <+> l') <+> pp "or"  <+> r'
+         Plus   -> l' <+> pp "+"   <+> r'
+         Minus  -> l' <+> pp "-"   <+> r'
+         Mod    -> l' <+> pp "%"   <+> r'
+         ShiftR -> l' <+> pp ">>"  <+> r'
+         ShiftL -> l' <+> pp "<<"  <+> r'
          _      -> error $ "SQL.mkNormalizedExpr EBinOp " ++ show op
-mkNormalizedExpr' _    (ETyped _  e _)     = e
-mkNormalizedExpr' _    (EApply _ f as)     = pp f <+> (parens $ commaSep as)
-mkNormalizedExpr' _    (EStruct _ c fs)    = let TStruct _ cs = fromJust $ tdefType $ consType ?r c
-                                                 Constructor _ _ as = getConstructor ?r c
-                                                 needtag = length cs > 1 in
-                                             parens $ commaSep
-                                             $ (if' needtag (mkVal $ enode $ tagVal cs c) empty) :
-                                               (map (\f -> maybe (pp "NULL") (fs !!) $ elemIndex f as) 
-                                                    $ structFields cs)
-mkNormalizedExpr' _    (EMatch _ m cs)    = m $$
-                                            pp "begin" $$
-                                            (nest' $ pp "case" $$
-                                                     (nest' $ vcat $ map mkCase cs) $$
-                                                     pp "end case;") $$
-                                            pp "end;"
-    where mkCase (pat, v) = pat $$ pp "begin" $$ nest' v $$ pp "end" <> semi
-mkNormalizedExpr' ctx   (EVarDecl _ v)     = pp v <+> (mkType $ fromJust $ ctxExpectType ?r ctx) <> semi
+mkNormalizedExpr' _    (ETyped _  (_, e') _)         = e'
+mkNormalizedExpr' _    (EApply _ f as)               = pp f <+> (parens $ commaSep $ map snd as)
+mkNormalizedExpr' _    (EStruct _ c fs)              = 
+    let TStruct _ cs = fromJust $ tdefType $ consType ?r c
+        Constructor _ _ as = getConstructor ?r c
+        needtag = length cs > 1 in
+    parens $ commaSep
+    $ (if' needtag (mkVal $ enode $ tagVal cs c) empty) :
+      (map (\f -> maybe (pp "NULL") (snd . (fs !!)) $ elemIndex f as) 
+           $ structFields cs)
+mkNormalizedExpr' ctx e@(EMatch _ (m,m') cs)         = 
+    match $$
+    (nest' $ pp "case" $$
+             (nest' $ vcat $ mapIdx mkCase cs) $$
+             pp "end case;") $$
+    pp "end;"
+    where ex = exprMap fst e
+          mtype = exprType ?r (CtxMatchExpr ex ctx) m
+          match = pp "declare" $$ (nest' $ pp matchvar <+> mkType mtype <> semi) $$
+                  pp "begin" $$ (nest' $ pp matchvar <+> pp ":=" <+> m' <> semi)
+          mkCase ((pat, _), (_, v')) i = 
+            pp "when" <+> mkNormalizedExpr CtxRefine cond <+> pp "then" $$
+            (if' (null decls) 
+                 (pp "begin")
+                 (pp "declare" $$ (nest' $ vcat decls) $$ pp "begin" $$ (nest' $ vcat asns))) $$
+            nest' v' $$ pp "end" <> semi
+            where cond  = pattern2Constr (eVar matchvar) mtype pat
+                  (decls, asns) = unzip $
+                          map (\(x, ctx') -> (pp x <+> mkType (fromJust $ ctxExpectType ?r ctx') <> semi, 
+                                              pp x <+> pp ":=" <+> (mkNormalizedExpr CtxRefine $ ctx2Field (eVar matchvar) ctx') <> semi)) 
+                              $ exprVarDecls (CtxMatchPat ex ctx i) pat
+mkNormalizedExpr' ctx   (EVarDecl _ v)     = pp "declare" $$ (nest' $ pp v <+> (mkType $ fromJust $ ctxExpectType ?r ctx)) <> semi
 mkNormalizedExpr' _     (EPHolder _)       = empty
-mkNormalizedExpr' _     (ESeq _ e1 e2)     = e1 $$ e2
-mkNormalizedExpr' _     (EITE _ c t me)    = pp "if" <+> c <+> pp "then" $$
-                                             (nest' t) $$
-                                             (maybe empty ((pp "else" $$) . nest') me)
-mkNormalizedExpr' _     (ESet _ l r)       = l <+> pp ":=" <+> r <> semi
-mkNormalizedExpr' _     e                  = error $ "SQL.mkNormalizedExpr " ++ (render $ pp e)
+mkNormalizedExpr' _     (ESeq _ (_,e1') (_,e2'))     = e1' $$ pp "begin" $$ nest' e2' $$ pp "end" <> semi
+mkNormalizedExpr' _     (EITE _ (_,c') (_,t') me)    = pp "if" <+> c' <+> pp "then" $$
+                                                       (nest' t') $$
+                                                       (maybe empty ((pp "else" $$) . nest' . snd) me)
+mkNormalizedExpr' _     (ESet _ (_,l') (_,r'))       = l' <+> pp ":=" <+> r' <> semi
+mkNormalizedExpr' _     e                            = error $ "SQL.mkNormalizedExpr " ++ (render $ pp $ exprMap fst e)
 
 mkColumn :: (?r::Refine) => Field -> Doc
 mkColumn f = mkColumn' (fieldType f) $ eVar $ name f
@@ -332,14 +357,13 @@ mkType :: (?r::Refine) => Type -> Doc
 mkType t = mkType' (typ' ?r t)
 
 mkType' :: (?r::Refine) => Type -> Doc
-mkType' (TStruct _ (c:_))      = pp $ name $ consType ?r $ name c
-mkType' (TBool _)              = pp "boolean"
-mkType' (TString _)            = pp "text"
-mkType' (TBit _ w) | w < 16    = pp "smallint"
-                   | w < 32    = pp "int"
-                   | w < 64    = pp "bigint"
-                   | otherwise = pp "bit" <> (parens $ pp w)
-mkType' t                      = error $ "SQL.mkType " ++ show t
+mkType' t@TStruct{}              = pp $ name $ structTypeDef ?r t
+mkType'   TBool{}                = pp "boolean"
+mkType'   TString{}              = pp "text"
+mkType'   (TBit _ w) | w < 32    = pp "int"
+                     | w < 64    = pp "bigint"
+                     | otherwise = pp "bit" <> (parens $ pp w)
+mkType' t                        = error $ "SQL.mkType " ++ show t
 
 tagType :: [Constructor] -> Type
 tagType cs = tBit $ bitWidth $ length cs - 1

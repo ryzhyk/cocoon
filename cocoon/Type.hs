@@ -18,16 +18,20 @@ limitations under the License.
 
 module Type( WithType(..) 
            , exprType, exprType', exprTypeMaybe, exprNodeType
+           , exprTypes
            , exprTraverseTypeM
            , typ', typ''
            , isBool, isBit, isInt, isLocation, isStruct, isArray
            , matchType, matchType'
            , ctxExpectType
+           , typeSubtypes
+           , typeSubtypesRec
            {-, typeDomainSize, typeEnumerate-}) where
 
 import Data.Maybe
 import Data.List
 import Control.Monad.Except
+import Control.Monad.State
 --import {-# SOURCE #-} Builtins
 
 import Util
@@ -122,6 +126,9 @@ exprNodeType' _ _   (ETyped _ _ t)         = Just t
 exprNodeType' _ _   (ERelPred _ _ _)       = Just tBool
 
 
+exprTypes :: Refine -> ECtx -> Expr -> [Type]
+exprTypes r ctx e = nub $ execState (exprTraverseTypeM r (\ctx' e' -> modify ((fromJust $ exprNodeType r ctx' e'):)) ctx e) []
+
 -- Unwrap typedef's down to actual type definition
 typ' :: (WithType a) => Refine -> a -> Type
 typ' r x = case typ x of
@@ -190,6 +197,21 @@ matchType' r x y =
     where t1 = typ' r x
           t2 = typ' r y
 
+-- sub-types that immediately appear in the type expression
+typeSubtypes :: Type -> [Type]
+typeSubtypes t@TArray{}  = [t, typeElemType t]
+typeSubtypes t@TStruct{} = t: (map typ $ structFields $ typeCons t)
+typeSubtypes t@TTuple{}  = t: (map typ $ typeArgs t)
+typeSubtypes t           = [t]
+
+
+typeSubtypesRec :: Refine -> Type -> [Type]
+typeSubtypesRec r t = typeSubtypesRec' r [] t
+
+typeSubtypesRec' :: Refine -> [Type] -> Type -> [Type]
+typeSubtypesRec' r acc t = let new = typeSubtypes t \\ acc in
+                           new ++ foldl' (\acc' t' -> acc'++ typeSubtypesRec' r (acc++new++acc') t') [] new
+            
 {-
 typeDomainSize :: Refine -> Type -> Integer
 typeDomainSize r t = 

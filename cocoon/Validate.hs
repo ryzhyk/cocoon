@@ -355,7 +355,7 @@ exprValidate r ctx e = --trace ("exprValidate " ++ show ctx ++ " " ++ show e) $
 
 exprTraverseTypeME :: (MonadError String me) => Refine -> (ECtx -> ExprNode Type -> me ()) -> ECtx -> Expr -> me ()
 exprTraverseTypeME r = exprTraverseCtxWithM (\ctx e -> do 
-    e' <- exprMap (return . Just) e
+    let e' = exprMap Just e
     --trace ("exprTraverseTypeME " ++ show ctx ++ "\n    " ++ show e) $ return ()
     case exprNodeType r ctx e' of
          Just t  -> do case ctxExpectType r ctx of

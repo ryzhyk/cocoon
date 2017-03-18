@@ -3,7 +3,8 @@ module Expr where
 import Syntax
 
 exprFoldCtxM :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> Expr -> m b
-exprMap :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
+exprMapM :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
+exprMap :: (a -> b) -> ExprNode a -> ExprNode b
 exprFoldCtx :: (ECtx -> ExprNode b -> b) -> ECtx -> Expr -> b
 exprFoldM :: (Monad m) => (ExprNode b -> m b) -> Expr -> m b
 exprFold :: (ExprNode b -> b) -> Expr -> b
