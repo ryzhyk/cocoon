@@ -32,6 +32,7 @@ import qualified Data.Map as M
 import qualified Data.Graph.Inductive.Query.DFS as G
 
 import Name
+import Pos
 import PP
 import Util
 import Syntax
@@ -113,10 +114,10 @@ mkTypeDef t = error $ "SQL.mkTypeDef " ++ show t
 mkFun :: (?r::Refine) => Function -> Doc
 mkFun f@Function{..} = 
             pp "create function" <+> (pp $ name f) <+> (parens $ commaSep $ map (\a -> (pp $ name a) <+> mkType (typ a)) funcArgs) <+> 
-            pp "returns" <+> mkType funcType <+> pp "as $$"
-            $$
-            (nest' $ mkExpr (CtxFunc f CtxRefine) $ fromJust funcDef)
-            $$
+            pp "returns" <+> mkType funcType <+> pp "as $$" $$
+            pp "begin" $$
+            (nest' $ mkExpr (CtxFunc f CtxRefine) $ fromJust funcDef) $$
+            pp "end;" $$  
             pp "$$ language plpgsql" <> semi
 
 mkExpr :: (?r::Refine) => ECtx -> Expr -> Doc
@@ -127,17 +128,18 @@ mkExpr ctx e = mkNormalizedExprF ctx e'
                        return $ exprSplitVDecl ?r ctx e2) 0
 
 mkRel :: (?r::Refine) => Relation -> Doc
-mkRel rel@Relation{..} = pp "create table" <+> pp relName <+> pp "("
+mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
+                         pp "create table" <+> pp relName <+> pp "("
                          $$
-                         (nest' $ vcommaSep $ cols ++ map fst cons)
+                         (nest' $ vcommaSep $ cols ++ map sel2 cons)
                          $$
                          pp ");"
                          $$
-                         (vcat $ map snd cons)
+                         (vcat $ map sel3 cons)
     where
     -- Primary table
     cols = map mkColumn relArgs
-    cons = map (mkConstraint rel) relConstraints
+    cons = mapIdx (mkConstraint rel) relConstraints
     -- Delta table
     -- Primary-delta synchronization triggers
 
@@ -386,23 +388,37 @@ mkVal (EBit _ w v) | w < 64    = pp v
                    | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) [0..w-1]) ++ "'"
 mkVal e               = error $ "SQL.mkVal " ++ (render $ pp e)
 
-mkConstraint :: (?r::Refine) => Relation -> Constraint -> (Doc, Doc)
-mkConstraint rel (PrimaryKey _ fs)           = 
-    (pp "primary key" <+> (parens $ commaSep $ concatMap (map colName . field2cols rel) fs), empty)
-mkConstraint rel (ForeignKey _ fs rname fs') = 
-    ( let rel' = getRelation ?r rname in
+mkConstraint :: (?r::Refine) => Relation -> Constraint -> Int -> (Doc, Doc, Doc)
+mkConstraint rel (PrimaryKey _ fs) _           = 
+    (empty, pp "primary key" <+> (parens $ commaSep $ concatMap (map colName . field2cols rel) fs), empty)
+mkConstraint rel (ForeignKey _ fs rname fs') _ = 
+    ( empty
+    , let rel' = getRelation ?r rname in
       pp "foreign key" <+> 
       (parens $ commaSep $ concatMap (map colName . field2cols rel) fs) <+>
       pp "references" <+> 
       (pp rname <+> (parens $ commaSep $ concatMap (map colName . field2cols rel') fs'))
     , empty)
-mkConstraint rel (Unique _ fs) = 
+mkConstraint rel (Unique _ fs) _ = 
     ( empty,
+      empty,
       pp "create unique index on" <+> (pp $ name rel) <+>
       (parens $ commaSep
        $ map mkSqlCol
        $ concatMap (\f -> e2cols (exprType ?r (CtxRelKey rel) f) f) fs) <> semi)
-mkConstraint _   (Check _ _)                 = (empty, empty)
+mkConstraint rel (Check _ cond) i              = (mkFun func, pp "check" <> parens call, empty)
+    where fname    = "check" ++ name rel ++ "$" ++ show i
+          fields   = exprVars (CtxCheck rel) cond
+          fargs    = map (\(v, ctx) -> Field nopos v (exprType ?r ctx (eVar v))) fields
+          func     = Function nopos True fname fargs tBool (Just cond)
+          callargs = map (gather . (\f -> (eVar $ name f, typ f))) fargs
+          gather (e, t) = case typ' ?r t of
+                               TStruct _ cs -> parens $ commaSep 
+                                               $ map (\f -> gather (eField e $ name f, typ f)) 
+                                               $ (if' (length cs > 1) [Field nopos tag $ tagType cs] []) ++ (structFields cs)
+                               _            -> mkNormalizedExprV (CtxCheck rel) e
+          call     = pp fname <> (parens $ commaSep callargs)
+
 --error "mkConstraint check is undefined"
 
 
