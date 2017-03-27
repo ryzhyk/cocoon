@@ -12,6 +12,8 @@ level of detail sufficient for the Cocoon compiler to generate an
 SDN application that manages network switches via the southbound 
 interface (we currently support P4).  
 
+For more information about Cocoon, see the [NSDI'17 paper](http://ryzhyk.net/publications/Ryzhyk_BCJSTV_17.pdf).
+
 # Installation
 
 Install the [Haskell Platform](https://www.haskell.org/platform/).
