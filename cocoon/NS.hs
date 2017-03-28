@@ -36,9 +36,9 @@ import Syntax
 import Name
 import Util
 import Pos
-import Relation
-import {-# SOURCE #-}Expr
-import {-# SOURCE #-}Type
+import {-# SOURCE #-} Relation
+import {-# SOURCE #-} Expr
+import {-# SOURCE #-} Type
 --import {-# SOURCE #-}Builtins
 
 packetTypeName = "Packet"

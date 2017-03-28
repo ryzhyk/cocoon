@@ -20,3 +20,5 @@ exprVarDecls :: ECtx -> Expr -> [(String, ECtx)]
 isLExpr :: Refine -> ECtx -> Expr -> Bool
 isLVar :: Refine -> ECtx -> String -> Bool
 isLRel :: Refine -> ECtx -> String -> Bool
+exprFuncs :: Expr -> [String]
+exprFuncsRec :: Refine -> Expr -> [String]

@@ -76,11 +76,11 @@ vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
 mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
                                vcat $ intersperse (pp "") $ createdb : 
-                                                            (map mkTypeDef types) ++ 
-                                                            (map (mk . getRelation r) ordered) ++
+                                                            (map mkTypeDef tdefs) ++ 
+                                                            (map (mk . getRelation r) rels) ++
                                                             (map mkFun funs)
                                                             
-    where ordered = reverse $ G.topsort' $ relGraph r
+    where rels = reverse $ G.topsort' $ relGraph r
           createdb = pp "drop database if exists" <+> pp dbname <> semi
                      $$
                      pp "create database" <+> pp dbname <> semi
@@ -89,18 +89,12 @@ mkSchema dbname r@Refine{..} = let ?r = r in
           mk rel = case relDef rel of
                         Nothing -> mkRel rel
                         _       -> mkView rel
-          funs = map (getFunc r) $ nub 
-                 $ concatMap (concatMap (\case
-                                          Check _ c -> exprFuncsRec r c
-                                          _         -> []) 
-                                        . relConstraints) 
-                             refineRels
-          types = mapMaybe (\t -> case t of
+          funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
+          types = nub $ concatMap (relTypes r) refineRels
+          types' = nub $ map (typ' r) $ reverse $ G.topsort' $ typeGraph r types
+          tdefs = mapMaybe (\t -> case t of
                                        TStruct{..} -> Just $ structTypeDef r t
-                                       _           -> Nothing)
-                  $ nub $ concatMap (map (typ' r) . typeSubtypesRec r)
-                  $ concatMap (\f -> funcType f : (map typ $ funcArgs f) ++ (exprTypes r (CtxFunc f CtxRefine) $ fromJust $ funcDef f))
-                              funs
+                                       _           -> Nothing) types'
 
 mkTypeDef :: (?r::Refine) => TypeDef -> Doc
 mkTypeDef (TypeDef _ n (Just (TStruct _ cs))) = 

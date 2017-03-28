@@ -101,10 +101,6 @@ checkFRefinement f f' = do
     assert (funcType f == funcType f') (pos f') $ "Type of " ++ name f' ++ " do not match previous definition at " ++ spos f
     assert (isNothing $ funcDef f) (pos f') $ "Cannot re-define function " ++ name f' ++ " previously defined at " ++ spos f
 
--- construct dependency graph
---typeGraph :: Refine -> G.Gr TypeDef ()
---typeGraph _ = undefined
-
 -- Validate refinement with previous definitions inlined
 validate1 :: (MonadError String me) => Refine -> me ()
 validate1 r@Refine{..} = do
@@ -117,10 +113,6 @@ validate1 r@Refine{..} = do
     uniqNames (\c -> "Multiple definitions of constructor " ++ c) $ concatMap typeCons $ refineStructs r
     -- each role occurs at most once as a port
     --uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . nodePorts) refineNodes
-    -- TODO: check for cycles in the types graph - catch recursive type definitions
---    case grCycle (typeGraph r) of
---         Nothing -> return ()
---         Just t  -> err (pos $ snd $ head t) $ "Recursive type definition: " ++ (intercalate "->" $ map (name . snd) t)
     mapM_ (relValidate r)    refineRels
     mapM_ (relValidate2 r)   refineRels
     maybe (return ()) 
@@ -131,6 +123,7 @@ validate1 r@Refine{..} = do
     mapM_ (funcValidate r)   refineFuncs
     mapM_ (roleValidate r)   refineRoles
     mapM_ (assumeValidate r) refineAssumes
+    mapM_ (relValidate3 r)   refineRels
     -- TODO: check for cycles in the locations graph
     mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
                                 "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
@@ -150,15 +143,6 @@ typeValidate r (TArray _ t _) = typeValidate r t
 typeValidate r (TUser   p n)  = do _ <- checkType p r n
                                    return ()
 typeValidate _ _              = return ()
-
-relTypeValidate :: (MonadError String me) => Refine -> Pos -> Type -> me ()
-relTypeValidate r p   TArray{}       = errR r p "Arrays are not allowed in relations"
-relTypeValidate r p   TTuple{}       = errR r p "Tuples are not allowed in relations"
-relTypeValidate r p   TOpaque{}      = errR r p "Opaque columns are not allowed in relations"
-relTypeValidate r p   TInt{}         = errR r p "Arbitrary-precision integers are not allowed in relations"
-relTypeValidate r p   (TStruct _ cs) = mapM_ (relTypeValidate r p . typ) $ structFields cs
-relTypeValidate r p   t@TUser{}      = relTypeValidate r p $ typ' r t
-relTypeValidate _ _   _              = return ()
 
 consValidate :: (MonadError String me) => Refine -> Constructor -> me ()
 consValidate r Constructor{..} = do
@@ -182,7 +166,6 @@ relValidate :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate r Relation{..} = do 
     uniqNames (\a -> "Multiple definitions of column " ++ a) relArgs
     mapM_ (typeValidate r . fieldType) relArgs
-    mapM_ ((\t -> relTypeValidate r (pos t) t) . fieldType) relArgs
 
 relValidate2 :: (MonadError String me) => Refine -> Relation -> me ()
 relValidate2 r rel@Relation{relAnnotation=annot, ..} = do 
@@ -222,7 +205,26 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
                                         Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
                                         _                -> False) relConstraints) p
                        "The following constraint is required in a #switch_port table: unique (switch,portnum)"
-                        
+                 
+relTypeValidate :: (MonadError String me) => Refine -> Relation -> Pos -> Type -> me ()
+relTypeValidate r rel p   TArray{}  = errR r p $ "Arrays are not allowed in relations (in relation " ++ name rel ++ ")"
+relTypeValidate r rel p   TTuple{}  = errR r p $ "Tuples are not allowed in relations (in relation " ++ name rel ++ ")"
+relTypeValidate r rel p   TOpaque{} = errR r p $ "Opaque columns are not allowed in relations (in relation " ++ name rel ++ ")"
+relTypeValidate r rel p   TInt{}    = errR r p $ "Arbitrary-precision integers are not allowed in relations (in relation " ++ name rel ++ ")"
+relTypeValidate _ _   _   TStruct{} = return ()
+relTypeValidate _ _   _   TUser{}   = return ()
+relTypeValidate _ _   _   _         = return ()
+
+relValidate3 :: (MonadError String me) => Refine -> Relation -> me ()
+relValidate3 r rel = do 
+    let types = relTypes r rel
+    mapM_ (\t -> relTypeValidate r rel (pos t) t) types
+    maybe (return ())
+          (\cyc -> errR r (pos rel) 
+                     $ "Dependency cycle among types used in relation " ++ name rel ++ ":\n" ++ 
+                      (intercalate "\n" $ map (show . snd) cyc))
+          $ grCycle $ typeGraph r types
+
 
 constraintValidate :: (MonadError String me) => Refine -> Relation -> Constraint ->  me ()
 constraintValidate r rel Check{..} = exprValidate r (CtxCheck rel) constrCond

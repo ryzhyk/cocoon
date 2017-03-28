@@ -21,17 +21,19 @@ module Type( WithType(..)
            , exprTypes
            , exprTraverseTypeM
            , typ', typ''
-           , isBool, isBit, isInt, isLocation, isStruct, isArray
+           , isBool, isBit, isInt, isLocation, isStruct, isArray, isTuple
            , matchType, matchType'
            , ctxExpectType
            , typeSubtypes
            , typeSubtypesRec
+           , typeGraph
            {-, typeDomainSize, typeEnumerate-}) where
 
 import Data.Maybe
 import Data.List
 import Control.Monad.Except
 import Control.Monad.State
+import qualified Data.Graph.Inductive as G
 --import {-# SOURCE #-} Builtins
 
 import Util
@@ -40,7 +42,7 @@ import Syntax
 import NS
 import Pos
 import Name
-import Relation
+import {-# SOURCE #-} Relation
 
 class WithType a where
     typ  :: a -> Type
@@ -174,6 +176,12 @@ isArray r a = case typ' r a of
                    TArray _ _ _ -> True
                    _            -> False
 
+isTuple :: (WithType a) => Refine -> a -> Bool
+isTuple r a = case typ' r a of
+                   TTuple _ _ -> True
+                   _          -> False
+
+
 matchType :: (MonadError String me, WithType a, WithType b) => Pos -> Refine -> a -> b -> me ()
 matchType p r x y = assertR r (matchType' r x y) p $ "Incompatible types " ++ show (typ x) ++ " and " ++ show (typ y)
 
@@ -198,20 +206,30 @@ matchType' r x y =
           t2 = typ' r y
 
 -- sub-types that immediately appear in the type expression
-typeSubtypes :: Type -> [Type]
-typeSubtypes t@TArray{}  = [t, typeElemType t]
-typeSubtypes t@TStruct{} = t: (map typ $ structFields $ typeCons t)
-typeSubtypes t@TTuple{}  = t: (map typ $ typeArgs t)
-typeSubtypes t           = [t]
+typeSubtypes :: Refine -> Type -> [Type]
+typeSubtypes r = nub . typeSubtypes' r
 
+typeSubtypes' :: Refine -> Type -> [Type]
+typeSubtypes' _ t@TArray{}  = [typeElemType t]
+typeSubtypes' _ t@TStruct{} = (map typ $ structFields $ typeCons t)
+typeSubtypes' _ t@TTuple{}  = (map typ $ typeArgs t)
+typeSubtypes' r t@TUser{}   = (maybeToList $ tdefType $ getType r $ typeName t)
+typeSubtypes' _ _           = []
 
 typeSubtypesRec :: Refine -> Type -> [Type]
 typeSubtypesRec r t = typeSubtypesRec' r [] t
 
 typeSubtypesRec' :: Refine -> [Type] -> Type -> [Type]
-typeSubtypesRec' r acc t = let new = typeSubtypes t \\ acc in
+typeSubtypesRec' r acc t = let new = nub (t: typeSubtypes r t) \\ acc in
                            new ++ foldl' (\acc' t' -> acc'++ typeSubtypesRec' r (acc++new++acc') t') [] new
-            
+
+-- The list of types must be closed under the typeSubtypes operation
+typeGraph :: Refine -> [Type] -> G.Gr Type ()
+typeGraph r ts = foldl' (\g t -> foldl' (\g' t' -> G.insEdge (typIdx t, typIdx t', ()) g') g 
+                                 $ typeSubtypes r t) g0 ts
+    where g0 = G.insNodes (mapIdx (\t i -> (i, t)) ts) G.empty
+          typIdx t = fromJust $ elemIndex t ts
+  
 {-
 typeDomainSize :: Refine -> Type -> Integer
 typeDomainSize r t = 

@@ -18,6 +18,8 @@ limitations under the License.
 
 module Relation (relRecordType,
                  relGraph,
+                 relTypes, 
+                 relFuncsRec,
                  ruleIsRecursive) where
 
 import qualified Data.Graph.Inductive as G
@@ -27,6 +29,9 @@ import Data.Maybe
 import Util
 import Name
 import Syntax
+import NS
+import {-# SOURCE #-} Type
+import {-# SOURCE #-} Expr
 
 relRecordType :: Relation -> Type
 relRecordType rel = tUser $ relName rel
@@ -56,3 +61,23 @@ ruleDeps :: Rule -> [String]
 ruleDeps rule = nub $ mapMaybe (\case
                                 E (ERelPred _ rname _) -> Just rname
                                 _                      -> Nothing) $ ruleRHS rule
+
+relFuncsRec :: Refine -> Relation -> [String]
+relFuncsRec r rel = nub 
+                    $ concatMap (\case
+                                   Check _ c -> exprFuncsRec r c
+                                   _         -> []) 
+                    $ relConstraints rel
+
+relTypes :: Refine -> Relation -> [Type]
+relTypes r rel = nub $ relFuncTypes r rel ++ relTypes' r rel
+
+relTypes' :: Refine -> Relation -> [Type]
+relTypes' r rel = nub $ concatMap (typeSubtypesRec r . typ) $ relArgs rel
+
+relFuncTypes :: Refine -> Relation -> [Type]
+relFuncTypes r rel = nub 
+                     $ concatMap (typeSubtypesRec r)
+                     $ concatMap (\f -> funcType f : (map typ $ funcArgs f) ++ (maybe [] (exprTypes r (CtxFunc f CtxRefine)) $ funcDef f))
+                     $ map (getFunc r) 
+                     $ relFuncsRec r rel
