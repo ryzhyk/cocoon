@@ -1,0 +1,163 @@
+typedef port_id_t  = string
+typedef mac_addr_t = bit<48>
+typedef ip4_addr_t = bit<32>
+typedef ip6_addr_t = bit<128>
+typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
+                   | IPAddr6 {addr6 : ip6_addr_t}
+
+function ethUnicastAddr(addr: mac_addr_t): bool
+function ethMulticastAddr(addr: mac_addr_t): bool
+function ethBroadcastAddr(addr: mac_addr_t): bool
+
+typedef Packet = eth_pkt_t
+
+typedef eth_pkt_t = EtherPacket { src  : mac_addr_t
+                                , dst  : mac_addr_t
+                                , vlan : vlan_t
+                                , l3   : l3_pkt_t}
+
+typedef vlan_t = VLANNone
+               | VLAN { pcp : bit<3>
+                      , dei : bit<1>
+                      , vid : bit<12>}
+
+typedef l3_pkt_t = L3PktIP4   { ip4 : ip4_pkt_t
+                              , l4  : l4_pkt_t}
+                 | L3PktIP6   { ip6 : ip6_pkt_t
+                              , l4  : l4_pkt_t}
+                 | L3PktARP   { arp : arp_pkt_t}
+                 | L3PktOther { ethertype : bit<16>}
+
+typedef ip4_pkt_t = IP4Pkt { dscp : bit<6>
+                           , ecn  : bit<2>
+                           , ttl  : bit<8>
+                           , frag : bit<13>
+                           , mf   : bool
+                           , src  : ip4_addr_t
+                           , dst  : ip4_addr_t}
+
+typedef ip6_pkt_t = IP6Pkt { dscp  : bit<6>
+                           , ecn   : bit<2>
+                           , ttl   : bit<8>
+                           , frag  : bit<13>
+                           , mf    : bool
+                           , label : bit<20>
+                           , src   : ip6_addr_t
+                           , dst   : ip6_addr_t}
+
+typedef arp_op_t = ARPRequest 
+                 | ARPReply
+
+typedef arp_pkt_t = ARPPkt { op  : arp_op_t
+                           , spa : ip4_addr_t
+                           , tpa : ip4_addr_t
+                           , sha : mac_addr_t
+                           , tha : mac_addr_t}
+
+typedef l4_pkt_t = L4PktTCP   { tcp : tcp_pkt_t}
+                 | L4PktUDP   { udp : udp_pkt_t}
+                 | L4PktICMP4 { icmp4 : icmp4_pkt_t}
+                 | L4PktICMP6 { icmp6 : icmp6_pkt_t}
+                 | L4CP       { cp : cp_pkt_t}
+                 | L4PktOther { protocol : bit<8>}
+
+typedef cp_pkt_t = CPReq  {request: key_t}     
+                 | CPResp {request: key_t, response: value_t}
+
+typedef tcp_pkt_t = TCPPkt { src   : bit<16>
+                           , dst   : bit<16>
+                           , flags : bit<9> }
+
+typedef udp_pkt_t = UDPPkt { src   : bit<16>
+                           , dst   : bit<16> }
+
+typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef uuid_t = bit<128>
+typedef vlan_id_t = bit<12>
+
+function acl(src: ip4_addr_t, dst: ip4_addr_t): bool
+function datastore(k: key_t): value_t
+
+table Client ( addr: ip4_addr_t, 
+               primary key (addr))
+
+table Server ( addr: ip4_addr_t,
+               primary key (addr))
+
+view ClientServer( client: ip4_addr_t
+                 , server: ip4_addr_t
+                 , check (client != server))
+
+ClientServer(c,s) :- Client(c), Server(s)
+
+assume Client(addr) => not Server(addr)
+
+function isRequestPkt(p: Packet): bool =
+    match (p.l3) {
+        L3PktIP4{_, l4} -> match (l4) {
+            L4CP{cp} -> match (cp) {
+                CPReq{_} -> true,
+                _        -> false
+              },
+            _        -> false
+          },
+        _ -> false
+    }
+
+role ClientOut [client in Client] = 
+    if (not isRequestPkt(pkt)) drop;
+    if (not acl(client.addr, pkt.l3.dst)) drop;
+    the (srv in Server | srv.addr == pkt.l3.dst) { false } default {drop};
+    pkt.response = datastore(pkt.request);
+    send ClientIn[client]
+
+role ClientIn [client in Client] = drop
+
+refine ClientOut {
+    role ClientOut [client in Client] = send CPIn[ ]
+    
+    state table Cache ( req: key_t
+                      , resp: value_t
+                      , primary key(req))
+    
+    role CPIn[] = 
+        if (/* packet from client */) {
+            the(cached in Cache | cached.req == pkt.l3.l4.cp.request) {
+                pkt.l3.l4.cp.response = cached.resp;
+                var tmp: ip4_addr_t = pkt.l3.src;
+                pkt.l3.src = pkt.l3.dst;
+                pkt.l3.dst = tmp;
+                send CPOut[]
+            } default {
+                send CPOut[]
+            }
+        } else {
+            Cache.insert(pkt.l3.l4.cp.request, pkt.l3.l4.cp.response);
+            send CPOut[]
+        }
+            
+        
+    role CPOut[] = /* if source is client, send to ClientIn, otherwise
+send to ServerIn */
+
+    role FWIn[] = 
+        if not acl(pkt.l3.src, pkt.l3.dst) {
+            drop;
+        } else {
+            send FWOut[]
+        }
+    role FWOut[] = /* if source is client, send to ClientIn, otherwise
+send to ServerIn */
+
+    role ServerIn[server in Server / isRequestPkt(pkt)] = 
+        pkt.l4 = L4CP{CPResp{datastore(pkt.request)}}
+        send ServerOut[server]
+        
+    role ServerOut[server in Server] = send FWIn[]
+
+}
