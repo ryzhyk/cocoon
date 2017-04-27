@@ -1,0 +1,64 @@
+typedef mac_addr_t = bit<48>
+typedef ip4_addr_t = bit<32>
+typedef ip4_netmask_t = IP4NetMask {ip: ip4_addr_t, mask: bit<6>}
+
+typedef acl_action_t = ACCEPT
+                     | DENY
+
+typedef Packet = Packet { srcMAC: mac_addr_t
+                        , dstMAC: mac_addr_t
+                        , srcIP:  ip4_addr_t
+                        , dstIP:  ip4_addr_t
+                        , sport:  bit<16>
+                        , dport:  bit<16>
+                        , proto:  bit<8>}
+
+table Routers(addr: ip4_addr_t)
+
+table ACL( prio:    bit<32>
+         , src:     ip4_netmask_t
+         , dst:     ip4_netmask_t
+         , proto:   bit<8>
+         , sport:   bit<16>
+         , dport:   bit<16>
+         , action:  acl_action_t)
+
+table Routes( subnet: ip4_netmask_t
+            , nhop:   ip4_addr_t
+            , unique(subnet))
+
+table ARP( ip: ip4_addr_t
+         , mac: mac_addr_t
+         , unique(ip))
+
+view NextHop ( subnet: ip4_netmask_t
+             , mac: mac_addr_t)
+
+NextHop(subnet, mac) :- Routes(subnet, nhop), ARP(nhop, mac)
+
+function ip4match(mask: ip4_netmask_t, ip2: ip4_addr_t): bool
+
+function acl(p: Packet): acl_action_t =
+    /*select_first*/ the(rule in ACL | ip4match(rule.src, p.srcIP) and 
+                               ip4match(rule.dst, p.dstIP) and
+                               rule.proto == p.proto and
+                               rule.sport == p.sport and
+                               rule.dport == p.dport
+                /* order by prio asc*/) {
+        rule.action
+    } default {
+        DENY
+    }
+
+function nexthop(addr: ip4_addr_t): mac_addr_t = 
+    /*select_first*/ the(rule in NextHop | ip4match(rule.subnet, addr)
+                 /*order by subnet.mask desc*/) {
+        rule.mac
+    }
+
+role RouterIn[router in Routers] =
+    if (acl(pkt) == DENY) { drop };
+    pkt.dstMAC = nexthop(pkt.dstIP);
+    send RouterOut[router] 
+
+role RouterOut[router in Routers] = drop
