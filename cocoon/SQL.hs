@@ -138,7 +138,8 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
     -- Primary-delta synchronization triggers
 
 mkView :: (?r::Refine) => Relation -> Doc
-mkView rel@Relation{..} = pp "create" <+> (if' isrec (pp "recursive") empty) <+> pp "view" <+> pp relName <+> 
+mkView rel@Relation{..} = (vcat $ map sel1 cons) $$
+                          pp "create" <+> (if' isrec (pp "recursive") empty) <+> pp "view" <+> pp relName <+> 
                           (parens $ commaSep $ concatMap (\a -> map (colName . sel1) 
                                                                 $ e2cols (typ a) $ eVar $ name a) $ relArgs) <+> pp "as"
                           $$
@@ -146,6 +147,7 @@ mkView rel@Relation{..} = pp "create" <+> (if' isrec (pp "recursive") empty) <+>
     where
     (recrules, simprules) = partition (ruleIsRecursive rel) $ fromJust relDef
     isrec = not $ null recrules
+    cons = mapIdx (mkConstraint rel) relConstraints
     
     -- Primary table
     -- Delta table
@@ -412,8 +414,6 @@ mkConstraint rel (Check _ cond) i              = (mkFun func, pp "check" <> pare
                                                $ (if' (length cs > 1) [Field nopos tag $ tagType cs] []) ++ (structFields cs)
                                _            -> mkNormalizedExprV (CtxCheck rel) e
           call     = pp fname <> (parens $ commaSep callargs)
-
---error "mkConstraint check is undefined"
 
 
 mkSqlCol :: (Expr, Type, Bool) -> Doc
