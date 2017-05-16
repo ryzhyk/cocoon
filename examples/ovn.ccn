@@ -225,7 +225,7 @@ view LogicalSwitchMAC( switch_id : uuid_t
 LogicalSwitchMAC(sw, p, mac) :- LogicalPort(p, sw, _, _, _), LogicalPort_mac(p, mac)
 
 view LogicalSwitchAcceptsUnknown( switch_id : uuid_t
-                                  , port      : port_id_t)
+                                , port      : port_id_t)
 LogicalSwitchAcceptsUnknown(sw, p) :- LogicalPort(p, sw, _, _, _), LogicalPort_address(p, PortAddressUnknown)
 
 //assume LogicalPort(p1, sw, _, _, _) and LogicalPort(p2, sw, _ ,_ ,_) and
