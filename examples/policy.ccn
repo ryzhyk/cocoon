@@ -1,0 +1,276 @@
+/*
+ * Desired State
+ */
+
+typedef connectivity_strategy_t = Whitelist
+                                | Blacklist
+
+typedef realization_state_t = RealizationInProgress
+                            | RealizationSuccess
+                            | RealizationFailure
+
+table Infra( name: string
+           , connectivityStrategy: connectivity_strategy_t
+           , primary key (name))
+
+//Infra space related policy
+table Domain( infra: string
+            , name:  string
+            , primary key (infra, name)
+            , foreign key (infra) references Infra(name)) 
+
+table Group( infra:  string
+           , domain: string
+           , name:   string
+           , primary key (infra, domain, name)
+           , foreign key (infra, domain) references Domain(infra, name))
+
+table GroupExpression( infra:  string
+                     , domain: string
+                     , group:  string
+                     , expr:   uuid_t
+                     , foreign key (expr) references Expression(id)
+                     , foreign key (infra, domain, group) references Group(infra, domain, name))
+
+typedef uuid_t = bit<128>
+typedef match_t = MatchName
+                | MatchTag
+
+typedef match_op_t = MatchEquals
+                   | MatchContains
+                   | MatchStartsWith
+
+typedef expression_t = ExprOr             {e1: uuid_t, e2: uuid_t}
+                     | ExprAnd            {e1: uuid_t, e2: uuid_t}
+                     | ExprVirtualMachine {matchType: match_t, matchOp: matchop_t, val: string}
+                     | ExprLogicalSwitch  {matchType: match_t, matchOp: matchop_t, val: string}
+                     | ExprLogicalPort    {matchType: match_t, matchOp: matchop_t, val: string}
+
+table Expression ( id: uuid_t
+                 , expr: expression_t
+                 , primary key(id)
+                 , foreign key(expr.e1) references Expression(id)
+                 , foreign key(expr.e2) references Expression(id))
+
+table Service ( infra: string
+              , name:  string
+              , foreign key (infra) references Infra(name)
+              , primary key (infra, name))
+
+typedef alg_app_t = AlgOracleTNS
+                  | AlgFTP
+                  | AlgSunRPCTCP
+                  | AlgSunRPCUDP
+                  | AlgMSRPCTCP
+                  | AlgMSRPCUDP
+                  | AlgNBNSBroadcast
+                  | AlgNBDGBroadcast
+
+typedef l4_portset_proto_t = L4PortSetTCP
+                           | L4PortSetUDP
+
+typedef icmp_proto_t = ICMPv4
+                     | ICMPv6
+
+typedef service_entry_t = EtherTypeServiceEntry  {etherType: bit<16>}
+                        | IPProtocolServiceEntry {ipProto:   bit<8>}
+                        | IGMPTypeServiceEntry
+                        | ICMPTypeServiceEntry   {proto: icmp_proto_t, type: bit<8>, code: bit<8>}
+                        | ALGTypeServiceEntry    {app: alg_app_t}  // source ports, destination ports
+                        | L4PortSetServiceEntry  {proto: l4_portset_proto_t} // source ports, destination ports
+
+table ServiceEntry ( infra:   string
+                   , service: string
+                   , name:    string
+                   , entry:   service_entry_t
+                   , foreign key (infra, service) references Service(infra, name)
+                   , primary key (infra, service, name))
+
+typedef port_range_t = PortRange {from: bit<16>, to: bit<16>}
+
+table ServiceEntrySrc ( infra:   string
+                      , service: string
+                      , entry:   string 
+                      , range:   port_range_t
+                      , foreign key (infra, service, entry) references ServiceEntry(infra, service, name)
+                      , unique (infra, service, entry, port)
+                      , check (range.to >= range.from))
+
+table ServiceEntryDst ( infra:   string
+                      , service: string
+                      , entry:   string 
+                      , range:   port_range_t
+                      , foreign key (infra, service, entry) references ServiceEntry(infra, service, name)
+                      , unique (infra, service, entry, port)
+                      , check (range.to >= range.from))
+
+
+table CommunicationProfile ( infra: string
+                           , name:  string
+                           , foreign key (infra) references Infra(name)
+                           , primary key (infra, name))
+
+typedef action_t = Allow
+                 | Deny
+
+table CommunicationProfileEntry ( infra:   string
+                                , profile: string
+                                , name:    string
+                                , action:  action_t
+                                , foreign key (infra, profile) references CommunicationProfile(infra, name)
+                                , primary key (infra, profile, name))
+
+table CommunicationProfileEntryService ( infra:   string
+                                       , profile: string
+                                       , entry:   string
+                                       , service: string
+                                       , foreign key (infra, profile, entry) references CommunicationProfileEntry (infra, profile, name)
+                                       , foreign key (infra, service) references Service(infra, name))
+
+table CommunicationMap ( infra:      string
+                       , name:       string
+                       , precedence: bit<32>)
+
+table CommunicationEntry ( infra:     string
+                         , profile:   string
+                         , map:       string
+                         , name:      string
+                         , priority:  bit<32>
+                         , foreign key (infra, profile) references CommunicationProfile (infra, name)
+                         , foreign key (infra, map) references CommunicationMap (infra, name)
+                         , primary key (infra, profile, name))
+
+table CommunicationEntrySrcGroup ( infra:   string
+                                 , profile: string
+                                 , entry:   string
+                                 , domain:  string
+                                 , group:   string
+                                 , foreign key (infra, profile, entry) references CommunicationEntry(infra, profile, name)
+                                 , foreign key (infra, domain, group) references Group(infra, domain, name))
+
+table CommunicationEntryDstGroup ( infra:   string
+                                 , profile: string
+                                 , entry:   string
+                                 , domain:  string
+                                 , group:   string
+                                 , foreign key (infra, profile, entry) references CommunicationEntry(infra, profile, name)
+                                 , foreign key (infra, domain, group) references Group(infra, domain, name))
+
+/*
+ * Realized state
+ */
+
+table EnforcementPoint ( infra: string
+                       , name:  string
+                       , foreign key (infra) references Infra(name)
+                       , primary key (infra, name))
+
+typedef group_type_t = RealizedNSGroup
+                     | RealizedSecurityGroup
+
+table RealizedGroup ( infra:            string
+                    , enforcementPoint: string
+                    , domain:           string
+                    , group:            string
+                    , type:             group_type_t
+                    , rstate:           realized_state_t
+                    , foreign key (infra, enforcementPoint) references EnforcementPoint(infra, name)
+                    , foreign key (infra, domain, group) references Group(infra, domain, name)
+                    , primary key (infra, enforcementPoint, domain, group))
+
+typedef port_status_t = PortUp
+                      | PortDown
+                      | PortUnknown
+
+table RealizedLogicalPort ( infra:            string
+                          , enforcementPoint: string
+                          , domain:           string
+                          , group:            string
+                          , port:             string
+                          , status:           port_status_t
+                          , foreign key (port) ???
+                          , foreign key (infra, enforcementPoint, domain, group) references RealizedGroup(infra, enforcementPoint, domain, group))
+
+table RealizedLogicalSwitch ( infra:            string
+                            , enforcementPoint: string
+                            , domain:           string
+                            , group:            string
+                            , transportZone:    string
+                            , logicalSwitch:    string
+                            , foreign key (transportZone, logicalSwitch) ???
+                            , foreign key (infra, enforcementPoint, domain, group) references RealizedGroup(infra, enforcementPoint, domain, group))
+
+typedef vm_powerstate_t = VMRunning
+                        | VMStopped
+                        | VMSuspended
+                        | VMUnknown
+
+table RealizedVirtualMachine ( infra:            string
+                             , enforcementPoint: string
+                             , domain:           string
+                             , group:            string
+                             , hostId:           string       
+                             , localId:          string
+                             , powerState:       vm_powerstate_t
+                             , computeIds: ???
+                             , foreign key (hostId, localId) ???
+                             , foreign key (infra, enforcementPoint, domain, group) references RealizedGroup(infra, enforcementPoint, domain, group))
+
+table RealizedPolicyService ( infra:            string
+                            , enforcementPoint: string
+                            , id:               string
+                            , foreign key (infra, enforcementPoint) RealizedEnforcementPoint(infra, name)
+                            , primary key (infra, enforcementPoint, id))
+
+typedef firewall_section_type_t = SectionLayer2
+                                | SectionLayer3
+
+table RealizedFirewallSection ( infra:            string
+                              , enforcementPoint: string
+                              , service:          string
+                              , type: firewall_section_type_t
+                              , id:               string
+                              , foreign key (infra, enforcementPoint, service) references RealizedPolicyService(infra, enforcementPoint, id)
+                              , primary key (infra, enforcementPoint, service, id))
+
+typedef firewall_dir_t = FirewallIn
+                       | FirewallOut
+                       | FirewallInOut
+
+typedef firewall_action_t = Allow
+                          | Drop
+                          | Reject
+
+table RealizedFirewallRule ( infra:            string
+                           , enforcementPoint: string
+                           , service:          string
+                           , section:          string
+                           , id:               string
+                           , disabled:         bool
+                           , direction:        firewall_dir_t
+                           , action:           firewall_action_t
+                           , foreign key (infra, enforcementPoint, service, section) references RealizedFirewallSection (infra, enforcementPoint, service, id))
+
+table FirewallSource ( infra:            string
+                     , enforcementPoint: string
+                     , service:          string
+                     , section:          string
+                     , rule:             string
+                     , resource:         ???
+                     , foreign key (infra, enforcementPoint, service, section, rule) references RealizedFirewallRule(infra, enforcementPoint, service, section, id))
+
+table FirewallDestination ( infra:            string
+                          , enforcementPoint: string
+                          , service:          string
+                          , section:          string
+                          , rule:             string
+                          , resource:         ???
+                          , foreign key (infra, enforcementPoint, service, section, rule) references RealizedFirewallRule(infra, enforcementPoint, service, section, id))
+
+table FirewallService ( infra:            string
+                      , enforcementPoint: string
+                      , service:          string
+                      , section:          string
+                      , rule:             string
+                      , resource:         ???
+                      , foreign key (infra, enforcementPoint, service, section, rule) references RealizedFirewallRule(infra, enforcementPoint, service, section, id))
