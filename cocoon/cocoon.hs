@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE RecordWildCards, ImplicitParams #-}
+{-# LANGUAGE RecordWildCards, ImplicitParams, LambdaCase #-}
 
 import System.Environment
 import Text.Parsec.Prim
@@ -22,20 +22,25 @@ import Text.PrettyPrint
 import System.FilePath.Posix
 import System.Directory
 import System.Console.GetOpt
+import Control.Monad
 
 import Parse
 import Validate
 import SQL
 
 data TOption = CCN String
+             | Action String
              | Bound String
              | DoBoogie
              | Do1Refinement
              | DoP4
              | DoNetKAT
         
+data CCNAction = ActionSQL | ActionController
+
 options :: [OptDescr TOption]
 options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
+          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, controller"
           , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
           , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
           , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
@@ -44,6 +49,7 @@ options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Co
           ]
 
 data Config = Config { confCCNFile      :: FilePath
+                     , confAction       :: CCNAction
                      , confBound        :: Int
                      , confDoBoogie     :: Bool
                      , confDo1Refinement:: Bool
@@ -51,7 +57,8 @@ data Config = Config { confCCNFile      :: FilePath
                      , confDoNetKAT     :: Bool
                      }
 
-defaultConfig = Config { confCCNFile      = ""
+defaultConfig = Config { confCCNFile      = error "input file not specified"
+                       , confAction       = error "action not specified"
                        , confBound        = 15
                        , confDoBoogie     = False
                        , confDo1Refinement= False
@@ -60,21 +67,39 @@ defaultConfig = Config { confCCNFile      = ""
                        }
 
 
-addOption :: TOption -> Config -> Config
-addOption (CCN f)       config = config{ confCCNFile  = f}
-addOption (Bound b)     config = config{ confBound    = case reads b of
-                                                             []        -> error "invalid bound specified"
-                                                             ((i,_):_) -> i}
-addOption DoBoogie      config = config{ confDoBoogie      = True}
-addOption Do1Refinement config = config{ confDo1Refinement = True}
-addOption DoP4          config = config{ confDoP4          = True}
-addOption DoNetKAT      config = config{ confDoNetKAT      = True}
+addOption :: Config -> TOption -> IO Config
+addOption config (CCN f)        = return config{ confCCNFile  = f}
+addOption config (Action a)     = do a' <- case a of
+                                                "sql"        -> return ActionSQL
+                                                "controller" -> return ActionController
+                                                _            -> fail "invalid action"
+                                     return config{confAction = a'}
+addOption config (Bound b)      = do b' <- case reads b of
+                                                []        -> fail "invalid bound specified"
+                                                ((i,_):_) -> return i
+                                     return config{confBound = b'}
+addOption config DoBoogie       = return config{ confDoBoogie      = True}
+addOption config Do1Refinement  = return config{ confDo1Refinement = True}
+addOption config DoP4           = return config{ confDoP4          = True}
+addOption config DoNetKAT       = return config{ confDoNetKAT      = True}
+
+validateOptions :: [TOption] -> IO ()
+validateOptions opts = do
+    when (not $ any (\case 
+                      CCN _ -> True
+                      _     -> False) opts)
+         $ fail "input file not specified"
+    when (not $ any (\case 
+                      Action _ -> True
+                      _        -> False) opts)
+         $ fail "action not specified"
 
 main = do
     args <- getArgs
     prog <- getProgName
     config <- case getOpt Permute options args of
-                   (flags, [], []) -> return $ foldr addOption defaultConfig flags
+                   (flags, [], []) -> do validateOptions flags
+                                         foldM addOption defaultConfig flags
                    _ -> fail $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options 
 
     let fname  = confCCNFile config
@@ -94,10 +119,12 @@ main = do
     --let final = last combined
     putStrLn "Validation complete"
 
-    let schema = mkSchema basename $ head combined
-        schfile = workdir </> addExtension basename "schema"
-    writeFile schfile $ render schema
-    putStrLn $ "Schema written to file " ++ schfile
+    case confAction config of
+         ActionSQL -> do let schema = mkSchema basename $ head combined
+                             schfile = workdir </> addExtension basename "schema"
+                         writeFile schfile $ render schema
+                         putStrLn $ "Schema written to file " ++ schfile
+         ActionController -> do putStrLn "Starting controller"
     
 --
 --    let ps = pairs combined
