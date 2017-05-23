@@ -95,8 +95,9 @@ main = do
     putStrLn "Validation complete"
 
     let schema = mkSchema basename $ head combined
-    writeFile (workdir </> addExtension basename "schema") $ render schema
-    putStrLn "Schema written to file"
+        schfile = workdir </> addExtension basename "schema"
+    writeFile schfile $ render schema
+    putStrLn $ "Schema written to file " ++ schfile
     
 --
 --    let ps = pairs combined
