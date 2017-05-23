@@ -28,7 +28,6 @@ import Data.Char
 import Data.Tuple.Select
 import Text.PrettyPrint
 import Control.Monad.State
-import qualified Data.Map as M
 import qualified Data.Graph.Inductive.Query.DFS as G
 
 import Name
@@ -50,17 +49,17 @@ matchvar = "match$"
 commaSep = hsep . punctuate comma . filter (not . isEmpty)
 vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
 
-andSep = andSep' . filter (not . isEmpty)
+--andSep = andSep' . filter (not . isEmpty)
 
-andSep' []  = empty
-andSep' [x] = x
-andSep' xs  = parens $ hsep $ punctuate (pp " and") xs
+--andSep' []  = empty
+--andSep' [x] = x
+--andSep' xs  = parens $ hsep $ punctuate (pp " and") xs
 
-vandSep = vandSep' . filter (not . isEmpty)
+--vandSep = vandSep' . filter (not . isEmpty)
 
-vandSep' []  = empty
-vandSep' [x] = x
-vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
+--vandSep' []  = empty
+--vandSep' [x] = x
+--vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
 
 -- TODO
 -- Special tables
@@ -77,20 +76,17 @@ mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
                                vcat $ intersperse (pp "") $ createdb : 
                                                             (map mkTypeDef tdefs) ++ 
-                                                            (map (mk . getRelation r) rels) ++
+                                                            (map (mkRel . getRelation r) rels) ++
                                                             (map mkFun funs)
                                                             
-    where rels = reverse $ G.topsort' $ relGraph r
+    where rels = filter (not . relIsView . getRelation r) $ reverse $ G.topsort' $ relGraph r
           createdb = pp "drop database if exists" <+> pp dbname <> semi
                      $$
                      pp "create database" <+> pp dbname <> semi
                      $$
                      pp "\\c" <+> pp dbname
-          mk rel = case relDef rel of
-                        Nothing -> mkRel rel
-                        _       -> mkView rel
           funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
-          types = nub $ concatMap (relTypes r) refineRels
+          types = nub $ concatMap (relTypes r . getRelation r) rels
           types' = nub $ map (typ' r) $ reverse $ G.topsort' $ typeGraph r types
           tdefs = mapMaybe (\t -> case t of
                                        TStruct{..} -> Just $ structTypeDef r t
@@ -129,78 +125,34 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
                          $$
                          pp ");"
                          $$
+                         mkNotify relName
+                         $$
                          (vcat $ map sel3 cons)
     where
     -- Primary table
-    cols = map mkColumn relArgs
+    cols = pp "_serial bigserial" :
+           map mkColumn relArgs
     cons = mapIdx (mkConstraint rel) relConstraints
     -- Delta table
     -- Primary-delta synchronization triggers
 
-mkView :: (?r::Refine) => Relation -> Doc
-mkView rel@Relation{..} = (vcat $ map sel1 cons) $$
-                          pp "create" <+> (if' isrec (pp "recursive") empty) <+> pp "view" <+> pp relName <+> 
-                          (parens $ commaSep $ concatMap (\a -> map (colName . sel1) 
-                                                                $ e2cols (typ a) $ eVar $ name a) $ relArgs) <+> pp "as"
-                          $$
-                          (vcat $ intersperse (pp "UNION") $ map (nest' . mkRule rel) $ simprules ++ recrules) <> semi
-    where
-    (recrules, simprules) = partition (ruleIsRecursive rel) $ fromJust relDef
-    isrec = not $ null recrules
-    cons = mapIdx (mkConstraint rel) relConstraints
-    
-    -- Primary table
-    -- Delta table
-    -- rel' = 
-    -- Primary-delta synchronization triggers
-
-mkRule :: (?r::Refine) => Relation -> Rule -> Doc
-mkRule rel rule@Rule{..} = 
-    (pp "select distinct") $$
-    (nest' $ vcommaSep $ concatMap (uncurry mkarg) $ zip (relArgs rel) ruleLHS) $$
-    (pp "from") $$ 
-    (nest' $ commaSep $ map (\(p, n) -> (pp $ exprRel p) <+> pp n) prednames) $$
-    (pp "where") $$
-    (nest' $ vandSep [predconstr, eqconstr, arithconstr])
-  where 
-    (preds, conds) = partition exprIsRelPred ruleRHS
-    prednames :: [(ENode, String)]
-    prednames = evalState (mapM (\(E p) -> do (i::Int) <- (liftM $ maybe 0 (+1)) $ gets (M.lookup (exprRel p))
-                                              modify $ M.insert (exprRel p) i
-                                              return (p, exprRel p ++ show i)) preds) M.empty
-    vars = ctxAllVars ?r (CtxRuleR rel rule)
-    -- Variable to column mapping
-    varcols :: [(Field, [Expr])]
-    varcols = zip vars
-              $ map (\v -> concatMap (\(p, pname) -> map (ctx2Field (eVar pname) . snd) 
-                                                     $ filter ((name v ==) . fst)
-                                                     $ exprVars (CtxRuleR rel rule) $ E p) prednames)
-                    vars
-    -- LHS arguments
-    mkarg arg val = let cols = field2cols rel (eVar $ name arg)
-                        vals = map sel1 $ e2cols (fieldType arg) $ subst val
-                    in map (\(v, c) -> colName v <+> pp "as" <+> colName c) $ zip vals cols
-    -- collect (constructor) constraints from individual relations
-    predconstr = mkNormalizedExprV (CtxRuleR rel rule) $ conj 
-                 $ map (\(ERelPred _ rname as, tname) -> 
-                        let Relation{..} = getRelation ?r rname in
-                        conj $ map (\(f,a) -> pattern2Constr (eField (eVar tname) $ name f) (typ f) a) 
-                             $ zip relArgs as) 
-                       prednames
-    -- collect non-predicate constraints (conds)
-    arithconstr = mkNormalizedExprV (CtxRuleR rel rule) $ conj $ map subst conds
-    -- collect equality constraints
-    eqconstr = andSep
-               $ map (\(f, e:es) -> let ecols = e2cols (typ f) e in
-                                    andSep $ map (\e' -> let ecols' = e2cols (typ f) e' in
-                                                         andSep $ map (\(c1,c2) -> mkSqlCol c1 <+> pp "=" <+> mkSqlCol c2)
-                                                                      $ zip ecols ecols') es) 
-                     varcols
-    -- substitute variable names with matching column names in expression
-    subst e = exprFold subst' e
-    subst' (EVar _ v) = head $ snd $ fromJust $ find ((== v) . name . fst) varcols
-    subst' e          = E e
-
+mkNotify :: String -> Doc
+mkNotify rel = pp $ 
+    "create function upd_" ++ rel ++ "() returns trigger as $$\n"                ++
+    "begin\n"                                                                    ++
+    "    if (tg_op = 'DELETE' or tg_op = 'UPDATE') then\n"                       ++
+    "        perform pg_notify('" ++ lrel ++ "_del', json_build_object('id', old._serial)::text);\n" ++
+    "    end if;\n"                                                              ++
+    "    if (tg_op = 'INSERT' or tg_op = 'UPDATE') then\n"                       ++
+    "        perform pg_notify('" ++ lrel ++ "_ins', row_to_json(new)::text);\n" ++
+    "    end if;\n"                                                              ++
+    "    return NEW;\n"                                                          ++
+    "end;\n"                                                                     ++
+    "$$ language plpgsql;\n"                                                     ++
+    "create trigger trg_" ++ rel ++ " after insert or delete or update on " ++ rel ++ "\n" ++
+    "    for each row execute procedure upd_" ++ rel ++ "();\n"
+    where lrel = map toLower rel
+ 
 
 --- r, m, Cons1{_,_,Cons2{x,_}} ===> m.f1.f2
 ctx2Field :: (?r::Refine) => Expr -> ECtx -> Expr

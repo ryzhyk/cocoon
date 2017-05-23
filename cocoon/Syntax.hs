@@ -24,6 +24,7 @@ module Syntax( pktVar
              , Field(..)
              , Role(..)
              , Relation(..)
+             , relIsView
              , RelAnnotation(..)
              , Constraint(..), isPrimaryKey, isForeignKey, isUnique, isCheck
              , Constructor(..)
@@ -239,6 +240,9 @@ data Rule = Rule { rulePos :: Pos
 
 ppRule :: String -> Rule -> Doc
 ppRule rel Rule{..} = pp rel <> (parens $ hsep $ punctuate comma $ map pp ruleLHS) <+> pp ":-" <+> (hsep $ punctuate comma $ map pp ruleRHS)
+
+relIsView :: Relation -> Bool
+relIsView = isJust . relDef
 
 instance Show Rule where
     show = render . ppRule ""
