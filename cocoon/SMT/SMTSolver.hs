@@ -84,10 +84,27 @@ data Expr = EVar        String
           | ESlice      Expr Int Int
           | ECond       [(Expr, Expr)] Expr
           | ERelPred    String [Expr]
-          deriving Show
+          deriving (Show, Eq)
 
 instance PP Expr where
     pp = text . show
+
+conj :: [Expr] -> Expr
+conj = conj' . filter (/= EBool True)
+
+conj' :: [Expr] -> Expr
+conj' []     = EBool True
+conj' [e]    = e
+conj' (e:es) = EBinOp And e (conj' es)
+
+disj :: [Expr] -> Expr
+disj = disj' . filter (/= EBool False)
+
+disj' :: [Expr] -> Expr
+disj' []     = EBool False
+disj' [e]    = e
+disj' (e:es) = EBinOp Or e (disj' es)
+
 
 -- Assigns values to variables.
 type Assignment = M.Map String Expr

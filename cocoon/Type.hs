@@ -229,7 +229,7 @@ typeGraph r ts = foldl' (\g t -> foldl' (\g' t' -> G.insEdge (typIdx t, typIdx t
                                  $ typeSubtypes r t) g0 ts
     where g0 = G.insNodes (mapIdx (\t i -> (i, t)) ts) G.empty
           typIdx t = fromJust $ elemIndex t ts
-  
+
 {-
 typeDomainSize :: Refine -> Type -> Integer
 typeDomainSize r t = 

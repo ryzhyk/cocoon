@@ -24,12 +24,14 @@ import qualified Data.Aeson as JSON
 import Data.String
 import Data.List
 import Data.Maybe
+import qualified Data.Graph.Inductive.Query.DFS as G
 
 import Syntax
 import Refine
 import NS
 import Relation
 import Name
+import Type
 import qualified SMT.Datalog as DL
 import qualified SMT as SMT
 
@@ -42,13 +44,14 @@ controllerLoop dbname r = do
     let rels = refineRelsSorted r
     let funcs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) rels
     let funcs' = map SMT.func2SMT funcs
-    let structs = map (structTypeDef r) 
+    let structs = map (\t -> SMT.struct2SMT (name t) $ typeCons $ fromJust $ tdefType t)
+                  $ nub $ map (structTypeDef r . typ' r) 
                   $ filter (\case 
                              TStruct _ _ -> True
                              _           -> False) 
+                  $ reverse $ G.topsort' $ typeGraph r 
                   $ nub $ concatMap (relTypes r) rels
-    let structs' = map (\t -> SMT.struct2SMT (name t) $ typeCons $ fromJust $ tdefType t) structs
-    dlsession <- (DL.newSession DL.z3DatalogEngine) structs' funcs'
+    dlsession <- (DL.newSession DL.z3DatalogEngine) structs funcs'
     -- populate datalog with base tables
     PG.withTransaction db $ do readDB r
                                --subscribe db r

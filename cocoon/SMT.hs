@@ -16,7 +16,7 @@ import Syntax
 import Name
 import Expr
 import Pos
---import NS
+import NS
 import Type
 --import Builtins
 
@@ -78,40 +78,53 @@ typ2SMT x = case typ' ?r x of
                  TLocation _  -> SMT.TBit 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
                  t            -> error $ "SMT.typ2SMT " ++ show t
 
+-- TODO: preprocess expression, substituting variables in the action
+-- clauses of match expressions
+
 expr2SMT :: (?r::Refine) => ECtx -> Expr -> SMT.Expr
 expr2SMT ctx e = snd $ exprFoldCtx expr2SMT'' ctx e
 
 expr2SMT'' :: (?r::Refine) => ECtx -> ExprNode (Type, SMT.Expr) -> (Type, SMT.Expr)
 expr2SMT'' ctx e = (fromJust $ exprNodeType ?r ctx $ exprMap (Just . fst) e, e')
-    where e' = expr2SMT' e
+    where e' = expr2SMT' ctx e
 
-expr2SMT' :: (?r::Refine) => ExprNode (Type, SMT.Expr) -> SMT.Expr
-expr2SMT' (EVar _ v) | -- inside match case - add to dictionary
-expr2SMT' (EVar _ v) | -- inside match action - replace from dictionary if in dictionary
-expr2SMT' (EVar _ v) | otherwise             = SMT.EVar v
-expr2SMT' (EPacket _)                       = SMT.EVar pktVar
-expr2SMT' (EApply _ f as)                   = SMT.EApply f $ map snd as
-expr2SMT' (EField _ (t,s) f)                = let TStruct _ cs = typ' ?r t
-                                                  cs' = structFieldConstructors cs f
-                                                  es = map (\c -> (SMT.EIsInstance (name c) s, SMT.EField (name c) s f)) cs'
-                                              in SMT.ECond (init es) $ snd $ last es
-expr2SMT' (EBool _ b)                       = SMT.EBool b
-expr2SMT' (EInt _ i)                        = SMT.EInt i
-expr2SMT' (EString _ s)                     = SMT.EString s
-expr2SMT' (EBit _ w i)                      = SMT.EBit w i
+expr2SMT' :: (?r::Refine) => ECtx -> ExprNode (Type, SMT.Expr) -> SMT.Expr
+expr2SMT' ctx (EVarDecl _ _) | ctxInMatchPat ctx   = SMT.EBool True -- inside match case - no constraint on the field
+expr2SMT' _   (EVar _ v)                           = SMT.EVar v
+expr2SMT' _   (EPacket _)                          = SMT.EVar pktVar
+expr2SMT' _   (EApply _ f as)                      = SMT.EApply f $ map snd as
+expr2SMT' _   (EField _ (t,s) f)                   = let TStruct _ cs = typ' ?r t
+                                                         cs' = structFieldConstructors cs f
+                                                         es = map (\c -> (SMT.EIsInstance (name c) s, SMT.EField (name c) s f)) cs'
+                                                     in SMT.ECond (init es) $ snd $ last es
+expr2SMT' _   (EBool _ b)                          = SMT.EBool b
+expr2SMT' _   (EInt _ i)                           = SMT.EInt i
+expr2SMT' _   (EString _ s)                        = SMT.EString s
+expr2SMT' _   (EBit _ w i)                         = SMT.EBit w i
+expr2SMT' ctx (EStruct _ c fs) | ctxInMatchPat ctx = let -- inside match case - convert to is- check, conjoin with fields
+                                                         ctx'@(CtxMatchPat (EMatch _ e _) _ _) = fromJust $ ctxInMatchPat' ctx
+                                                         e' = expr2SMT ctx' e
+                                                         c' = SMT.EIsInstance c $ ctx2Field e' ctx
+                                                     in SMT.conj $ c' : (map snd fs)
+                               | otherwise         = SMT.EStruct c $ map snd fs
+expr2SMT' _   (EBinOp _ op (_,e1) (_, e2))         = SMT.EBinOp op e1 e2
+expr2SMT' _   (EUnOp _ op (_, e1))                 = SMT.EUnOp op e1
+expr2SMT' _   (EITE _ (_,i) (_,t) (Just (_,e)))    = SMT.ECond [(i, t)] e
+expr2SMT' _   (ESlice _ (_, e) h l)                = SMT.ESlice e h l
+expr2SMT' _   (ETyped _ (_, e) _)                  = e -- Do we ever need type hints in SMT?
+expr2SMT' _   (ERelPred _ rel as)                  = SMT.ERelPred rel $ map snd as
+expr2SMT' ctx (EPHolder _) | ctxInMatchPat ctx     = SMT.EBool True -- inside match case - no constraint on the field
+expr2SMT' _   (EMatch _ _ cs)                      = SMT.ECond (map (\(c,e) -> (snd c, snd e)) $ init cs) (snd $ snd $ last cs)
+expr2SMT' _   e                                    = error $ "SMT.expr2SMT' " ++ (show $ exprMap snd e)
 
-expr2SMT' (EStruct _ c fs) | -- inside match case - convert to is- check, conjoin with fields
-expr2SMT' (EStruct _ c fs) | otherwise      = SMT.EStruct c $ map snd fs
-expr2SMT' (EBinOp _ op (_,e1) (_, e2))      = SMT.EBinOp op e1 e2
-expr2SMT' (EUnOp _ op (_, e1))              = SMT.EUnOp op e1
-expr2SMT' (EITE _ (_,i) (_,t) (Just (_,e))) = SMT.ECond [(i, t)] e
-expr2SMT' (ESlice _ (_, e) h l)             = SMT.ESlice e h l
-expr2SMT' (ETyped _ (_, e) _)               = e -- Do we ever need type hints in SMT?
-expr2SMT' (ERelPred _ rel as)               = SMT.ERelPred rel $ map snd as
-expr2SMT' (EPHolder _)                      = -- inside match case - ignore
-                                              -- else - raise error
-expr2SMT' (EMatch _ (_, e) cs)              = -- generate Cond expression
-expr2SMT' e                                 = error $ "SMT.expr2SMT' " ++ (show $ exprMap snd e)
+--- r, m, Cons1{_,_,Cons2{x,_}} ===> m.f1.f2
+ctx2Field :: (?r::Refine) => SMT.Expr -> ECtx -> SMT.Expr
+ctx2Field pref CtxMatchPat{}                         = pref
+ctx2Field pref (CtxTyped _ pctx)                     = ctx2Field pref pctx
+ctx2Field pref (CtxStruct (EStruct _ c _) pctx i)    = let cons = getConstructor ?r c in
+                                                       SMT.EField c (ctx2Field pref pctx) (name $ consArgs cons !! i)
+ctx2Field pref ctx                                   = error $ "SMT.ctx2Field " ++ show pref ++ " " ++ show ctx
+
 
 -- Convert constant SMT expression to Expr
 exprFromSMT :: SMT.Expr -> Expr

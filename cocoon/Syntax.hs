@@ -49,7 +49,7 @@ module Syntax( pktVar
              , ECtx(..)
              , ctxParent, ctxAncestors
              , ctxIsRuleL, ctxInRuleL
-             , ctxIsMatchPat, ctxInMatchPat
+             , ctxIsMatchPat, ctxInMatchPat, ctxInMatchPat'
              , ctxIsSetL, ctxInSetL
              , ctxIsSeq1, ctxInSeq1
              , ctxIsTyped
@@ -413,6 +413,9 @@ instance PP TypeDef where
 instance Show TypeDef where
     show = render . pp
 
+instance Eq TypeDef where
+    (==) t1 t2 = name t1 == name t2 && tdefType t1 == tdefType t2
+
 data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EPacket   {exprPos :: Pos}
                 | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
@@ -668,7 +671,10 @@ ctxIsMatchPat CtxMatchPat{} = True
 ctxIsMatchPat _             = False
 
 ctxInMatchPat :: ECtx -> Bool
-ctxInMatchPat ctx = any ctxIsMatchPat $ ctxAncestors ctx
+ctxInMatchPat ctx = isJust $ ctxInMatchPat' ctx
+
+ctxInMatchPat' :: ECtx -> Maybe ECtx
+ctxInMatchPat' ctx = find ctxIsMatchPat $ ctxAncestors ctx
 
 ctxIsSetL :: ECtx -> Bool
 ctxIsSetL CtxSetL{} = True
