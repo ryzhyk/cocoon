@@ -18,6 +18,7 @@ limitations under the License.
 -- Interface to SMT2 format
 
 module SMT.SMTLib2(SMT2Config,
+                   SMTPP(..),
                    z3Config,
                    newSMTLib2Solver) where
 
@@ -29,6 +30,7 @@ import System.Exit
 import Control.Monad.Except
 import Data.String.Utils
 
+import Name()
 import Util
 import PP
 import SMT.SMTSolver
@@ -61,80 +63,91 @@ mkIdent str = if valid then str else "|" ++ (replace  "|" "_" str) ++ "|"
                   && notElem (head str) ['0'..'9']
 
 class SMTPP a where
-    smtpp :: (?q::SMTQuery) => a -> Doc
+    smtpp :: SMTQuery -> a -> Doc
 
 printQuery :: SMTQuery -> Doc
 printQuery q@SMTQuery{..} = 
-        let ?q = q in
-        (vcat $ map smtpp smtStructs)
+        (vcat $ map (smtpp q) smtStructs)
         $+$
-        (vcat $ map smtpp smtVars)
+        (vcat $ map (smtpp q) smtVars)
         $+$
-        (vcat $ map smtpp smtFuncs)
+        (vcat $ map (smtpp q) smtFuncs)
         $+$
         (vcat $ mapIdx (\e i -> parens $ text "assert" 
-                                         <+> (parens $ char '!' <+> smtppExpr Nothing e <+> text ":named" <+> text assertName <> int i)) smtExprs)
+                                         <+> (parens $ char '!' <+> smtppExpr q Nothing e <+> text ":named" <+> text assertName <> int i)) smtExprs)
 
 instance SMTPP Var where
-    smtpp (Var n t) = parens $  pp "declare-const"
-                            <+> pp (mkIdent n)
-                            <+> smtpp t
+    smtpp q (Var n t) = parens $  pp "declare-const"
+                              <+> pp (mkIdent n)
+                              <+> smtpp q t
 
 instance SMTPP Type where
-    smtpp TBool        = pp "Bool"
-    smtpp (TUInt w)    = pp $ "(_ BitVec " ++ show w ++ ")"
-    smtpp (TStruct n)  = pp n
-    smtpp (TArray t _) = parens $ pp "Array" <+> pp "Int" <+> smtpp t
+    smtpp _ TBool        = pp "Bool"
+    smtpp _ TInt         = pp "Int"
+    smtpp _ TString      = pp "String"
+    smtpp _ (TBit w)     = pp $ "(_ BitVec " ++ show w ++ ")"
+    smtpp _ (TStruct n)  = pp n
+    smtpp q (TArray t _) = parens $ pp "Array" <+> pp "Int" <+> smtpp q t
 
 instance SMTPP Struct where
-    smtpp (Struct n fs) = parens $ pp "declare-datatypes ()" 
-                                 <+> (parens $ parens $ pp n 
-                                      <+> parens (pp ("mk-" ++ n) <+> (hsep $ map (\(f,t) -> parens $ pp (n ++ f) <+> smtpp t) fs)))
+    smtpp q (Struct n cs) = parens $ pp "declare-datatypes ()" 
+                                   <+> (parens $ parens $ pp n 
+                                        <+> (hsep 
+                                            $ map (\(cn, fs) -> parens $ pp cn <+> (hsep $ map (\(f,t) -> parens $ pp (cn ++ f) <+> smtpp q t) fs)) cs))
 
-smtppExpr :: (?q::SMTQuery) => Maybe Function -> Expr -> Doc
-smtppExpr _  (EVar n)           = pp n
-smtppExpr mf (EField e f)       = parens $ text (s ++ f) <+> smtppExpr mf e
-                                  where TStruct s = typ ?q mf e
-smtppExpr _  (EBool True)       = pp "true"
-smtppExpr _  (EBool False)      = pp "false"
-smtppExpr _  (EInt w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
-smtppExpr mf (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map (smtppExpr mf) fs))
-smtppExpr mf (EBinOp Neq e1 e2) = smtppExpr mf $ EUnOp Not $ EBinOp Eq e1 e2
-smtppExpr mf (EBinOp op e1 e2)  = parens $ smtpp op <+> smtppExpr mf e1 <+> smtppExpr mf e2
-smtppExpr mf (EUnOp op e)       = parens $ smtpp op <+> smtppExpr mf e
-smtppExpr mf (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtppExpr mf e
-smtppExpr mf (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtppExpr mf c <+> smtppExpr mf v <+> e) (smtppExpr mf d) cs
-smtppExpr _  (EApply f [])      = ppFName f
-smtppExpr mf (EApply f as)      = parens $ ppFName f <+> (hsep $ map (smtppExpr mf) as)
+smtppExpr :: SMTQuery -> Maybe Function -> Expr -> Doc
+smtppExpr _ _  (EVar n)           = pp n
+smtppExpr q mf (EField c e f)     = parens $ text (c ++ f) <+> smtppExpr q mf e
+smtppExpr _ _  (EBool True)       = pp "true"
+smtppExpr _ _  (EBool False)      = pp "false"
+smtppExpr _ _  (EBit w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
+smtppExpr _ _  (EInt v)           = pp v
+smtppExpr _ _  (EString s)        = pp s
+smtppExpr q mf (EIsInstance c e)  = parens $ pp "is-" <> pp c <+> smtppExpr q mf e
+smtppExpr q mf (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map (smtppExpr q mf) fs))
+smtppExpr q mf (EBinOp Neq e1 e2) = smtppExpr q mf $ EUnOp Not $ EBinOp Eq e1 e2
+smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtpp q op <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
+smtppExpr q mf (EUnOp op e)       = parens $ smtpp q op <+> smtppExpr q mf e
+smtppExpr q mf (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtppExpr q mf e
+smtppExpr q mf (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtppExpr q mf c <+> smtppExpr q mf v <+> e) (smtppExpr q mf d) cs
+smtppExpr _ _  (EApply f [])      = ppFName f
+smtppExpr q mf (EApply f as)      = parens $ ppFName f <+> (hsep $ map (smtppExpr q mf) as)
+smtppExpr _ _  (ERelPred r [])    = ppRelName r
+smtppExpr q mf (ERelPred r as)    = parens $ ppRelName r <+> (hsep $ map (smtppExpr q mf) as)
 
 instance SMTPP BOp where
-    smtpp Eq     = pp "="
-    smtpp Neq    = error "SMTLib2.smtpp !="
-    smtpp Lt     = pp "bvult"
-    smtpp Gt     = pp "bvugt"
-    smtpp Lte    = pp "bvule"
-    smtpp Gte    = pp "bvuge"
-    smtpp And    = pp "and"
-    smtpp Or     = pp "or"
-    smtpp Impl   = pp "=>"
-    smtpp Plus   = pp "bvadd"
-    smtpp Minus  = pp "bvsub"
-    smtpp ShiftR = pp "bvlshr"
-    smtpp ShiftL = pp "bvshl"
-    smtpp Mod    = pp "bvurem"
-    smtpp Concat = pp "concat"
+    smtpp _ Eq     = pp "="
+    smtpp _ Neq    = error "SMTLib2.smtpp !="
+    smtpp _ Lt     = pp "bvult"
+    smtpp _ Gt     = pp "bvugt"
+    smtpp _ Lte    = pp "bvule"
+    smtpp _ Gte    = pp "bvuge"
+    smtpp _ And    = pp "and"
+    smtpp _ Or     = pp "or"
+    smtpp _ Impl   = pp "=>"
+    smtpp _ Plus   = pp "bvadd"
+    smtpp _ Minus  = pp "bvsub"
+    smtpp _ ShiftR = pp "bvlshr"
+    smtpp _ ShiftL = pp "bvshl"
+    smtpp _ Mod    = pp "bvurem"
+    smtpp _ Concat = pp "concat"
 
 instance SMTPP UOp where
-    smtpp Not   = pp "not"
+    smtpp _ Not   = pp "not"
 
 instance SMTPP Function where
-    smtpp f@Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
-                                  <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp t) funcArgs) 
-                                  <+> smtpp funcType
-                                  <+> smtppExpr (Just f) funcDef
+    smtpp q f@Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
+                                    <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp q t) funcArgs) 
+                                    <+> smtpp q funcType
+                                    <+> smtppExpr q (Just f) funcDef
 
 ppFName :: String -> Doc
 ppFName f = pp $ "__fun_" ++ f
+
+ppRelName :: String -> Doc
+ppRelName r = pp $ "__rel_" ++ r
+
+
 
 --------------------------------------------------------
 ---- Running solver in different modes

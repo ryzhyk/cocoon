@@ -27,6 +27,7 @@ import Control.Monad
 import Parse
 import Validate
 import SQL
+import Controller
 
 data TOption = CCN String
              | Action String
@@ -125,6 +126,7 @@ main = do
                          writeFile schfile $ render schema
                          putStrLn $ "Schema written to file " ++ schfile
          ActionController -> do putStrLn "Starting controller"
+                                controllerLoop basename $ head combined
     
 --
 --    let ps = pairs combined

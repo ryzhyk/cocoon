@@ -159,9 +159,9 @@ parseAsn (n, e) = let t = varType $ fromJust $ find ((==n) . varName) $ smtVars 
                   in M.singleton n val
 
 parseExpr :: (?q::SMTQuery) => Type -> SMTExpr -> Expr
-parseExpr _           (ExpBool b)                = EBool b
-parseExpr (TUInt w)   (ExpInt v)                 = EInt w v
-parseExpr t           (ExpApply "ite" [i,th,el]) = if' cond (parseExpr t th) (parseExpr t el)
+parseExpr _          (ExpBool b)                = EBool b
+parseExpr (TBit w)   (ExpInt v)                 = EBit w v
+parseExpr t          (ExpApply "ite" [i,th,el]) = if' cond (parseExpr t th) (parseExpr t el)
     where cond = case parseExpr TBool i of
                       EBool b -> b
                       _       -> error $ "parseExpr: cannot evaluate boolean expression " ++ show i
@@ -169,7 +169,7 @@ parseExpr (TStruct s) (ExpApply n as) | isPrefixOf "mk-" n =
     if length fs /= length as
        then error "parseExpr: incorrect number of fields in a struct"
        else EStruct s (map (\((_,t), e) -> parseExpr t e) $ zip fs as)
-    where Struct _ fs = fromJust $ find ((==s) . structName) $ smtStructs ?q
+    where fs = snd $ fromJust $ find ((==s) . fst) $ concatMap structCons $ smtStructs ?q
 
 --parseExpr (ExpIdent i) = case lookupEnumerator i of
 --         Just _  -> SVal $ EnumVal i

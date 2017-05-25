@@ -18,12 +18,14 @@ limitations under the License.
 module Refine( funcGraph
              , refineStructs
              , refineIsMulticast
-             , refineIsDeterministic) where
+             , refineIsDeterministic
+             , refineRelsSorted) where
 
 import Data.List
 import Data.Maybe
 import qualified Data.Graph.Inductive as G
 
+import Relation
 import Expr
 import Syntax
 import Name
@@ -53,3 +55,7 @@ refineIsDeterministic :: Maybe Refine -> Refine -> String -> Bool
 refineIsDeterministic mra rc rlname = any (exprIsDeterministic rc . roleBody . getRole rc) roles
     where new = maybe [] (\ra -> (map name (refineRoles rc) \\ map name (refineRoles ra))) mra
           roles = rlname : intersect new (roleSendsToRolesRec rc new rlname)
+
+
+refineRelsSorted :: Refine -> [Relation]
+refineRelsSorted r = map (getRelation r) $ reverse $ G.topsort' $ relGraph r

@@ -39,6 +39,7 @@ import Expr
 import Type
 import NS
 import Relation
+import Refine
 
 sqlMaxIntWidth :: Int
 sqlMaxIntWidth = 63
@@ -76,17 +77,17 @@ mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
                                vcat $ intersperse (pp "") $ createdb : 
                                                             (map mkTypeDef tdefs) ++ 
-                                                            (map (mkRel . getRelation r) rels) ++
+                                                            (map mkRel rels) ++
                                                             (map mkFun funs)
                                                             
-    where rels = filter (not . relIsView . getRelation r) $ reverse $ G.topsort' $ relGraph r
+    where rels = filter (not . relIsView) $ refineRelsSorted r
           createdb = pp "drop database if exists" <+> pp dbname <> semi
                      $$
                      pp "create database" <+> pp dbname <> semi
                      $$
                      pp "\\c" <+> pp dbname
           funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
-          types = nub $ concatMap (relTypes r . getRelation r) rels
+          types = nub $ concatMap (relTypes r) rels
           types' = nub $ map (typ' r) $ reverse $ G.topsort' $ typeGraph r types
           tdefs = mapMaybe (\t -> case t of
                                        TStruct{..} -> Just $ structTypeDef r t
