@@ -1,16 +1,36 @@
+{-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
+Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-}
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
 
 module SMT ( struct2SMT
            , func2SMT
            , typ2SMT
            , expr2SMT
-           , exprFromSMT) where
+           , exprFromSMT
+           , rel2DL) where
 
 --import qualified Data.Map as M
 import Data.Maybe
---import Data.List
+import Data.List
+import Control.Monad.State
+import Debug.Trace
 
 import qualified SMT.SMTSolver as SMT
+import qualified SMT.Datalog   as DL
 --import qualified SMT.SMTLib2   as SMT
 import Syntax
 import Name
@@ -18,6 +38,7 @@ import Expr
 import Pos
 import NS
 import Type
+import Util
 --import Builtins
 
 -- Solve equation e for variable var; returns all satisfying assignments.
@@ -134,3 +155,25 @@ exprFromSMT (SMT.EStruct n fs) = E $ EStruct nopos n $ map exprFromSMT fs
 exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
 
 
+rel2DL :: (?r::Refine) => Relation -> (DL.Relation, [DL.Rule])
+rel2DL rel = (rel', rules)
+    where rel' = DL.Relation (name rel) $ map (\arg -> SMT.Var (name arg) (typ2SMT arg)) $ relArgs rel
+          rules = maybe []
+                        (mapIdx (\Rule{..} i -> let replacePH :: ENode -> State Int Expr
+                                                    replacePH (EPHolder _) = do idx <- get
+                                                                                modify (+1)
+                                                                                return $ eVar $ "__ph" ++ show idx
+                                                    replacePH e = return $ E e
+                                                    (ruleLHS', ruleRHS') = evalState (do lhs <- mapM (exprFoldM replacePH) ruleLHS
+                                                                                         rhs <- mapM (exprFoldM replacePH) ruleRHS
+                                                                                         return (lhs, rhs)) 0
+                                                    rl' = Rule nopos ruleLHS' ruleRHS'
+                                                    h = SMT.ERelPred (name rel) $ mapIdx (\e i' -> expr2SMT (CtxRuleL rel rl' i') e) ruleLHS'
+                                                    hvars = concat $ mapIdx (\e i' -> exprVars (CtxRuleL rel rl' i') e) ruleLHS'
+                                                    b = SMT.conj $ map (expr2SMT (CtxRuleR rel rl')) ruleRHS'
+                                                    bvars = concatMap (exprVars (CtxRuleR rel rl')) ruleRHS'
+                                                    vars = nub
+                                                           $ map (\(vname, ctx) -> SMT.Var vname $ typ2SMT $ exprType ?r ctx $ eVar vname)
+                                                           $ hvars ++ bvars
+                                                in DL.Rule vars h b $ fromIntegral i))
+                        $ relDef rel

@@ -1,4 +1,5 @@
 {-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
 Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -36,6 +37,7 @@ data Type = TBool
           | TBit Int
           | TStruct String
           | TArray Type Int
+          deriving (Eq)
 
 instance Show Type where
     show TBool        = "bool"
@@ -54,7 +56,7 @@ instance WithName Struct where
 
 data Var = Var { varName :: String
                , varType :: Type} 
-               deriving Show
+               deriving (Show, Eq)
 
 
 instance WithName Var where
@@ -88,6 +90,22 @@ data Expr = EVar        String
 
 instance PP Expr where
     pp = text . show
+
+exprMap :: (Expr -> Expr) -> Expr -> Expr
+exprMap g e@(EVar _)          = g e
+exprMap g   (EApply f as)     = g $ EApply f $ map (exprMap g) as
+exprMap g   (EField c s f)    = g $ EField c (exprMap g s) f
+exprMap g e@(EBool _)         = g e
+exprMap g e@(EBit _ _)        = g e
+exprMap g e@(EInt _)          = g e
+exprMap g e@(EString _)       = g e
+exprMap g   (EStruct c fs)    = g $ EStruct c $ map (exprMap g) fs
+exprMap g   (EIsInstance c e) = g $ EIsInstance c $ exprMap g e
+exprMap g   (EBinOp op e1 e2) = g $ EBinOp op (exprMap g e1) (exprMap g e2)
+exprMap g   (EUnOp op e1)     = g $ EUnOp op $ exprMap g e1
+exprMap g   (ESlice e1 h l)   = g $ ESlice (exprMap g e1) h l
+exprMap g   (ECond cs d)      = g $ ECond (map (\(e1,e2) -> (exprMap g e1, exprMap g e2)) cs) $ exprMap g d
+exprMap g   (ERelPred r as)   = g $ ERelPred r $ map (exprMap g) as
 
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)

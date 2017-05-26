@@ -1,4 +1,5 @@
 {-
+Copyrights (c) 2017. VMware, Inc. All right reserved. 
 Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +20,7 @@ limitations under the License.
 
 module SMT.SMTLib2(SMT2Config,
                    SMTPP(..),
+                   smtppExpr,
                    z3Config,
                    newSMTLib2Solver) where
 
@@ -30,11 +32,12 @@ import System.Exit
 import Control.Monad.Except
 import Data.String.Utils
 
-import Name()
+import Name
 import Util
 import PP
 import SMT.SMTSolver
 import SMT.SMTLib2Parse
+import SMT.Datalog
 import Ops
 
 data SMT2Config = SMT2Config {
@@ -104,7 +107,8 @@ smtppExpr _ _  (EBit w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ "
 smtppExpr _ _  (EInt v)           = pp v
 smtppExpr _ _  (EString s)        = pp s
 smtppExpr q mf (EIsInstance c e)  = parens $ pp "is-" <> pp c <+> smtppExpr q mf e
-smtppExpr q mf (EStruct n fs)     = parens (pp ("mk-" ++ n) <+> (hsep $ map (smtppExpr q mf) fs))
+smtppExpr _ _  (EStruct c [])     = pp c
+smtppExpr q mf (EStruct c fs)     = parens (pp c <+> (hsep $ map (smtppExpr q mf) fs))
 smtppExpr q mf (EBinOp Neq e1 e2) = smtppExpr q mf $ EUnOp Not $ EBinOp Eq e1 e2
 smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtpp q op <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
 smtppExpr q mf (EUnOp op e)       = parens $ smtpp q op <+> smtppExpr q mf e
@@ -141,11 +145,34 @@ instance SMTPP Function where
                                     <+> smtpp q funcType
                                     <+> smtppExpr q (Just f) funcDef
 
+instance SMTPP Relation where
+    smtpp q (Relation n as) = (parens $ pp "declare-rel" <+> ppDisRelName n <+> (parens $ smtpp q $ TBit 64)) $$
+                              (parens $ pp "declare-rel" <+> ppRelName n <+> (parens $ hsep $ map (smtpp q . varType) as))
+
+instance SMTPP GroundRule where
+    smtpp q (GroundRule r as i) = parens $ pp "rule" <+> 
+                                  (parens $ pp "=>" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i))) 
+                                                    <+> (smtppExpr q Nothing $ ERelPred r as))
+instance SMTPP Rule where
+    smtpp q (Rule vs h b i) = (vcat $ map (\v -> parens $ pp "declare-var" <+> (pp $ varname $ name v) <+> smtpp q (varType v)) vs) $$
+                              (parens $ pp "rule" <+> 
+                                        (parens $ pp "=>" <+> smtppExpr q Nothing b' <+> smtppExpr q Nothing h'))
+        where ERelPred rname _ = h
+              varname x = "__" ++ rname ++ "_" ++ show i ++ "_" ++ x
+              subst e = exprMap subst' e
+              subst' (EVar v) = EVar $ varname v
+              subst' e        = e
+              b' = subst b
+              h' = subst h
+
 ppFName :: String -> Doc
 ppFName f = pp $ "__fun_" ++ f
 
 ppRelName :: String -> Doc
 ppRelName r = pp $ "__rel_" ++ r
+
+ppDisRelName :: String -> Doc
+ppDisRelName r = pp $ "__dis_" ++ r
 
 
 

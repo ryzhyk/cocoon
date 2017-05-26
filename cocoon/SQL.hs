@@ -88,7 +88,7 @@ mkSchema dbname r@Refine{..} = let ?r = r in
                      pp "\\c" <+> pp dbname
           funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
           types = nub $ concatMap (relTypes r) rels
-          types' = nub $ map (typ' r) $ reverse $ G.topsort' $ typeGraph r types
+          types' = nub $ map (typ' r) $ typeSort r types
           tdefs = mapMaybe (\t -> case t of
                                        TStruct{..} -> Just $ structTypeDef r t
                                        _           -> Nothing) types'

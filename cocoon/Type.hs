@@ -27,6 +27,7 @@ module Type( WithType(..)
            , typeSubtypes
            , typeSubtypesRec
            , typeGraph
+           , typeSort
            {-, typeDomainSize, typeEnumerate-}) where
 
 import Data.Maybe
@@ -229,6 +230,11 @@ typeGraph r ts = foldl' (\g t -> foldl' (\g' t' -> G.insEdge (typIdx t, typIdx t
                                  $ typeSubtypes r t) g0 ts
     where g0 = G.insNodes (mapIdx (\t i -> (i, t)) ts) G.empty
           typIdx t = fromJust $ elemIndex t ts
+
+-- Sort list of types in dependency order; list must be closed under the typeSubtypes operation
+typeSort :: Refine -> [Type] -> [Type]
+typeSort r types  = reverse $ G.topsort' $ typeGraph r types
+
 
 {-
 typeDomainSize :: Refine -> Type -> Integer
