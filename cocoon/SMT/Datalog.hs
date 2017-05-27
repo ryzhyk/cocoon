@@ -46,12 +46,12 @@ data GroundRule = GroundRule { gruleRel  :: String
 type RuleId = Int64
 
 data Session = Session {
-    addRelation         :: Relation   -> IO (),
-    addRule             :: Rule       -> IO (),
-    addGroundRule       :: GroundRule -> IO (),
-    removeGroundRule    :: RuleId     -> IO (),
-    checkRelationSAT    :: String     -> IO Bool,
-    enumRelation        :: String     -> IO [Assignment]
+    addRelation         :: Relation         -> IO (),
+    addRule             :: Rule             -> IO (),
+    addGroundRule       :: GroundRule       -> IO (),
+    removeGroundRule    :: String -> RuleId -> IO (),
+    checkRelationSAT    :: String           -> IO Bool,
+    enumRelation        :: String           -> IO [Assignment]
 }
 
 data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> IO Session}

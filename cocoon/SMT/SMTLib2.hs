@@ -22,7 +22,8 @@ module SMT.SMTLib2(SMT2Config,
                    SMTPP(..),
                    smtppExpr,
                    z3Config,
-                   newSMTLib2Solver) where
+                   newSMTLib2Solver,
+                   ppDisRelName) where
 
 import qualified Text.Parsec as P
 import Text.PrettyPrint
@@ -201,7 +202,7 @@ runSolver cfg query parser =
                     "\nsolver stderr: " ++ er)
 
 checkSat :: SMT2Config -> SMTQuery -> Maybe Bool
-checkSat cfg q = runSolver cfg query satresParser
+checkSat cfg q = Just $ runSolver cfg query satresParser
     where query = printQuery q $$ text "(check-sat)"
 
 
@@ -210,9 +211,8 @@ getUnsatCore cfg q =
     runSolver cfg query
     $ do res <- satresParser
          case res of
-              Just False -> liftM (Just . Just) unsatcoreParser
-              Just True  -> return (Just Nothing)
-              _          -> return Nothing
+              False -> liftM (Just . Just) unsatcoreParser
+              True  -> return (Just Nothing)
     where query = text "(set-option :produce-unsat-cores true)"
                $$ printQuery q
                $$ text "(check-sat)"
@@ -223,9 +223,8 @@ getModel cfg q =
     runSolver cfg query
     $ do res <- satresParser
          case res of 
-              Just True  -> let ?q = q in liftM (Just . Just) modelParser
-              Just False -> return $ Just Nothing
-              _          -> return Nothing
+              True  -> let ?q = q in liftM (Just . Just) modelParser
+              False -> return $ Just Nothing
     where query = text "(set-option :produce-models true)"
                $$ (printQuery q)
                $$ text "(check-sat)"
@@ -236,9 +235,8 @@ getModelOrCore cfg q =
     runSolver cfg query
     $ do res <- satresParser
          case res of 
-              Just True  -> let ?q = q in liftM (Just . Right) modelParser
-              Just False -> liftM (Just . Left)  $ errorParser *> unsatcoreParser
-              _          -> return Nothing
+              True  -> let ?q = q in liftM (Just . Right) modelParser
+              False -> liftM (Just . Left)  $ errorParser *> unsatcoreParser
     where query = text "(set-option :produce-unsat-cores true)"
                $$ text "(set-option :produce-models true)"
                $$ (printQuery q)

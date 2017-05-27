@@ -19,6 +19,7 @@ module SMT.SMTLib2Parse ( assertName
                         , satresParser
                         , unsatcoreParser
                         , modelParser
+                        , exprParser
                         , errorParser) where
 
 import Data.Maybe
@@ -32,6 +33,7 @@ import Numeric
 
 import Util
 import SMT.SMTSolver
+import Ops
 
 -- appended to each assertion name
 assertName :: String
@@ -61,15 +63,18 @@ data SMTExpr = ExpIdent   String
 -- exports
 ------------------------------------------------------
 
-satresParser :: Parsec String () (Maybe Bool)
-satresParser = ((Just False) <$ symbol "unsat") <|> 
-               ((Just True)  <$ symbol "sat")
+satresParser :: Parsec String () Bool
+satresParser = (False <$ symbol "unsat") <|> 
+               (True  <$ symbol "sat")
 
 unsatcoreParser :: Parsec String () [Int]
 unsatcoreParser = option [] (parens $ many $ (string assertName *> (fromInteger <$> decimal)) <* spaces)
 
 modelParser :: (?q::SMTQuery) => Parsec String () Assignment
 modelParser = assignmentFromModel <$> model
+
+exprParser :: (?q::SMTQuery) => Maybe Type -> Parsec String () Expr
+exprParser t = parseExpr t <$> expr
 
 errorParser = char '(' *> symbol "error" *> (many $ noneOf ['(',')']) <* char ')' <* spaces
 
@@ -83,6 +88,7 @@ reservedOpNames = ["_"]
 lexer  = T.makeTokenParser emptyDef { T.identStart      =  letter 
                                                        <|> char '_' 
                                                        <|> char '$'
+                                                       <|> char ':'
                                     , T.identLetter     =  alphaNum 
                                                        <|> char '_' 
                                                        <|> char '-' 
@@ -155,21 +161,26 @@ assignmentFromModel decls =
 
 parseAsn :: (?q::SMTQuery) => (String, SMTExpr) -> Assignment
 parseAsn (n, e) = let t = varType $ fromJust $ find ((==n) . varName) $ smtVars ?q
-                      val = parseExpr t e 
+                      val = parseExpr (Just t) e 
                   in M.singleton n val
 
-parseExpr :: (?q::SMTQuery) => Type -> SMTExpr -> Expr
-parseExpr _          (ExpBool b)                = EBool b
-parseExpr (TBit w)   (ExpInt v)                 = EBit w v
-parseExpr t          (ExpApply "ite" [i,th,el]) = if' cond (parseExpr t th) (parseExpr t el)
-    where cond = case parseExpr TBool i of
+parseExpr :: (?q::SMTQuery) => Maybe Type -> SMTExpr -> Expr
+parseExpr _                 (ExpBool b)                  = EBool b
+parseExpr (Just (TBit w))   (ExpInt v)                   = EBit w v
+parseExpr _                 (ExpApply ":var" [ExpInt i]) = EVar $ ":var" ++ show i
+parseExpr _                 (ExpApply "=" [e1, e2])      = EBinOp Eq (parseExpr Nothing e1) (parseExpr Nothing e2)
+parseExpr _                 (ExpApply "or" as)           = disj $ map (parseExpr $ Just TBool) as
+parseExpr _                 (ExpApply "and" as)          = conj $ map (parseExpr $ Just TBool) as
+parseExpr t                 (ExpApply "ite" [i,th,el])   = if' cond (parseExpr t th) (parseExpr t el)
+    where cond = case parseExpr (Just TBool) i of
                       EBool b -> b
                       _       -> error $ "parseExpr: cannot evaluate boolean expression " ++ show i
-parseExpr (TStruct s) (ExpApply n as) | isPrefixOf "mk-" n =
+parseExpr _                 (ExpApply n as) | isJust cons = 
     if length fs /= length as
-       then error "parseExpr: incorrect number of fields in a struct"
-       else EStruct s (map (\((_,t), e) -> parseExpr t e) $ zip fs as)
-    where fs = snd $ fromJust $ find ((==s) . fst) $ concatMap structCons $ smtStructs ?q
+       then error "SMTLib2Parse.parseExpr: incorrect number of fields in a struct"
+       else EStruct n (map (\((_,t), e) -> parseExpr (Just t) e) $ zip fs as)
+    where cons = find ((==n) . fst) $ concatMap structCons $ smtStructs ?q
+          fs = snd $ fromJust cons
 
 --parseExpr (ExpIdent i) = case lookupEnumerator i of
 --         Just _  -> SVal $ EnumVal i
