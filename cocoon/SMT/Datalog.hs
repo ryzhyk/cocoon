@@ -27,11 +27,15 @@ module SMT.Datalog( DatalogEngine(..)
 
 import Data.Int
 
+import Name
 import SMT.SMTSolver
 
 data Relation = Relation { relName :: String 
                          , relArgs :: [Var]
                          }
+
+instance WithName Relation where
+    name = relName
 
 data Rule = Rule { ruleVars :: [Var]
                  , ruleHead :: Expr
@@ -46,7 +50,6 @@ data GroundRule = GroundRule { gruleRel  :: String
 type RuleId = Int64
 
 data Session = Session {
-    addRelation         :: Relation         -> IO (),
     addRule             :: Rule             -> IO (),
     addGroundRule       :: GroundRule       -> IO (),
     removeGroundRule    :: String -> RuleId -> IO (),
@@ -54,4 +57,4 @@ data Session = Session {
     enumRelation        :: String           -> IO [Assignment]
 }
 
-data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> IO Session}
+data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> [Relation] ->  IO Session}

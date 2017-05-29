@@ -50,9 +50,9 @@ controllerLoop dbname r = do
                              TStruct _ _ -> True
                              _           -> False) 
                   $ typeSort r $ nub $ concatMap (relTypes r) rels
-    DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs'
-    mapM_ ((\(rel, rules) -> do addRelation rel
-                                mapM_ addRule rules) . SMT.rel2DL) rels
+    let dlrels = map SMT.rel2DL rels
+    DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs' (map fst dlrels)
+    mapM_ ((\rules -> mapM_ addRule rules) . snd) dlrels
     -- populate datalog with base tables
     PG.withTransaction db $ do readDB r
                                --subscribe db r

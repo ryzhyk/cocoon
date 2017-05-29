@@ -26,7 +26,11 @@ import System.Process
 import GHC.IO.Handle
 import Control.Monad
 import Data.List
+import Data.Maybe
+import qualified Data.Map as M
 
+import Name
+import Ops
 import PP
 import SMT.Datalog
 import SMT.SMTLib2
@@ -34,19 +38,21 @@ import SMT.SMTLib2Parse
 import SMT.SMTSolver
 
 data Z3Session = Z3Session { z3q     :: SMTQuery
+                           , z3rel   :: [Relation]
                            , z3hto   :: Handle
                            , z3hfrom :: Handle
                            , z3hp    :: ProcessHandle}
 z3DatalogEngine = DatalogEngine {newSession = z3NewSession}
 
-z3NewSession :: [Struct] -> [Function] -> IO Session
-z3NewSession structs funcs = do
+z3NewSession :: [Struct] -> [Function] -> [Relation] -> IO Session
+z3NewSession structs funcs rels = do
     (hlocal, hremote) <- createPipe
     let cproc = (proc "z3" ["-smt2", "-in"]){ std_out = UseHandle hremote
                                             , std_in  = CreatePipe
                                             , std_err = UseHandle hremote}
     (Just hin, _, _, ph) <- createProcess cproc
     let z3 = Z3Session { z3q     = SMTQuery structs [] funcs []
+                       , z3rel   = rels
                        , z3hto   = hin
                        , z3hfrom = hlocal
                        , z3hp    = ph}
@@ -54,8 +60,8 @@ z3NewSession structs funcs = do
     z3send z3 $ text "(set-option :fixedpoint.engine datalog)"
     mapM_ (z3req z3 . smtpp (z3q z3)) structs
     mapM_ (z3req z3 . smtpp (z3q z3)) funcs
-    return Session { addRelation      = z3AddRelation      z3
-                   , addRule          = z3AddRule          z3
+    mapM_ (z3req z3 . smtpp (z3q z3)) rels
+    return Session { addRule          = z3AddRule          z3
                    , addGroundRule    = z3AddGroundRule    z3
                    , removeGroundRule = z3RemoveGroundRule z3
                    , checkRelationSAT = z3CheckRelationSAT z3
@@ -102,9 +108,6 @@ z3call z3 txt parser = do
                     $ trace " solver output: " 
                     $ trace out x-}
 
-z3AddRelation :: Z3Session -> Relation -> IO ()
-z3AddRelation z3 rel = z3send z3 $ smtpp (z3q z3) rel
-
 z3AddRule :: Z3Session -> Rule -> IO ()
 z3AddRule z3 rule = z3send z3 $ smtpp (z3q z3) rule
 
@@ -131,4 +134,15 @@ z3EnumRelation z3 rel = do
     z3call z3 (parens $ pp "query" <+> pp rel <+> pp ":print-certificate true") parser
 
 expr2Assignments :: Z3Session -> String -> Expr -> [Assignment]
-expr2Assignments z3 rel e = undefined
+expr2Assignments _  _   (EBool False)      = []
+expr2Assignments z3 rel (EBinOp Or e1 e2)  = expr2Assignments z3 rel e1 ++ expr2Assignments z3 rel e2
+expr2Assignments z3 rel e@(EBinOp And _ _) = [expr2Assignment relArgs e M.empty]
+    where Relation{..} = fromJust $ find ((==rel) . name) (z3rel z3)
+expr2Assignments  _  _   e                  = error $"Z3Datalog.expr2Assignment " ++ show e
+
+expr2Assignment :: [Var] -> Expr -> Assignment -> Assignment
+expr2Assignment []      _                                a = a
+expr2Assignment (f:fs)  (EBinOp And (EBinOp Eq _ val) e) a = expr2Assignment fs e (M.insert (name f) val a)
+expr2Assignment [f]     val                              a = M.insert (name f) val a
+expr2Assignment fs      val                              _ = error $ "Z3Datalog.expr2Assignment " ++ show fs ++ " " ++ show val
+
