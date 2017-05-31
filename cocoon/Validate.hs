@@ -182,9 +182,9 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
              outrole <- checkRole p r outp
              assertR r (roleTable inrole == relName) p $ "Role " ++ inp ++ " is not indexed by the " ++ relName ++ " relation" 
              assertR r (roleTable outrole == relName) p $ "Role " ++ outp ++ " is not indexed by the " ++ relName ++ " relation" 
-             assertR r (roleCond inrole == eBool True) p 
+             assertR r (roleCond inrole == eTrue) p 
                      $ "Role " ++ inp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
-             assertR r (roleCond outrole == eBool True) p 
+             assertR r (roleCond outrole == eTrue) p 
                      $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
              assertR r (isJust $ find ((== "switch") . name) relArgs) p 
                      "Relation with #switch_port annotation must have a column named \"switch\""

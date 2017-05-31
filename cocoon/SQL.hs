@@ -28,7 +28,6 @@ import Data.Char
 import Data.Tuple.Select
 import Text.PrettyPrint
 import Control.Monad.State
-import qualified Data.Graph.Inductive.Query.DFS as G
 
 import Name
 import Pos
@@ -172,7 +171,7 @@ pattern2Constr pref t (E EStruct{..}) = conj
                                            (map (\(f,a) -> pattern2Constr (eField pref $ name f) (typ f) a) $ zip fs exprFields)
     where TStruct _ cs = typ' ?r t
           Constructor _ c fs = getConstructor ?r exprConstructor
-pattern2Constr _    _ _               = eBool True
+pattern2Constr _    _ _               = eTrue
 
 -- Only works for expressions whose variables are known to be non-NULL
 -- (i.e., don't need to be coalesced)
@@ -324,7 +323,7 @@ tagVal cs c = eBit (typeWidth $ tagType cs) $ fromIntegral $ fromJust $ findInde
 
 defVal :: Type -> Expr
 defVal (TStruct _ cs) = defVal $ tagType cs
-defVal (TBool _)      = eBool False
+defVal (TBool _)      = eFalse
 defVal (TString _)    = eString ""
 defVal (TBit _ w)     = eBit w 0
 defVal t              = error $ "SQL.defVal " ++ show t

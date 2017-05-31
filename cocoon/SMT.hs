@@ -177,3 +177,40 @@ rel2DL rel = (rel', rules)
                                                            $ hvars ++ bvars
                                                 in DL.Rule vars h b $ fromIntegral i))
                         $ relDef rel
+
+constr2DL :: (?r::Refine) => Relation -> Constraint -> (DL.Relation, [DL.Rule])
+constr2DL rel (PrimaryKey _ fs) = uniqueConstr rel fs
+constr2DL rel (Unique _ fs)     = uniqueConstr rel fs
+constr2DL rel (Check _ e)       = undefined
+
+
+uniqueConstr :: (?r::Refine) => Relation -> [Expr] -> (DL.Relation, [DL.Rule])
+uniqueConstr rel fs = rel2DL rel'
+    where -- R_unique_(x1,x2) <- R(x1), R(x2), x1!=x2, x1.f == x2.f
+          as1 = map (\f -> f{fieldName = fieldName f ++ "1"}) $ relArgs rel
+          as2 = map (\f -> f{fieldName = fieldName f ++ "2"}) $ relArgs rel
+          relname = name rel ++ "_unique_" ++ (intercalate "_" $ map show fs)
+          neq = disj $ map (\(f1, f2) -> eUnOp Not $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
+          rename suff = exprVarRename (++suff)
+          eq  = conj $ map (\f -> let fcond = fieldCond (CtxRelKey rel) f
+                                      fcond1 = rename "1" fcond
+                                      fcond2 = rename "2" fcond
+                                  in conj [fcond1, fcond2, eBinOp Eq (rename "1" f) (rename "2" f)]) fs
+          rel' = Relation nopos False relname (as1 ++ as2) [] Nothing 
+                          $ Just [Rule nopos (map (eVar . name) $ as1 ++ as2) 
+                                              [ eRelPred (name rel) (map (eVar . name) as1)
+                                              , eRelPred (name rel) (map (eVar . name) as2)
+                                              , neq, eq]]
+
+fieldCond :: (?r::Refine) => ECtx -> Expr -> Expr
+fieldCond ctx e = conj $ execState (exprTraverseCtxM (fieldCond' ?r) ctx e) []
+
+fieldCond' :: Refine -> ECtx -> ENode -> State [Expr] ()
+fieldCond' _ ctx (EVar _ _)      = return ()
+fieldCond' r ctx (EField _ e f)  = do 
+    let TStruct _ cs = typ' r $ exprType r ctx e
+    let cs' = structFieldConstructors cs f
+    if length cs == length cs'
+       then return ()
+       else modify ((eMatch e $ map (\c -> (eStruct (name c) (map (\_ -> ePHolder) $ consArgs c), eTrue)) cs' ++ [(ePHolder, eFalse)]):)
+fieldCond' _ _   e               = error $ "SMT.fieldCond' " ++ show e

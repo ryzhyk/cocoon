@@ -243,8 +243,8 @@ role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b)
                <*> (brackets $ (,,,)
                            <$> varIdent
                            <*> (reserved "in" *> relIdent)
-                           <*> (option (eBool True) (reservedOp "|" *> expr))
-                           <*> (option (eBool True) (reservedOp "/" *> expr)))
+                           <*> (option eTrue (reservedOp "|" *> expr))
+                           <*> (option eTrue (reservedOp "/" *> expr)))
                <*> (reservedOp "=" *> expr)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
@@ -366,19 +366,19 @@ evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
-                   <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+                   <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
 ewith   = eWith    <$ reserved "the" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
-                   <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+                   <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                    <*> term
                    <*> (optionMaybe $ reserved "default" *> term)
 
 eany    = eAny <$ reserved "any" 
                <*> (symbol "(" *> varIdent)
                <*> (reserved "in" *> relIdent) 
-               <*> ((option (eBool True) (reservedOp "|" *> expr)) <* symbol ")")
+               <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                <*> term
                <*> (optionMaybe $ reserved "default" *> term)
 epholder = ePHolder <$ reserved "_"

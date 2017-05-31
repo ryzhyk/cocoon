@@ -42,7 +42,7 @@ module Syntax( pktVar
              , ENode
              , Expr(..)
              , enode
-             , eVar, ePacket, eApply, eField, eLocation, eBool, eInt, eString, eBit, eStruct, eTuple
+             , eVar, ePacket, eApply, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
              , eWith, eAny, ePHolder, eTyped, eRelPred
              , exprIsRelPred
@@ -549,6 +549,8 @@ eApply f as         = E $ EApply    nopos f as
 eField e f          = E $ EField    nopos e f
 eLocation r k       = E $ ELocation nopos r k
 eBool b             = E $ EBool     nopos b
+eTrue               = eBool True
+eFalse              = eBool False
 eInt i              = E $ EInt      nopos i
 eString s           = E $ EString   nopos s
 eBit w v            = E $ EBit      nopos w v
@@ -578,18 +580,18 @@ exprIsRelPred (E (ERelPred{})) = True
 exprIsRelPred _                = False
 
 conj :: [Expr] -> Expr
-conj = conj' . filter (/= eBool True)
+conj = conj' . filter (/= eTrue)
 
 conj' :: [Expr] -> Expr
-conj' []     = eBool True
+conj' []     = eTrue
 conj' [e]    = e
 conj' (e:es) = eBinOp And e (conj' es)
 
 disj :: [Expr] -> Expr
-disj = disj' . filter (/= eBool False)
+disj = disj' . filter (/= eFalse)
 
 disj' :: [Expr] -> Expr
-disj' []     = eBool False
+disj' []     = eFalse
 disj' [e]    = e
 disj' (e:es) = eBinOp Or e (disj' es)
 

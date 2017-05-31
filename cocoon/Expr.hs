@@ -47,6 +47,7 @@ module Expr ( exprMapM
             , ctxExpectsStat
             , ctxMustReturn
             , exprIsStatement
+            , exprVarRename
             --, exprScalars
             --, exprDeps
             --, exprSubst
@@ -487,3 +488,8 @@ exprIsStatement (EWith    {})                 = True
 exprIsStatement (EAny     {})                 = True
 exprIsStatement (ETyped _ (E (EVarDecl{})) _) = True
 exprIsStatement _                             = False
+
+exprVarRename :: (String -> String) -> Expr -> Expr
+exprVarRename f e = exprFold g e
+    where g (EVar pos v) = E $ EVar pos $ f v
+          g e'           = E e'
