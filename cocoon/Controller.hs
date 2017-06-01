@@ -24,7 +24,10 @@ import qualified Data.Aeson as JSON
 import Data.String
 import Data.List
 import Data.Maybe
+import Control.Exception
+import Control.Monad
 
+import Util
 import Syntax
 import Refine
 import NS
@@ -33,41 +36,75 @@ import Name
 import Type
 import qualified SMT.Datalog   as DL
 import qualified SMT.Z3Datalog as DL
-import qualified SMT as SMT
+import qualified SMT           as SMT
+import qualified SMT.SMTSolver as SMT
+
+data ControllerState = ControllerState {
+    ctlDL           :: DL.Session,
+    ctlConstraints  :: [(Relation, [DL.Relation])],
+    ctlDB           :: PG.Connection
+}
+
+data Violation = Violation Relation Constraint SMT.Assignment
+
+instance Show Violation where
+    show (Violation rel c asn) = "row " ++ show asn ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
 controllerLoop :: String -> Refine -> IO ()
 controllerLoop dbname r = do
-    db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ dbname
-    let ?db = db
     let ?r = r
+    db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ dbname
     putStrLn "Connected to database"
-    let rels = refineRelsSorted r
-    let funcs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) rels
+    (dl, constr) <- startDLSession
+    let ?s = ControllerState dl constr db
+    populateDB
+    -- event loop
+    PG.close db
+    putStrLn "Disconnected"
+
+startDLSession :: (?r::Refine) => IO (DL.Session, [(Relation, [DL.Relation])])
+startDLSession = do
+    let rels = refineRelsSorted ?r
+    let funcs = map (getFunc ?r) $ nub $ concatMap (relFuncsRec ?r) rels
     let funcs' = map SMT.func2SMT funcs
     let structs = map (\t -> SMT.struct2SMT (name t) $ typeCons $ fromJust $ tdefType t)
-                  $ nub $ map (structTypeDef r . typ' r) 
+                  $ nub $ map (structTypeDef ?r . typ' ?r) 
                   $ filter (\case 
                              TStruct _ _ -> True
                              _           -> False) 
-                  $ typeSort r $ nub $ concatMap (relTypes r) rels
+                  $ typeSort ?r $ nub $ concatMap (relTypes ?r) rels
     let dlrels = zip rels $ map SMT.rel2DL rels
     let (allrels, allrules) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) dlrels
-    DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs' allrels
-    mapM_ (\rules -> mapM_ addRule rules) allrules
-    -- populate datalog with base tables
-    PG.withTransaction db $ do readDB r
+    dl@DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs' allrels
+    mapM_ addRule $ concat allrules
+    return (dl, map (mapSnd (map (fst . last) . snd)) dlrels)
 
-    -- create view relations and rules
-    -- event loop
 
-    PG.close db
-    putStrLn "Disconnected"
+populateDB :: (?r::Refine, ?s::ControllerState) => IO ()
+populateDB = do 
+    PG.withTransaction (ctlDB ?s) $ readDB
+    validateConstraints
     
 
-readDB :: (?db :: PG.Connection) => Refine -> IO ()
-readDB r = mapM_ readTable $ filter (not . relIsView) $ refineRels r    
+validateConstraints :: (?s::ControllerState) => IO ()
+validateConstraints = do
+    violations <- checkConstraints 
+    let e = concatMap (("Integrity violation: " ++) . show) violations
+    throw $ AssertionFailed e
 
-readTable :: (?db :: PG.Connection) => Relation -> IO ()
-readTable rel@Relation{..} = do
+checkConstraints :: (?s::ControllerState) => IO [Violation]
+checkConstraints = 
+    (liftM concat) 
+    $ mapM (\(rel, dlrels) -> do assigns <- mapM (DL.enumRelation (ctlDL ?s) . name) dlrels
+                                 return $ concatMap (\(asns, constr) -> map (Violation rel constr) asns) 
+                                        $ filter (not . null . fst)
+                                        $ zip assigns (relConstraints rel)) 
+    $ ctlConstraints ?s
+   
+readDB :: (?r::Refine, ?s::ControllerState) => IO ()
+readDB = mapM_ readTable $ filter (not . relIsView) $ refineRels ?r
+
+readTable :: (?r::Refine, ?s :: ControllerState) => Relation -> IO ()
+readTable Relation{..} = do
     let q = "select to_json(" ++ relName ++ ") from " ++ relName
-    PG.forEach_ ?db (fromString q) (\(x::[JSON.Value]) -> mapM_ (putStrLn . show) x )
+    PG.forEach_ (ctlDB ?s) (fromString q) (\(x::[JSON.Value]) -> mapM_ (putStrLn . show) x )

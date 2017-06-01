@@ -23,7 +23,8 @@ module SMT.SMTLib2(SMT2Config,
                    smtppExpr,
                    z3Config,
                    newSMTLib2Solver,
-                   ppDisRelName) where
+                   ppDisRelName,
+                   ppRelName) where
 
 import qualified Text.Parsec as P
 import Text.PrettyPrint
