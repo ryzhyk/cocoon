@@ -155,8 +155,8 @@ exprFromSMT (SMT.EStruct n fs) = E $ EStruct nopos n $ map exprFromSMT fs
 exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
 
 
-rel2DL :: (?r::Refine) => Relation -> (DL.Relation, [DL.Rule])
-rel2DL rel = (rel', rules)
+rel2DL :: (?r::Refine) => Relation -> [(DL.Relation, [DL.Rule])]
+rel2DL rel = (rel', rules) : constrs
     where rel' = DL.Relation (name rel) $ map (\arg -> SMT.Var (name arg) (typ2SMT arg)) $ relArgs rel
           rules = maybe []
                         (mapIdx (\Rule{..} i -> let replacePH :: ENode -> State Int Expr
@@ -177,20 +177,46 @@ rel2DL rel = (rel', rules)
                                                            $ hvars ++ bvars
                                                 in DL.Rule vars h b $ fromIntegral i))
                         $ relDef rel
+          constrs = concat $ mapIdx (constr2DL rel) $ relConstraints rel
 
-constr2DL :: (?r::Refine) => Relation -> Constraint -> (DL.Relation, [DL.Rule])
-constr2DL rel (PrimaryKey _ fs) = uniqueConstr rel fs
-constr2DL rel (Unique _ fs)     = uniqueConstr rel fs
-constr2DL rel (Check _ e)       = undefined
+constr2DL :: (?r::Refine) => Relation -> Constraint -> Int -> [(DL.Relation, [DL.Rule])]
+constr2DL rel (PrimaryKey _ fs) _            = pkeyIndex rel fs ++ uniqueConstr rel fs
+constr2DL rel (Unique _ fs)     _            = uniqueConstr rel fs
+constr2DL rel (Check _ e)       i            = rel2DL rel'
+    where relname = name rel ++ "_check_" ++ show i
+          as = relArgs rel
+          rel' = Relation nopos False relname as [] Nothing 
+                          $ Just [Rule nopos (map (eVar . name) as) 
+                                       [eRelPred (name rel) (map (eVar . name) as), eNot e]]
+constr2DL rel (ForeignKey _ fs rrel _) i     = rel2DL rel'
+    where -- R_foreign_i <- RRel(x,_), not RR_primary()
+          relname = name rel ++ "_foreign_" ++ show i
+          as = relArgs rel
+          rel' = Relation nopos False relname as [] Nothing
+                          $ Just [Rule nopos (map (eVar . name) as) 
+                                       [ eRelPred (name rel) (map (eVar . name) as)
+                                       , eNot $ eRelPred (primaryIdxName rrel) fs ]]
+
+primaryIdxName :: String -> String
+primaryIdxName rel = rel ++ "_primary_"
+
+pkeyIndex :: (?r::Refine) => Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
+pkeyIndex rel fs = rel2DL rel'
+    where -- R_primary(x) <- R(x,y)
+          relname = primaryIdxName $ name rel
+          as = relArgs rel
+          keys = mapIdx (\f i -> Field nopos ("col" ++ show i) $ exprType ?r (CtxRelKey rel) f) fs
+          rel' = Relation nopos False relname keys [] Nothing
+                          $ Just [Rule nopos fs [eRelPred (name rel) (map (eVar . name) as)]]
 
 
-uniqueConstr :: (?r::Refine) => Relation -> [Expr] -> (DL.Relation, [DL.Rule])
+uniqueConstr :: (?r::Refine) => Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
 uniqueConstr rel fs = rel2DL rel'
     where -- R_unique_(x1,x2) <- R(x1), R(x2), x1!=x2, x1.f == x2.f
           as1 = map (\f -> f{fieldName = fieldName f ++ "1"}) $ relArgs rel
           as2 = map (\f -> f{fieldName = fieldName f ++ "2"}) $ relArgs rel
           relname = name rel ++ "_unique_" ++ (intercalate "_" $ map show fs)
-          neq = disj $ map (\(f1, f2) -> eUnOp Not $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
+          neq = disj $ map (\(f1, f2) -> eNot $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
           rename suff = exprVarRename (++suff)
           eq  = conj $ map (\f -> let fcond = fieldCond (CtxRelKey rel) f
                                       fcond1 = rename "1" fcond
@@ -206,7 +232,7 @@ fieldCond :: (?r::Refine) => ECtx -> Expr -> Expr
 fieldCond ctx e = conj $ execState (exprTraverseCtxM (fieldCond' ?r) ctx e) []
 
 fieldCond' :: Refine -> ECtx -> ENode -> State [Expr] ()
-fieldCond' _ ctx (EVar _ _)      = return ()
+fieldCond' _ _   (EVar _ _)      = return ()
 fieldCond' r ctx (EField _ e f)  = do 
     let TStruct _ cs = typ' r $ exprType r ctx e
     let cs' = structFieldConstructors cs f

@@ -43,7 +43,7 @@ module Syntax( pktVar
              , Expr(..)
              , enode
              , eVar, ePacket, eApply, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
-             , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eFork
+             , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork
              , eWith, eAny, ePHolder, eTyped, eRelPred
              , exprIsRelPred
              , ECtx(..)
@@ -568,6 +568,7 @@ eSet l r            = E $ ESet      nopos l r
 eSend e             = E $ ESend     nopos e
 eBinOp op l r       = E $ EBinOp    nopos op l r
 eUnOp op e          = E $ EUnOp     nopos op e
+eNot e              = eUnOp Not e
 eFork v t c b       = E $ EFork     nopos v t c b
 eWith v t c b d     = E $ EWith     nopos v t c b d
 eAny v t c b d      = E $ EAny      nopos v t c b d
