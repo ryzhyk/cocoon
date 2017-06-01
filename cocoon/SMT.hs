@@ -149,46 +149,47 @@ ctx2Field pref ctx                                   = error $ "SMT.ctx2Field " 
 
 -- Convert constant SMT expression to Expr
 exprFromSMT :: SMT.Expr -> Expr
-exprFromSMT (SMT.EBool b)      = E $ EBool nopos b
-exprFromSMT (SMT.EBit w i)     = E $ EBit nopos w i
-exprFromSMT (SMT.EStruct n fs) = E $ EStruct nopos n $ map exprFromSMT fs
+exprFromSMT (SMT.EBool b)      = eBool b
+exprFromSMT (SMT.EBit w i)     = eBit w i
+exprFromSMT (SMT.EStruct n fs) = eStruct n $ map exprFromSMT fs
 exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
 
 
-rel2DL :: (?r::Refine) => Relation -> [(DL.Relation, [DL.Rule])]
-rel2DL rel = (rel', rules) : constrs
+rel2DL :: (?r::Refine) => Relation -> ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ])
+rel2DL rel = ((rel', rules), constrs)
     where rel' = DL.Relation (name rel) $ map (\arg -> SMT.Var (name arg) (typ2SMT arg)) $ relArgs rel
           rules = maybe []
-                        (mapIdx (\Rule{..} i -> let replacePH :: ENode -> State Int Expr
-                                                    replacePH (EPHolder _) = do idx <- get
-                                                                                modify (+1)
-                                                                                return $ eVar $ "__ph" ++ show idx
-                                                    replacePH e = return $ E e
-                                                    (ruleLHS', ruleRHS') = evalState (do lhs <- mapM (exprFoldM replacePH) ruleLHS
-                                                                                         rhs <- mapM (exprFoldM replacePH) ruleRHS
-                                                                                         return (lhs, rhs)) 0
-                                                    rl' = Rule nopos ruleLHS' ruleRHS'
-                                                    h = SMT.ERelPred (name rel) $ mapIdx (\e i' -> expr2SMT (CtxRuleL rel rl' i') e) ruleLHS'
-                                                    hvars = concat $ mapIdx (\e i' -> exprVars (CtxRuleL rel rl' i') e) ruleLHS'
-                                                    b = SMT.conj $ map (expr2SMT (CtxRuleR rel rl')) ruleRHS'
-                                                    bvars = concatMap (exprVars (CtxRuleR rel rl')) ruleRHS'
-                                                    vars = nub
-                                                           $ map (\(vname, ctx) -> SMT.Var vname $ typ2SMT $ exprType ?r ctx $ eVar vname)
-                                                           $ hvars ++ bvars
-                                                in DL.Rule vars h b $ fromIntegral i))
+                        (mapIdx (\rl@Rule{..} i -> let replacePH :: ECtx -> ENode -> State Int Expr
+                                                       replacePH ctx (EPHolder _) | ctxInRuleL ctx || ctxInRelPred ctx = do
+                                                           idx <- get
+                                                           modify (+1)
+                                                           return $ eVar $ "__ph" ++ show idx
+                                                       replacePH _   e = return $ E e
+                                                       (ruleLHS', ruleRHS') = evalState (do lhs <- mapIdxM (\l i' -> exprFoldCtxM replacePH (CtxRuleL rel rl i') l) ruleLHS
+                                                                                            rhs <- mapM (exprFoldCtxM replacePH (CtxRuleR rel rl)) ruleRHS
+                                                                                            return (lhs, rhs)) 0
+                                                       rl' = Rule nopos ruleLHS' ruleRHS'
+                                                       h = SMT.ERelPred (name rel) $ mapIdx (\e i' -> expr2SMT (CtxRuleL rel rl' i') e) ruleLHS'
+                                                       hvars = concat $ mapIdx (\e i' -> exprVars (CtxRuleL rel rl' i') e) ruleLHS'
+                                                       b = SMT.conj $ map (expr2SMT (CtxRuleR rel rl')) ruleRHS'
+                                                       bvars = concatMap (exprVars (CtxRuleR rel rl')) ruleRHS'
+                                                       vars = nub
+                                                              $ map (\(vname, ctx) -> SMT.Var vname $ typ2SMT $ exprType ?r ctx $ eVar vname)
+                                                              $ hvars ++ bvars
+                                                   in DL.Rule vars h b $ fromIntegral i))
                         $ relDef rel
-          constrs = concat $ mapIdx (constr2DL rel) $ relConstraints rel
+          constrs = mapIdx (constr2DL rel) $ relConstraints rel
 
 constr2DL :: (?r::Refine) => Relation -> Constraint -> Int -> [(DL.Relation, [DL.Rule])]
 constr2DL rel (PrimaryKey _ fs) _            = pkeyIndex rel fs ++ uniqueConstr rel fs
 constr2DL rel (Unique _ fs)     _            = uniqueConstr rel fs
-constr2DL rel (Check _ e)       i            = rel2DL rel'
+constr2DL rel (Check _ e)       i            = [fst $ rel2DL rel']
     where relname = name rel ++ "_check_" ++ show i
           as = relArgs rel
           rel' = Relation nopos False relname as [] Nothing 
                           $ Just [Rule nopos (map (eVar . name) as) 
                                        [eRelPred (name rel) (map (eVar . name) as), eNot e]]
-constr2DL rel (ForeignKey _ fs rrel _) i     = rel2DL rel'
+constr2DL rel (ForeignKey _ fs rrel _) i     = [fst $ rel2DL rel']
     where -- R_foreign_i <- RRel(x,_), not RR_primary()
           relname = name rel ++ "_foreign_" ++ show i
           as = relArgs rel
@@ -201,7 +202,7 @@ primaryIdxName :: String -> String
 primaryIdxName rel = rel ++ "_primary_"
 
 pkeyIndex :: (?r::Refine) => Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
-pkeyIndex rel fs = rel2DL rel'
+pkeyIndex rel fs = [fst $ rel2DL rel']
     where -- R_primary(x) <- R(x,y)
           relname = primaryIdxName $ name rel
           as = relArgs rel
@@ -211,7 +212,7 @@ pkeyIndex rel fs = rel2DL rel'
 
 
 uniqueConstr :: (?r::Refine) => Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
-uniqueConstr rel fs = rel2DL rel'
+uniqueConstr rel fs = [fst $ rel2DL rel']
     where -- R_unique_(x1,x2) <- R(x1), R(x2), x1!=x2, x1.f == x2.f
           as1 = map (\f -> f{fieldName = fieldName f ++ "1"}) $ relArgs rel
           as2 = map (\f -> f{fieldName = fieldName f ++ "2"}) $ relArgs rel

@@ -48,6 +48,7 @@ module Syntax( pktVar
              , exprIsRelPred
              , ECtx(..)
              , ctxParent, ctxAncestors
+             , ctxIsRelPred, ctxInRelPred
              , ctxIsRuleL, ctxInRuleL
              , ctxIsMatchPat, ctxInMatchPat, ctxInMatchPat'
              , ctxIsSetL, ctxInSetL
@@ -661,6 +662,13 @@ ctxParent ctx                 = ctxPar ctx
 ctxAncestors :: ECtx -> [ECtx]
 ctxAncestors CtxRefine = [CtxRefine]
 ctxAncestors ctx       = ctx : (ctxAncestors $ ctxParent ctx)
+
+ctxIsRelPred :: ECtx -> Bool
+ctxIsRelPred CtxRelPred{} = True
+ctxIsRelPred _            = False
+
+ctxInRelPred :: ECtx -> Bool
+ctxInRelPred ctx = any ctxIsRelPred $ ctxAncestors ctx
 
 ctxIsRuleL :: ECtx -> Bool
 ctxIsRuleL CtxRuleL{} = True
