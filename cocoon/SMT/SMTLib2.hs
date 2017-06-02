@@ -33,6 +33,8 @@ import System.Process
 import System.Exit
 import Control.Monad.Except
 import Data.String.Utils
+import Data.Char
+import Numeric
 
 import Name
 import Util
@@ -105,9 +107,9 @@ smtppExpr _ _  (EVar n)           = pp n
 smtppExpr q mf (EField c e f)     = parens $ text (c ++ f) <+> smtppExpr q mf e
 smtppExpr _ _  (EBool True)       = pp "true"
 smtppExpr _ _  (EBool False)      = pp "false"
-smtppExpr _ _  (EBit w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
+smtppExpr _ _  (EBit w v)         = pp $ "(_ bv" ++ showIntAtBase 2 intToDigit v "" ++ " " ++ show w ++ ")"
 smtppExpr _ _  (EInt v)           = pp v
-smtppExpr _ _  (EString s)        = pp s
+smtppExpr _ _  (EString s)        = pp $ "\"" ++ s ++ "\""
 smtppExpr q mf (EIsInstance c e)  = parens $ pp "is-" <> pp c <+> smtppExpr q mf e
 smtppExpr _ _  (EStruct c [])     = pp c
 smtppExpr q mf (EStruct c fs)     = parens (pp c <+> (hsep $ map (smtppExpr q mf) fs))
@@ -153,7 +155,7 @@ instance SMTPP Relation where
 
 instance SMTPP GroundRule where
     smtpp q (GroundRule r as i) = parens $ pp "rule" <+> 
-                                  (parens $ pp "=>" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i))) 
+                                  (parens $ pp "=>" <+> (parens $ pp "not" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i)))) 
                                                     <+> (smtppExpr q Nothing $ ERelPred r as))
 instance SMTPP Rule where
     smtpp q (Rule vs h b i) = (vcat $ map (\v -> parens $ pp "declare-var" <+> (pp $ varname $ name v) <+> smtpp q (varType v)) vs) $$

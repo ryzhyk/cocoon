@@ -20,7 +20,6 @@ module Controller (controllerLoop) where
 
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.Aeson as JSON
 import Data.String
 import Data.List
 import Data.Maybe
@@ -34,6 +33,7 @@ import NS
 import Relation
 import Name
 import Type
+import qualified SQL
 import qualified SMT.Datalog   as DL
 import qualified SMT.Z3Datalog as DL
 import qualified SMT           as SMT
@@ -102,9 +102,9 @@ checkConstraints =
     $ ctlConstraints ?s
    
 readDB :: (?r::Refine, ?s::ControllerState) => IO ()
-readDB = mapM_ readTable $ filter (not . relIsView) $ refineRels ?r
+readDB = mapM_ (\rel -> do rows <- SQL.readTable (ctlDB ?s) rel
+                           mapM_ (\(idx, args) -> (DL.addGroundRule $ ctlDL ?s) 
+                                                  $ DL.GroundRule (name rel) (map (SMT.expr2SMT CtxRefine) args) idx) rows) 
+         $ filter (not . relIsView) $ refineRels ?r
 
-readTable :: (?r::Refine, ?s :: ControllerState) => Relation -> IO ()
-readTable Relation{..} = do
-    let q = "select to_json(" ++ relName ++ ") from " ++ relName
-    PG.forEach_ (ctlDB ?s) (fromString q) (\(x::[JSON.Value]) -> mapM_ (putStrLn . show) x )
+

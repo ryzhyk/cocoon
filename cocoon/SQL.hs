@@ -18,16 +18,25 @@ limitations under the License.
 
 -- Cocoon's SQL backend
 
-module SQL (sqlMaxIntWidth, mkSchema) where
+module SQL ( sqlMaxIntWidth
+           , mkSchema
+           , readTable) where
 
 import Data.List
 import Data.List.Utils
 import Data.Bits
 import Data.Maybe
 import Data.Char
+import Data.String
 import Data.Tuple.Select
 import Text.PrettyPrint
 import Control.Monad.State
+import Data.Scientific
+import Data.Text(pack, unpack)
+import Data.Int
+import qualified Database.PostgreSQL.Simple as PG
+import qualified Data.Aeson as JSON
+import qualified Data.HashMap.Strict as HM
 
 import Name
 import Pos
@@ -45,6 +54,7 @@ sqlMaxIntWidth = 63
 
 tag = "tag$"
 matchvar = "match$"
+serialcol = "_serial"
 
 commaSep = hsep . punctuate comma . filter (not . isEmpty)
 vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
@@ -130,7 +140,7 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
                          (vcat $ map sel3 cons)
     where
     -- Primary table
-    cols = pp "_serial bigserial" :
+    cols = (pp serialcol <+> pp "bigserial") :
            map mkColumn relArgs
     cons = mapIdx (mkConstraint rel) relConstraints
     -- Delta table
@@ -141,7 +151,7 @@ mkNotify rel = pp $
     "create function upd_" ++ rel ++ "() returns trigger as $$\n"                ++
     "begin\n"                                                                    ++
     "    if (tg_op = 'DELETE' or tg_op = 'UPDATE') then\n"                       ++
-    "        perform pg_notify('" ++ lrel ++ "_del', json_build_object('id', old._serial)::text);\n" ++
+    "        perform pg_notify('" ++ lrel ++ "_del', json_build_object('id', old." ++ serialcol ++ ")::text);\n" ++
     "    end if;\n"                                                              ++
     "    if (tg_op = 'INSERT' or tg_op = 'UPDATE') then\n"                       ++
     "        perform pg_notify('" ++ lrel ++ "_ins', row_to_json(new)::text);\n" ++
@@ -372,3 +382,40 @@ mkSqlCol :: (Expr, Type, Bool) -> Doc
 mkSqlCol (e, _, False) = colName e
 mkSqlCol (e, t, True)  = pp "coalesce" <> (parens $ colName e <> comma <+> (mkVal $ enode $ defVal t))
 
+-- Runtime interface to the DB
+
+readTable :: (?r::Refine) => PG.Connection -> Relation -> IO [(Int64, [Expr])]
+readTable pg rel@Relation{..} = do
+    let q = "select to_json(" ++ relName ++ ") from " ++ relName
+    PG.fold_ pg (fromString q) [] (\_ (x::[JSON.Value]) -> mapM (\(JSON.Object val) -> do putStrLn $ show val
+                                                                                          return $ (parseRow rel val)) x )
+
+parseInt :: (Integral a) => JSON.Value -> a
+parseInt (JSON.Number n) = fromInteger $ coefficient n
+
+parseBool :: JSON.Value -> Bool
+parseBool (JSON.Bool b) = b
+
+parseString :: JSON.Value -> String
+parseString (JSON.String t) = unpack t
+
+parseRow :: (?r::Refine) => Relation -> JSON.Object -> (Int64, [Expr])
+parseRow Relation{..} json = (id, args)
+    where -- extract "_serial"
+          id = parseInt $ json HM.! (pack serialcol)
+          -- extract fields
+          args = map (parseVal json "") relArgs
+
+parseVal :: (?r::Refine) => JSON.Object -> String -> Field -> Expr
+parseVal json prefix Field{..} = 
+    case typ' ?r fieldType of
+         TStruct _ [Constructor{..}] -> eStruct consName $ map (parseVal json fname) consArgs
+         TStruct _ cs                -> let t::Int = parseInt $ json HM.! (pack $ fname ++ "$" ++ tag)
+                                            Constructor{..} = cs !! t
+                                        in eStruct consName $ map (parseVal json (fname ++ "$")) consArgs
+         TBool _                     -> eBool $ parseBool val
+         TBit _ w | w < 64           -> eBit w $ parseInt val
+                  | otherwise        -> eBit w $ readBin $ parseString val
+         TString _                   -> eString $ parseString val
+    where fname = prefix ++ fieldName
+          val = json HM.! (pack fname)
