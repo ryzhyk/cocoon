@@ -16,8 +16,7 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams, OverloadedStrings, PackageImports #-}
 
-module Controller ( controllerStart
-                  , controllerCLI) where
+module Controller (controllerStart) where
 
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.ByteString.Char8 as BS
@@ -112,18 +111,6 @@ disconnect ControllerConnected{..} = do
     PG.close ctlDB
     return $ (ControllerDisconnected ctlDBName ctlRefine , "Disconnected")
 disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
-
-controllerCLI :: Int -> IO ()
-controllerCLI port = do
-    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "connect")
-    case resp of
-         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
-         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
-    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "disconnect")
-    case resp of
-         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
-         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
-
 
 startDLSession :: (?r::Refine) => IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession = do

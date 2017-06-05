@@ -29,6 +29,7 @@ import Parse
 import Validate
 import SQL
 import Controller
+import CLI
 import Syntax
 
 data TOption = CCN String
