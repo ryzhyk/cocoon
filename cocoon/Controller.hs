@@ -14,17 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams, OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams, OverloadedStrings, PackageImports #-}
 
-module Controller (controllerLoop) where
+module Controller ( controllerStart
+                  , controllerCLI) where
 
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.ByteString.Char8 as BS
-import Data.String
 import Data.List
 import Data.Maybe
 import Control.Exception
 import Control.Monad
+import "daemons" System.Daemon
+import Pipes
+import Control.Pipe.Serialize ( serializer, deserializer )
 
 import Util
 import Syntax
@@ -39,28 +42,88 @@ import qualified SMT.Z3Datalog as DL
 import qualified SMT           as SMT
 import qualified SMT.SMTSolver as SMT
 
-data ControllerState = ControllerState {
-    ctlDL           :: DL.Session,
-    ctlConstraints  :: [(Relation, [DL.Relation])],
-    ctlDB           :: PG.Connection
-}
+
+data ControllerState = ControllerDisconnected { ctlDBName       :: String
+                                              , ctlRefine       :: Refine
+                                              }
+                     | ControllerConnected    { ctlDBName       :: String
+                                              , ctlRefine       :: Refine
+                                              , ctlDL           :: DL.Session
+                                              , ctlConstraints  :: [(Relation, [DL.Relation])]
+                                              , ctlDB           :: PG.Connection
+                                              }
 
 data Violation = Violation Relation Constraint SMT.Assignment
 
 instance Show Violation where
     show (Violation rel c asn) = "row " ++ show asn ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
-controllerLoop :: String -> Refine -> IO ()
-controllerLoop dbname r = do
-    let ?r = r
-    db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ dbname
-    putStrLn "Connected to database"
-    (dl, constr) <- startDLSession
-    let ?s = ControllerState dl constr db
-    populateDB
-    -- event loop
-    PG.close db
-    putStrLn "Disconnected"
+controllerStart :: String -> Int -> Refine -> IO ()
+controllerStart dbname port r = do
+    let dopts = DaemonOptions{ daemonPort           = port
+                             , daemonPidFile        = InHome
+                             , printOnDaemonStarted = True}
+    ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop dbname r)
+
+controllerLoop :: String -> Refine -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
+controllerLoop dbname r prod cons = 
+    -- serializer and deserializer pipes below are necessary to avoid stalling the pipeline
+    -- due to lazy reading
+    runEffect (cons <-< serializer <-< commandHandler (ControllerDisconnected dbname r) <-< deserializer <-< prod)
+
+commandHandler :: ControllerState -> Pipe BS.ByteString BS.ByteString IO ()
+commandHandler state = do
+    cmd <- await
+    -- TODO: parse command
+    (state', response) <- lift $
+        (case cmd of
+             "connect"    -> connect state
+             "disconnect" -> disconnect state
+             --"status"     -> 
+             _            -> return (state, "Invalid command"))
+        `catch` (\e -> return (state, show (e::SomeException)))
+    yield $ BS.pack response
+    commandHandler state'
+
+type Action = ControllerState -> IO (ControllerState, String)
+
+connect :: Action
+connect ControllerDisconnected{..} = do
+    let ?r = ctlRefine
+    db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
+    (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
+        (dl, constr) <- startDLSession
+        (do let ?s = ControllerConnected ctlDBName ctlRefine dl constr db
+            populateDB
+            return (?s, "Connected"))
+         `catch` \e -> do
+             closeDLSession dl
+             throw (e::SomeException))
+     `catch` \e -> do 
+         PG.close db
+         throw (e::SomeException)
+connect ControllerConnected{} = throw $ AssertionFailed "already connected"
+
+-- This is the only way to transition to disconnected state.
+-- Performs correct cleanup
+disconnect :: Action
+disconnect ControllerConnected{..} = do
+    closeDLSession ctlDL
+    PG.close ctlDB
+    return $ (ControllerDisconnected ctlDBName ctlRefine , "Disconnected")
+disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+
+controllerCLI :: Int -> IO ()
+controllerCLI port = do
+    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "connect")
+    case resp of
+         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
+         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
+    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "disconnect")
+    case resp of
+         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
+         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
+
 
 startDLSession :: (?r::Refine) => IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession = do
@@ -80,6 +143,9 @@ startDLSession = do
     return (dl, map (mapSnd (map (fst . last) . snd)) dlrels)
 
 
+closeDLSession :: DL.Session -> IO ()
+closeDLSession dl = DL.closeSession dl
+
 populateDB :: (?r::Refine, ?s::ControllerState) => IO ()
 populateDB = do 
     PG.withTransaction (ctlDB ?s) $ readDB
@@ -90,7 +156,7 @@ validateConstraints :: (?s::ControllerState) => IO ()
 validateConstraints = do
     violations <- checkConstraints 
     let e = concatMap (("Integrity violation: " ++) . show) violations
-    throw $ AssertionFailed e
+    unless (null e) $ throw $ AssertionFailed e
 
 checkConstraints :: (?s::ControllerState) => IO [Violation]
 checkConstraints = 

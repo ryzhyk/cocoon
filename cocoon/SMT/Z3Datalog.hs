@@ -66,6 +66,7 @@ z3NewSession structs funcs rels = do
                    , removeGroundRule = z3RemoveGroundRule z3
                    , checkRelationSAT = z3CheckRelationSAT z3
                    , enumRelation     = z3EnumRelation     z3
+                   , closeSession     = z3CloseSession     z3
                    }
 
 z3checkph :: Z3Session -> IO ()
@@ -146,3 +147,7 @@ expr2Assignment (f:fs)  (EBinOp And (EBinOp Eq _ val) e) a = expr2Assignment fs 
 expr2Assignment [f]     val                              a = M.insert (name f) val a
 expr2Assignment fs      val                              _ = error $ "Z3Datalog.expr2Assignment " ++ show fs ++ " " ++ show val
 
+z3CloseSession :: Z3Session -> IO ()
+z3CloseSession z3 = do terminateProcess $ z3hp z3
+                       _ <- waitForProcess $ z3hp z3
+                       return ()

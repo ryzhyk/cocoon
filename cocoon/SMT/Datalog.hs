@@ -54,7 +54,8 @@ data Session = Session {
     addGroundRule       :: GroundRule       -> IO (),
     removeGroundRule    :: String -> RuleId -> IO (),
     checkRelationSAT    :: String           -> IO Bool,
-    enumRelation        :: String           -> IO [Assignment]
+    enumRelation        :: String           -> IO [Assignment],
+    closeSession        ::                     IO ()
 }
 
-data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> [Relation] ->  IO Session}
+data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> [Relation] -> IO Session}

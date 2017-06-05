@@ -22,12 +22,14 @@ import Text.PrettyPrint
 import System.FilePath.Posix
 import System.Directory
 import System.Console.GetOpt
+import Control.Exception
 import Control.Monad
 
 import Parse
 import Validate
 import SQL
 import Controller
+import Syntax
 
 data TOption = CCN String
              | Action String
@@ -36,8 +38,13 @@ data TOption = CCN String
              | Do1Refinement
              | DoP4
              | DoNetKAT
+             | Port String
         
-data CCNAction = ActionSQL | ActionController
+data CCNAction = ActionSQL 
+               | ActionController
+               | ActionCLI
+               | ActionNone
+               deriving Eq
 
 options :: [OptDescr TOption]
 options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
@@ -47,6 +54,7 @@ options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Co
           , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
           , Option []    ["p4"]         (NoArg DoP4)                   "enable P4 backend"
           , Option []    ["netkat"]     (NoArg DoNetKAT)               "enable NetKAT backend"
+          , Option []    ["port"]       (ReqArg Port "PORT_NUMBER")    "cocoon controller port number, default: 5000"
           ]
 
 data Config = Config { confCCNFile      :: FilePath
@@ -56,15 +64,17 @@ data Config = Config { confCCNFile      :: FilePath
                      , confDo1Refinement:: Bool
                      , confDoP4         :: Bool
                      , confDoNetKAT     :: Bool
+                     , confCtlPort      :: Int
                      }
 
-defaultConfig = Config { confCCNFile      = error "input file not specified"
-                       , confAction       = error "action not specified"
+defaultConfig = Config { confCCNFile      = ""
+                       , confAction       = ActionNone
                        , confBound        = 15
                        , confDoBoogie     = False
                        , confDo1Refinement= False
                        , confDoP4         = False
                        , confDoNetKAT     = False
+                       , confCtlPort      = 5000
                        }
 
 
@@ -73,6 +83,7 @@ addOption config (CCN f)        = return config{ confCCNFile  = f}
 addOption config (Action a)     = do a' <- case a of
                                                 "sql"        -> return ActionSQL
                                                 "controller" -> return ActionController
+                                                "cli"        -> return ActionCLI
                                                 _            -> fail "invalid action"
                                      return config{confAction = a'}
 addOption config (Bound b)      = do b' <- case reads b of
@@ -83,51 +94,61 @@ addOption config DoBoogie       = return config{ confDoBoogie      = True}
 addOption config Do1Refinement  = return config{ confDo1Refinement = True}
 addOption config DoP4           = return config{ confDoP4          = True}
 addOption config DoNetKAT       = return config{ confDoNetKAT      = True}
+addOption config (Port p)       = do p' <- case reads p of 
+                                                []        -> fail "invalid port number"
+                                                ((i,_):_) -> return i
+                                     return config{confCtlPort = p'}
 
-validateOptions :: [TOption] -> IO ()
-validateOptions opts = do
-    when (not $ any (\case 
-                      CCN _ -> True
-                      _     -> False) opts)
-         $ fail "input file not specified"
-    when (not $ any (\case 
-                      Action _ -> True
-                      _        -> False) opts)
+validateConfig :: Config -> IO ()
+validateConfig Config{..} = do
+    when (confAction == ActionNone)
          $ fail "action not specified"
+    when ((confAction /= ActionCLI) && (confCCNFile == ""))
+         $ fail "input file not specified"
 
 main = do
     args <- getArgs
     prog <- getProgName
     config <- case getOpt Permute options args of
-                   (flags, [], []) -> do validateOptions flags
-                                         foldM addOption defaultConfig flags
+                   (flags, [], []) -> do conf <- foldM addOption defaultConfig flags
+                                         validateConfig conf
+                                         return conf
+                                      `catch`
+                                      (\e -> do putStrLn $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options
+                                                throw (e::SomeException))
                    _ -> fail $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options 
-
+ 
     let fname  = confCCNFile config
         (dir, file) = splitFileName fname
         (basename,_) = splitExtension file
         workdir = dir </> basename
+    case confAction config of
+         ActionCLI -> controllerCLI (confCtlPort config)
+         ActionSQL -> do 
+             combined <- readValidate fname workdir
+             let schema = mkSchema basename combined
+                 schfile = workdir </> addExtension basename "schema"
+             writeFile schfile $ render schema
+             putStrLn $ "Schema written to file " ++ schfile
+         ActionController -> do 
+             combined <- readValidate fname workdir
+             putStrLn "Starting controller"
+             controllerStart basename (confCtlPort config) combined
+         ActionNone -> fail "action not specified"
+ 
+readValidate :: FilePath -> FilePath -> IO Refine
+readValidate fname workdir = do
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
     spec <- case parse cocoonGrammar fname fdata of
                  Left  e    -> fail $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
-    return ()
     combined <- case validate spec of
                      Left e   -> fail $ "Validation error: " ++ e
                      Right rs -> return rs
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
-    --let final = last combined
     putStrLn "Validation complete"
-
-    case confAction config of
-         ActionSQL -> do let schema = mkSchema basename $ head combined
-                             schfile = workdir </> addExtension basename "schema"
-                         writeFile schfile $ render schema
-                         putStrLn $ "Schema written to file " ++ schfile
-         ActionController -> do putStrLn "Starting controller"
-                                controllerLoop basename $ head combined
-    
+    return $ head combined 
 --
 --    let ps = pairs combined
 --
