@@ -27,6 +27,10 @@ import Control.Monad
 import "daemons" System.Daemon
 import Pipes
 import Control.Pipe.Serialize ( serializer, deserializer )
+import GHC.IO.Handle
+import System.IO
+import qualified Control.Concurrent.Lock as L
+import Data.IORef
 
 import Util
 import Syntax
@@ -52,27 +56,41 @@ data ControllerState = ControllerDisconnected { ctlDBName       :: String
                                               , ctlDB           :: PG.Connection
                                               }
 
+type ControllerRefs = (Maybe Handle, ControllerState)
+
 data Violation = Violation Relation Constraint SMT.Assignment
 
 instance Show Violation where
     show (Violation rel c asn) = "row " ++ show asn ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
-controllerStart :: String -> Int -> Refine -> IO ()
-controllerStart dbname port r = do
+controllerStart :: String -> FilePath -> Int -> Refine -> IO ()
+controllerStart dbname logfile port r = do
     let dopts = DaemonOptions{ daemonPort           = port
                              , daemonPidFile        = InHome
                              , printOnDaemonStarted = True}
-    ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop dbname r)
+    lock <- L.new
+    ref <- newIORef (Nothing, ControllerDisconnected dbname r)
+    ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
-controllerLoop :: String -> Refine -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
-controllerLoop dbname r prod cons = 
-    -- serializer and deserializer pipes below are necessary to avoid stalling the pipeline
-    -- due to lazy reading
-    runEffect (cons <-< serializer <-< commandHandler (ControllerDisconnected dbname r) <-< deserializer <-< prod)
+controllerLoop :: L.Lock -> IORef ControllerRefs -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
+controllerLoop lock ref logfile prod cons = do
+    L.with lock $ do
+        (mhlog, state) <- readIORef ref
+        hlog <- case mhlog of 
+                     Nothing -> do h <- openFile logfile WriteMode
+                                   hDuplicateTo h stdout
+                                   hDuplicateTo h stderr
+                                   return h
+                     Just h  -> return h
+        writeIORef ref (Just hlog, state)
+        -- serializer and deserializer pipes below are necessary to avoid stalling the pipeline
+        -- due to lazy reading
+        runEffect (cons <-< serializer <-< commandHandler ref <-< deserializer <-< prod)
 
-commandHandler :: ControllerState -> Pipe BS.ByteString BS.ByteString IO ()
-commandHandler state = do
+commandHandler :: IORef ControllerRefs -> Pipe BS.ByteString BS.ByteString IO ()
+commandHandler ref = do
     cmd <- await
+    (mh, state) <- lift $ readIORef ref
     -- TODO: parse command
     (state', response) <- lift $
         (case cmd of
@@ -82,7 +100,7 @@ commandHandler state = do
              _            -> return (state, "Invalid command"))
         `catch` (\e -> return (state, show (e::SomeException)))
     yield $ BS.pack response
-    commandHandler state'
+    lift $ writeIORef ref (mh, state')
 
 type Action = ControllerState -> IO (ControllerState, String)
 

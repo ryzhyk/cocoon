@@ -49,4 +49,3 @@ controllerCLI port = runInputT defaultSettings loop
 --    case resp of
 --         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
 --         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
-

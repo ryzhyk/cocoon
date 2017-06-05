@@ -134,7 +134,9 @@ main = do
          ActionController -> do 
              combined <- readValidate fname workdir
              putStrLn "Starting controller"
-             controllerStart basename (confCtlPort config) combined
+             let logfile = workdir </> addExtension basename "log"
+             controllerStart basename logfile (confCtlPort config) combined
+             controllerCLI (confCtlPort config)
          ActionNone -> fail "action not specified"
  
 readValidate :: FilePath -> FilePath -> IO Refine
