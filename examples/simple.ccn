@@ -1,0 +1,23 @@
+typedef uuid_t = bit<12>
+typedef port_id_t  = uuid_t
+typedef vlan_id_t = bit<12>
+
+typedef Packet = Packet
+
+table LogicalPort( name      : port_id_t
+                 , switch_id : uuid_t
+                 , parent    : port_id_t
+                 , tag       : vlan_id_t
+                 , primary key (name)
+                 //, foreign key (switch_id)                 references LogicalSwitch(uuid)
+                 , foreign key (parent)                    references LogicalPort(name)
+                 , unique (parent, tag) /* Siblings must have different tags */)
+
+view ParentPort( child_name    : port_id_t
+               , child_switch  : uuid_t
+               , parent_name   : port_id_t
+               , parent_switch : uuid_t
+               , check child_switch == parent_switch)
+
+ParentPort(cn: port_id_t, cs: uuid_t, pn, ps) :- LogicalPort(cn, cs, pn, _),
+                                                 LogicalPort(pn, ps, pp, _)
