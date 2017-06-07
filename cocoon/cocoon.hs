@@ -85,10 +85,10 @@ addOption config (Action a)     = do a' <- case a of
                                                 "sql"        -> return ActionSQL
                                                 "controller" -> return ActionController
                                                 "cli"        -> return ActionCLI
-                                                _            -> fail "invalid action"
+                                                _            -> error "invalid action"
                                      return config{confAction = a'}
 addOption config (Bound b)      = do b' <- case reads b of
-                                                []        -> fail "invalid bound specified"
+                                                []        -> error "invalid bound specified"
                                                 ((i,_):_) -> return i
                                      return config{confBound = b'}
 addOption config DoBoogie       = return config{ confDoBoogie      = True}
@@ -96,16 +96,16 @@ addOption config Do1Refinement  = return config{ confDo1Refinement = True}
 addOption config DoP4           = return config{ confDoP4          = True}
 addOption config DoNetKAT       = return config{ confDoNetKAT      = True}
 addOption config (Port p)       = do p' <- case reads p of 
-                                                []        -> fail "invalid port number"
+                                                []        -> error "invalid port number"
                                                 ((i,_):_) -> return i
                                      return config{confCtlPort = p'}
 
 validateConfig :: Config -> IO ()
 validateConfig Config{..} = do
     when (confAction == ActionNone)
-         $ fail "action not specified"
+         $ error "action not specified"
     when ((confAction /= ActionCLI) && (confCCNFile == ""))
-         $ fail "input file not specified"
+         $ error "input file not specified"
 
 main = do
     args <- getArgs
@@ -117,7 +117,7 @@ main = do
                                       `catch`
                                       (\e -> do putStrLn $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options
                                                 throw (e::SomeException))
-                   _ -> fail $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options 
+                   _ -> error $ usageInfo ("Usage: " ++ prog ++ " [OPTION...]") options 
  
     let fname  = confCCNFile config
         (dir, file) = splitFileName fname
@@ -137,17 +137,17 @@ main = do
              let logfile = workdir </> addExtension basename "log"
              controllerStart basename logfile (confCtlPort config) combined
              controllerCLI (confCtlPort config)
-         ActionNone -> fail "action not specified"
+         ActionNone -> error "action not specified"
  
 readValidate :: FilePath -> FilePath -> IO Refine
 readValidate fname workdir = do
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
     spec <- case parse cocoonGrammar fname fdata of
-                 Left  e    -> fail $ "Failed to parse input file: " ++ show e
+                 Left  e    -> error $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
     combined <- case validate spec of
-                     Left e   -> fail $ "Validation error: " ++ e
+                     Left e   -> error $ "Validation error: " ++ e
                      Right rs -> return rs
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
     putStrLn "Validation complete"

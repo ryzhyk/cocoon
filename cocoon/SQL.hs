@@ -400,9 +400,9 @@ parseString :: JSON.Value -> String
 parseString (JSON.String t) = unpack t
 
 parseRow :: (?r::Refine) => Relation -> JSON.Object -> (Int64, [Expr])
-parseRow Relation{..} json = (id, args)
+parseRow Relation{..} json = (i, args)
     where -- extract "_serial"
-          id = parseInt $ json HM.! (pack serialcol)
+          i = parseInt $ json HM.! (pack serialcol)
           -- extract fields
           args = map (parseVal json "") relArgs
 
@@ -417,5 +417,6 @@ parseVal json prefix Field{..} =
          TBit _ w | w < 64           -> eBit w $ parseInt val
                   | otherwise        -> eBit w $ readBin $ parseString val
          TString _                   -> eString $ parseString val
+         t                           -> error $ "SQL.parseVal " ++ show t
     where fname = prefix ++ fieldName
           val = json HM.! (pack fname)

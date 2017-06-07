@@ -16,7 +16,8 @@ limitations under the License.
 -}
 {-# LANGUAGE RecordWildCards, FlexibleContexts, LambdaCase #-}
 
-module Validate (validate) where
+module Validate ( validate
+                , exprValidate) where
 
 import Control.Monad.Except
 import Data.Maybe
@@ -410,6 +411,10 @@ exprValidate1 r ctx (EFork p v t _ _)   = do ctxCheckSideEffects p r ctx
                                              _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
+exprValidate1 r ctx (EFor p v t _ _)   = do ctxCheckNotDataplane p ctx
+                                            _ <- checkRelation p r ctx t
+                                            _ <- checkNoVar p r ctx v
+                                            return ()
 exprValidate1 r ctx (EWith p v t _ _ _) = do _ <- checkRelation p r ctx t
                                              _ <- checkNoVar p r ctx v
                                              return ()
@@ -479,6 +484,12 @@ exprValidate2 _ _   _                   = return ()
 
 checkLExpr :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
 checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) $ "Expression " ++ show e ++ " is not an l-value" -- in context " ++ show ctx
+
+
+ctxCheckNotDataplane :: (MonadError String me) => Pos -> ECtx -> me ()
+ctxCheckNotDataplane p ctx = do
+    when (ctxInRole ctx) $ err p "loops are not allowed inside roles"
+    return ()
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects p r ctx =

@@ -103,6 +103,8 @@ exprFoldCtxM' f ctx e@(ESend p d)         = f ctx =<< (liftM $ ESend p) (exprFol
 exprFoldCtxM' f ctx e@(EBinOp p op l r)   = f ctx =<< (liftM2 $ EBinOp p op) (exprFoldCtxM f (CtxBinOpL e ctx) l) 
                                                                              (exprFoldCtxM f (CtxBinOpR e ctx) r)
 exprFoldCtxM' f ctx e@(EUnOp p op x)      = f ctx =<< (liftM $ EUnOp p op) (exprFoldCtxM f (CtxUnOp e ctx) x)
+exprFoldCtxM' f ctx e@(EFor p v t c b)    = f ctx =<< (liftM2 $ EFor p v t) (exprFoldCtxM f (CtxForCond e ctx) c) 
+                                                                            (exprFoldCtxM f (CtxForBody e ctx) b)
 exprFoldCtxM' f ctx e@(EFork p v t c b)   = f ctx =<< (liftM2 $ EFork p v t) (exprFoldCtxM f (CtxForkCond e ctx) c) 
                                                                              (exprFoldCtxM f (CtxForkBody e ctx) b)
 exprFoldCtxM' f ctx e@(EWith p v t c b d) = f ctx =<< (liftM3 $ EWith p v t) 
@@ -142,6 +144,7 @@ exprMapM g e = case e of
                    ESend p d         -> (liftM $ ESend p) (g d)
                    EBinOp p op l r   -> (liftM2 $ EBinOp p op) (g l) (g r)
                    EUnOp p op v      -> (liftM $ EUnOp p op) (g v)
+                   EFor p v t c b    -> (liftM2 $ EFor p v t) (g c) (g b)
                    EFork p v t c b   -> (liftM2 $ EFork p v t) (g c) (g b)
                    EWith p v t c b d -> (liftM3 $ EWith p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
                    EAny p v t c b d  -> (liftM3 $ EAny p v t) (g c) (g b) (maybe (return Nothing) (liftM Just . g) d)
@@ -199,6 +202,7 @@ exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
                                      ESend _ d         -> x' `op` d        
                                      EBinOp _ _ l r    -> x' `op` l `op` r  
                                      EUnOp _ _ v       -> x' `op` v
+                                     EFor _ _ _ c b    -> x' `op` c `op` b
                                      EFork _ _ _ c b   -> x' `op` c `op` b
                                      EWith _ _ _ c b d -> let x'' = x' `op` c `op` b in
                                                           maybe x'' (x'' `op`) d
@@ -450,6 +454,7 @@ ctxExpectsStat CtxPar1{}     = True
 ctxExpectsStat CtxPar2{}     = True
 ctxExpectsStat CtxITEThen{}  = True
 ctxExpectsStat CtxITEElse{}  = True
+ctxExpectsStat CtxForBody{}  = True
 ctxExpectsStat CtxForkBody{} = True
 ctxExpectsStat CtxWithBody{} = True
 ctxExpectsStat CtxWithDef{}  = True
@@ -483,6 +488,7 @@ exprIsStatement (EITE     {})                 = True
 exprIsStatement (EDrop    {})                 = True
 exprIsStatement (ESet     {})                 = True
 exprIsStatement (ESend    {})                 = True
+exprIsStatement (EFor     {})                 = True
 exprIsStatement (EFork    {})                 = True
 exprIsStatement (EWith    {})                 = True
 exprIsStatement (EAny     {})                 = True

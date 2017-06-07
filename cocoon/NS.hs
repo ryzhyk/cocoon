@@ -24,7 +24,7 @@ module NS(lookupType, checkType, getType,
           lookupRelation, checkRelation, getRelation,
           ctxMVars, ctxVars, ctxAllVars, 
           ctxRels,
-          isLVar, isLRel,
+          isLVar, 
           --lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
@@ -177,6 +177,10 @@ ctxMVars r ctx =
          CtxBinOpL _ _        -> ([], plvars ++ prvars)
          CtxBinOpR _ _        -> ([], plvars ++ prvars)
          CtxUnOp _ _          -> ([], plvars ++ prvars)
+         CtxForCond e _       -> ([], (frkvar e) : (plvars ++ prvars))
+         CtxForBody e pctx    -> if isLRel r pctx (exprTable e)
+                                    then ((frkvar e):plvars, prvars)
+                                    else (plvars, (frkvar e) : prvars)
          CtxForkCond e _      -> ([], (frkvar e) : (plvars ++ prvars))
          CtxForkBody e pctx   -> if isLRel r pctx (exprTable e)
                                     then ([frkvar e], plvars ++ prvars)

@@ -31,6 +31,7 @@ import GHC.IO.Handle
 import System.IO
 import qualified Control.Concurrent.Lock as L
 import Data.IORef
+import Text.Parsec
 
 import Util
 import Syntax
@@ -39,6 +40,8 @@ import NS
 import Relation
 import Name
 import Type
+import Parse
+import Validate
 import qualified SQL
 import qualified SMT.Datalog   as DL
 import qualified SMT.Z3Datalog as DL
@@ -56,7 +59,7 @@ data ControllerState = ControllerDisconnected { ctlDBName       :: String
                                               , ctlDB           :: PG.Connection
                                               }
 
-type ControllerRefs = (Maybe Handle, ControllerState)
+type DaemonState = (Maybe Handle, ControllerState)
 
 data Violation = Violation Relation Constraint SMT.Assignment
 
@@ -72,12 +75,13 @@ controllerStart dbname logfile port r = do
     ref <- newIORef (Nothing, ControllerDisconnected dbname r)
     ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
-controllerLoop :: L.Lock -> IORef ControllerRefs -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
+controllerLoop :: L.Lock -> IORef DaemonState -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
 controllerLoop lock ref logfile prod cons = do
     L.with lock $ do
         (mhlog, state) <- readIORef ref
         hlog <- case mhlog of 
                      Nothing -> do h <- openFile logfile WriteMode
+                                   hSetBuffering h NoBuffering
                                    hDuplicateTo h stdout
                                    hDuplicateTo h stderr
                                    return h
@@ -87,22 +91,55 @@ controllerLoop lock ref logfile prod cons = do
         -- due to lazy reading
         runEffect (cons <-< serializer <-< commandHandler ref <-< deserializer <-< prod)
 
-commandHandler :: IORef ControllerRefs -> Pipe BS.ByteString BS.ByteString IO ()
+commandHandler :: IORef DaemonState -> Pipe BS.ByteString BS.ByteString IO ()
 commandHandler ref = do
-    cmd <- await
+    cmdline <- await
     (mh, state) <- lift $ readIORef ref
-    -- TODO: parse command
-    (state', response) <- lift $
-        (case cmd of
-             "connect"    -> connect state
-             "disconnect" -> disconnect state
-             --"status"     -> 
-             _            -> return (state, "Invalid command"))
-        `catch` (\e -> return (state, show (e::SomeException)))
+    (state', response) <- lift $ (do
+        cmd <- case parse cmdGrammar "" (BS.unpack cmdline) of
+                    Left  e -> error $ show e
+                    Right c -> return c
+        case cmd of
+             Left c  -> execCommand c state
+             Right e -> execExpr e state)
+         `catch` (\e -> return (state, show (e::SomeException)))
     yield $ BS.pack response
     lift $ writeIORef ref (mh, state')
 
 type Action = ControllerState -> IO (ControllerState, String)
+
+execCommand :: [String] -> Action
+execCommand ["connect"]          s       = connect s
+execCommand ("connect":_)        _       = error "connect does not take arguments" 
+execCommand ["disconnect"]       s       = disconnect s
+execCommand ("disconnect":_)     _       = error "disconnect does not take arguments"
+execCommand _ ControllerDisconnected{}   = error "command not available in disconnected state"
+execCommand ("show":as)          s       = showcmd as s
+execCommand _                    _       = error "invalid command"
+
+execExpr :: Expr -> Action
+execExpr e s = do
+    case exprValidate (ctlRefine s) CtxRefine e of
+         Left er -> error er
+         Right _ -> return (s, "Evaluating expression " ++ show e)
+                --evalExpr (ctlRefine state) CtxRefine e
+
+showcmd :: [String] -> Action
+showcmd as s@ControllerConnected{..} = do
+    let res = case as of
+                   ["tables"]    -> intercalate "\n" $ map name tables
+                   ["views"]     -> intercalate "\n" $ map name views
+                   ["relations"] -> intercalate "\n" $ map name rels
+                   [t]           -> maybe (error $ "unknown relation " ++ t)
+                                          show
+                                          (find ((==t) . name) rels)
+                   _             -> error "unknown command"
+    return (s, res)
+    where 
+    rels = refineRels ctlRefine
+    tables = filter (not . relIsView) rels
+    views = filter relIsView rels
+showcmd _ _ = error $ "Controller.showcmd called in disconnected state"
 
 connect :: Action
 connect ControllerDisconnected{..} = do
@@ -179,3 +216,12 @@ readDB = mapM_ (\rel -> do rows <- SQL.readTable (ctlDB ?s) rel
          $ filter (not . relIsView) $ refineRels ?r
 
 
+-- :validate
+--
+--role syntax, sans side effects, packets, plus for loops
+--interpreter
+--
+--insert relname (<val1>, <val2>)
+--the (p in <relation> | <cond>) p
+--
+--every request is a transaction

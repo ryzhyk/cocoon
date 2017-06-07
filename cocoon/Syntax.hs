@@ -43,7 +43,7 @@ module Syntax( pktVar
              , Expr(..)
              , enode
              , eVar, ePacket, eApply, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
-             , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork
+             , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork, eFor
              , eWith, eAny, ePHolder, eTyped, eRelPred
              , exprIsRelPred
              , ECtx(..)
@@ -53,6 +53,7 @@ module Syntax( pktVar
              , ctxIsMatchPat, ctxInMatchPat, ctxInMatchPat'
              , ctxIsSetL, ctxInSetL
              , ctxIsSeq1, ctxInSeq1
+             , ctxIsRole, ctxInRole
              , ctxIsTyped
              , conj
              , disj
@@ -439,6 +440,7 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | ESend     {exprPos :: Pos, exprDst  :: e}
                 | EBinOp    {exprPos :: Pos, exprBOp :: BOp, exprLeft :: e, exprRight :: e}
                 | EUnOp     {exprPos :: Pos, exprUOp :: UOp, exprOp :: e}
+                | EFor      {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
                 | EFork     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprFrkBody :: e}
                 | EWith     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EAny      {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
@@ -469,6 +471,7 @@ instance Eq e => Eq (ExprNode e) where
     (==) (ESend _ d1)             (ESend _ d2)               = d1 == d2
     (==) (EBinOp _ o1 l1 r1)      (EBinOp _ o2 l2 r2)        = o1 == o2 && l1 == l2 && r1 == r2
     (==) (EUnOp _ o1 e1)          (EUnOp _ o2 e2)            = o1 == o2 && e1 == e2
+    (==) (EFor  _ v1 t1 c1 b1)    (EFor  _ v2 t2 c2 b2)      = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
     (==) (EFork _ v1 t1 c1 b1)    (EFork _ v2 t2 c2 b2)      = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2
     (==) (EWith _ v1 t1 c1 b1 d1) (EWith _ v2 t2 c2 b2 d2)   = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
     (==) (EAny _ v1 t1 c1 b1 d1)  (EAny _ v2 t2 c2 b2 d2)    = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
@@ -511,6 +514,7 @@ instance PP e => PP (ExprNode e) where
     pp (ESend  _ e)        = pp "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
+    pp (EFor  _ v t c b)   = (pp "for"  <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
     pp (EFork _ v t c b)   = (pp "fork" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
     pp (EWith _ v t c b d) = (pp "the" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
                              $$ (nest' $ pp b)
@@ -571,6 +575,7 @@ eBinOp op l r       = E $ EBinOp    nopos op l r
 eUnOp op e          = E $ EUnOp     nopos op e
 eNot e              = eUnOp Not e
 eFork v t c b       = E $ EFork     nopos v t c b
+eFor  v t c b       = E $ EFor      nopos v t c b
 eWith v t c b d     = E $ EWith     nopos v t c b d
 eAny v t c b d      = E $ EAny      nopos v t c b d
 ePHolder            = E $ EPHolder  nopos
@@ -635,6 +640,8 @@ data ECtx = CtxRefine
           | CtxBinOpL    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxBinOpR    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxUnOp      {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxForCond   {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxForBody   {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForkCond  {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxForkBody  {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxWithCond  {ctxParExpr::ENode, ctxPar::ECtx}
@@ -700,6 +707,13 @@ ctxIsSeq1 _         = False
 
 ctxInSeq1 :: ECtx -> Bool
 ctxInSeq1 ctx = any ctxIsSeq1 $ ctxAncestors ctx
+
+ctxIsRole :: ECtx -> Bool
+ctxIsRole CtxRole{} = True
+ctxIsRole _         = False
+
+ctxInRole :: ECtx -> Bool
+ctxInRole ctx = any ctxInRole $ ctxAncestors ctx
 
 ctxIsTyped :: ECtx -> Bool
 ctxIsTyped CtxTyped{} = True

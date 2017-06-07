@@ -18,6 +18,7 @@ limitations under the License.
 {-# LANGUAGE FlexibleContexts, RecordWildCards #-}
 
 module Parse ( cocoonGrammar
+             , cmdGrammar
              , cfgGrammar) where
 
 import Control.Applicative hiding (many,optional,Const)
@@ -47,6 +48,7 @@ reservedNames = ["_",
                  "else",
                  "false",
                  "foreign",
+                 "for",
                  "fork",
                  "function",
                  "if",
@@ -143,7 +145,11 @@ data SpecItem = SpType         TypeDef
 
 
 cocoonGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
+cmdGrammar = removeTabs *> ((optional whiteSpace) *> cmd <* eof)
 cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
+
+cmd =  (Left  <$ reservedOp ":" <*> many1 identifier)
+   <|> (Right <$> expr)
 
 spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
@@ -314,6 +320,7 @@ term' = withPos $
      <|> esend
      <|> evardcl
      <|> efork
+     <|> efor
      <|> ewith
      <|> eany
 
@@ -364,6 +371,11 @@ esend   = eSend    <$ reserved "send" <*> expr
 eite    = eITE     <$ reserved "if" <*> term <*> term <*> (optionMaybe $ reserved "else" *> term)
 evardcl = eVarDecl <$ reserved "var" <*> varIdent
 efork   = eFork    <$ reserved "fork" 
+                   <*> (symbol "(" *> varIdent)
+                   <*> (reserved "in" *> relIdent) 
+                   <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
+                   <*> term
+efor    = eFor     <$ reserved "for" 
                    <*> (symbol "(" *> varIdent)
                    <*> (reserved "in" *> relIdent) 
                    <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
