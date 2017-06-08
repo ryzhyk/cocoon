@@ -39,13 +39,3 @@ controllerCLI port = runInputT defaultSettings loop
                                           return ()
                             Just r  -> do outputStrLn $ BS.unpack r 
                                           loop
-
-
---    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "connect")
---    case resp of
---         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
---         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
---    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack "disconnect")
---    case resp of
---         Nothing -> fail $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
---         Just r  -> putStrLn $ "Response from controller: " ++ BS.unpack r 
