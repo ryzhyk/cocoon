@@ -17,6 +17,11 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
 module Eval ( KMap
+            , EvalState
+            , eget
+            , eput
+            , emodify
+            , eyield
             , evalExpr) where
 
 import qualified Data.Map as M
@@ -34,31 +39,50 @@ import Name
 import NS
 import Util
 import Pos
+import {-# SOURCE #-} Builtins
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
 
-evalExpr :: Refine -> ECtx -> KMap -> DL.Session -> Expr -> IO (Expr, KMap)
-evalExpr r ctx kmap dl e = let ?dl = dl      
-                               ?r = r 
-                           in runStateT (evalExpr' ctx e) kmap
+type EvalState a = StateT (KMap, [Expr]) IO a
 
-evalExpr' :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> StateT KMap IO Expr
+eget :: EvalState KMap
+eget = gets fst
+
+eput :: KMap -> EvalState ()
+eput kmap = modify $ \(_,y) -> (kmap, y)
+
+emodify :: (KMap -> KMap) -> EvalState ()
+emodify f = modify $ \(m, y) -> (f m, y)
+
+eyield :: Expr -> EvalState ()
+eyield e = modify $ \(m,y) -> (m, y ++ [e])
+
+evalExpr :: Refine -> ECtx -> KMap -> DL.Session -> Expr -> IO ([Expr], KMap)
+evalExpr r ctx kmap dl e = do let ?dl = dl      
+                                  ?r = r 
+                              (res, (kmap', ys)) <- runStateT (evalExpr' ctx e) (kmap, [])
+                              return (ys ++ [res], kmap')
+
+evalExpr' :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> EvalState Expr
 evalExpr' ctx (E e) = evalExpr'' ctx e
 
-evalExpr'' :: (?r::Refine, ?dl::DL.Session) => ECtx -> ENode -> StateT KMap IO Expr
+evalExpr'' :: (?r::Refine, ?dl::DL.Session) => ECtx -> ENode -> EvalState Expr
 evalExpr'' ctx e = do
     case e of
-        EVar _ v        -> (liftM (M.! v)) get
+        EVar _ v        -> (liftM (M.! v)) eget
         EApply _ f as   -> do let fun = getFunc ?r f
                               kmap' <- liftM M.fromList 
                                        $ liftM (zip (map name $ funcArgs fun)) 
-                                       $ mapIdxM (\a i -> evalExpr' (CtxApply e ctx i) a)as
-                              kmap <- get
-                              put kmap'
+                                       $ mapIdxM (\a i -> evalExpr' (CtxApply e ctx i) a) as
+                              kmap <- eget
+                              eput kmap'
                               v <- evalExpr' (CtxFunc fun ctx) (fromJust $ funcDef fun)
-                              put kmap
+                              eput kmap
                               return v
+        EBuiltin _ f as -> do let bin = getBuiltin f
+                              as' <- mapIdxM (\a i -> evalExpr' (CtxBuiltin e ctx i) a) as
+                              (bfuncEval bin) $ eBuiltin f as'
         EField _ s f    -> do s' <- evalExpr' (CtxField e ctx) s
                               case enode s' of
                                    EStruct _ c fs -> do let cons = getConstructor ?r c
@@ -82,15 +106,15 @@ evalExpr'' ctx e = do
         EMatch _ m cs   -> do m' <- evalExpr' (CtxMatchExpr e ctx) m
                               case findIndex (match m' . fst) cs of
                                    Just i      -> do let (c, v) = cs !! i
-                                                     kmap <- get
+                                                     kmap <- eget
                                                      assignTemplate (CtxMatchPat e ctx i) c m'
                                                      v' <- evalExpr' (CtxMatchVal e ctx i) v
-                                                     put kmap
+                                                     eput kmap
                                                      return v'
                                    Nothing     -> error $ "No match found in\n" ++ show e ++ 
                                                           "\nwhere match expression evaluates to " ++ show m'
         EVarDecl _ v    -> do let v' = error $ "variable " ++ v ++ " has undefined value"
-                              modify $ M.insert v v'
+                              emodify $ M.insert v v'
                               return v'
         ESeq _ e1 e2    -> do _ <- evalExpr' (CtxSeq1 e ctx) e1
                               evalExpr' (CtxSeq2 e ctx) e2
@@ -113,38 +137,38 @@ evalExpr'' ctx e = do
                                            _         -> eNot $ E a'
         EFor _ v t c b -> do let rel = getRelation ?r t
                              rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
-                             mapM_ (\row -> do kmap <- get
-                                               modify $ M.insert v row
+                             mapM_ (\row -> do kmap <- eget
+                                               emodify $ M.insert v row
                                                E c' <- evalExpr' (CtxForCond e ctx) c 
                                                case c' of
                                                     EBool{} -> return ()
                                                     _       -> error $ "Query condition does not evaluate to a constant in\n" ++ show e
                                                when (exprBVal c') $ do _ <- evalExpr' (CtxForBody e ctx) b
                                                                        return ()
-                                               put kmap)
+                                               eput kmap)
                                    rows
                              return $ eTuple []
         EWith _ v t c b d -> do let rel = getRelation ?r t
                                 rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
-                                rows' <- filterM (\row -> do kmap <- get
-                                                             modify $ M.insert v row
+                                rows' <- filterM (\row -> do kmap <- eget
+                                                             emodify $ M.insert v row
                                                              E c' <- evalExpr' (CtxWithCond e ctx) c 
                                                              case c' of
                                                                   EBool{} -> return ()
                                                                   _       -> error $ "Query condition does not evaluate to a constant in\n" ++ show e
-                                                             put kmap
+                                                             eput kmap
                                                              return $ exprBVal c') 
                                                  rows
                                 case rows' of
-                                     [row] -> do kmap <- get
-                                                 modify $ M.insert v row
+                                     [row] -> do kmap <- eget
+                                                 emodify $ M.insert v row
                                                  res <- evalExpr' (CtxWithBody e ctx) b
-                                                 put kmap
+                                                 eput kmap
                                                  return res
                                      []    -> maybe (error $ "query returned no rows in\n" ++ show e)
                                                     (\d' -> evalExpr' (CtxWithDef e ctx) d')
                                                     d
-                                     _     -> error $ "query returned multiple rows in\n" ++ show e ++ "\n" ++
+                                     _     -> error $ "query returned multiple rows in\n" ++ show e ++ ":\n" ++
                                                       (intercalate "\n" $ map show rows') 
         ETyped _ v _        -> evalExpr' (CtxTyped e ctx) v
         _                   -> error $ "Eval.evalExpr " ++ show e
@@ -161,10 +185,10 @@ match (E pat) (E e) =
          _                                  -> False
  
 
-assignTemplate :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> Expr -> StateT KMap IO ()
+assignTemplate :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> Expr -> EvalState ()
 assignTemplate ctx (E l) (E r) = 
     case (l, r) of
-         (EVar _ v,        _)                -> modify $ M.insert v $ E r
+         (EVar _ v,        _)                -> emodify $ M.insert v $ E r
          (EField _ e f,    _)                -> do E (EStruct _ c fs) <- evalExpr' (CtxField l ctx) e
                                                    let cons = getConstructor ?r c
                                                    case findIndex ((== f) . name) $ consArgs cons of 
@@ -177,7 +201,7 @@ assignTemplate ctx (E l) (E r) =
                                                                       $ zip ls rs
                                               | otherwise -> error $ "constructor mismatch at " ++ show (pos l) ++ 
                                                                      ": assigning value " ++ show r ++ "to " ++ show l
-         (EVarDecl _ v,    _)                -> modify $ M.insert v $ E r
+         (EVarDecl _ v,    _)                -> emodify $ M.insert v $ E r
          (EPHolder _,      _)                -> return ()
          (ETyped _ e _,    _)                -> assignTemplate (CtxTyped l ctx) e $ E r
          _                                   -> error $ "Eval.assignTemplate " ++ show l ++ " " ++ show r

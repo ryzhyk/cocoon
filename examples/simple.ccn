@@ -10,7 +10,7 @@ table LogicalPort( name      : port_id_t
                  , tag       : vlan_id_t
                  , primary key (name)
                  //, foreign key (switch_id)                 references LogicalSwitch(uuid)
-                 , foreign key (parent)                    references LogicalPort(name)
+                 //, foreign key (parent)                    references LogicalPort(name)
                  , unique (parent, tag) /* Siblings must have different tags */)
 
 view ParentPort( child_name    : port_id_t

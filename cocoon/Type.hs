@@ -35,7 +35,7 @@ import Data.List
 import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Graph.Inductive as G
---import {-# SOURCE #-} Builtins
+import {-# SOURCE #-} Builtins
 
 import Util
 import Expr
@@ -73,6 +73,8 @@ exprNodeType' :: Refine -> ECtx -> ExprNode (Maybe Type) -> Maybe Type
 exprNodeType' r ctx (EVar _ v)            = let (lvs, rvs) = ctxMVars r ctx in
                                             fromJust $ lookup v $ lvs ++ rvs 
 exprNodeType' _ _   (EPacket _)           = Just $ tUser packetTypeName
+exprNodeType' r ctx e@(EBuiltin _ f _)    = let bin = getBuiltin f
+                                            in Just $ (bfuncType bin) r ctx e
 exprNodeType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
 exprNodeType' r _   (EField _ e f)        = case e of
                                               Nothing -> Nothing
@@ -276,6 +278,7 @@ ctxExpectType _ (CtxCheck _)                       = Just tBool
 ctxExpectType _ (CtxRuleL rel _ i)                 = let args = relArgs rel in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxRuleR _ _)                     = Just tBool
+ctxExpectType _ (CtxBuiltin _ _ _)                 = Nothing -- TODO: add expectType hook to Builtins
 ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
 ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing

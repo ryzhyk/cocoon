@@ -234,6 +234,7 @@ mkNormalizedExpr' _    (EBinOp _ op (_,l') (_, r'))  = parens $
          ShiftL -> l' <+> pp "<<"  <+> r'
          _      -> error $ "SQL.mkNormalizedExpr EBinOp " ++ show op
 mkNormalizedExpr' _    (ETyped _  (_, e') _)         = e'
+mkNormalizedExpr' _    (EBuiltin _ _ _)              = error "not implemented: SQL.mkNormalizedExpr EBuiltin"
 mkNormalizedExpr' _    (EApply _ f as)               = pp f <+> (parens $ commaSep $ map snd as)
 mkNormalizedExpr' _    (EStruct _ c fs)              = 
     let TStruct _ cs = fromJust $ tdefType $ consType ?r c
@@ -387,8 +388,9 @@ mkSqlCol (e, t, True)  = pp "coalesce" <> (parens $ colName e <> comma <+> (mkVa
 readTable :: (?r::Refine) => PG.Connection -> Relation -> IO [(Int64, [Expr])]
 readTable pg rel@Relation{..} = do
     let q = "select to_json(" ++ relName ++ ") from " ++ relName
-    PG.fold_ pg (fromString q) [] (\_ (x::[JSON.Value]) -> mapM (\(JSON.Object val) -> do putStrLn $ show val
-                                                                                          return $ (parseRow rel val)) x )
+    PG.fold_ pg (fromString q) [] (\rows (x::[JSON.Value]) -> do rows' <- mapM (\(JSON.Object val) -> do putStrLn $ show val
+                                                                                                         return $ (parseRow rel val)) x
+                                                                 return $ rows ++ rows' )
 
 parseInt :: (Integral a) => JSON.Value -> a
 parseInt (JSON.Number n) = fromInteger $ coefficient n

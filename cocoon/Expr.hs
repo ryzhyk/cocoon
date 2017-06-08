@@ -74,6 +74,7 @@ exprFoldCtxM f ctx (E n) = exprFoldCtxM' f ctx n
 exprFoldCtxM' :: (Monad m) => (ECtx -> ExprNode b -> m b) -> ECtx -> ENode -> m b
 exprFoldCtxM' f ctx   (EVar p v)          = f ctx $ EVar p v
 exprFoldCtxM' f ctx   (EPacket p)         = f ctx $ EPacket p
+exprFoldCtxM' f ctx e@(EBuiltin p fun as) = f ctx =<< (liftM $ EBuiltin p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxBuiltin e ctx i) a) as)
 exprFoldCtxM' f ctx e@(EApply p fun as)   = f ctx =<< (liftM $ EApply p fun) (mapIdxM (\a i -> exprFoldCtxM f (CtxApply e ctx i) a) as)
 exprFoldCtxM' f ctx e@(EField p s fl)     = do s' <- exprFoldCtxM f (CtxField e ctx) s
                                                f ctx $ EField p s' fl
@@ -124,6 +125,7 @@ exprMapM :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
 exprMapM g e = case e of
                    EVar p v          -> return $ EVar p v
                    EPacket p         -> return $ EPacket p
+                   EBuiltin p f as   -> (liftM $ EBuiltin p f) $ mapM g as
                    EApply p f as     -> (liftM $ EApply p f) $ mapM g as
                    EField p s f      -> (liftM $ \s' -> EField p s' f) $ g s
                    ELocation p rl a  -> (liftM $ ELocation p rl) $ g a
@@ -181,6 +183,7 @@ exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
                         return $ case x of
                                      EVar _ _          -> x'
                                      EPacket _         -> x'
+                                     EBuiltin _ _ as   -> foldl' op x' as
                                      EApply _ _ as     -> foldl' op x' as
                                      EField _ s _      -> x' `op` s
                                      ELocation _ _ a   -> x' `op` a
@@ -338,6 +341,8 @@ expr2Statement :: Refine -> ECtx -> Expr -> State Int Expr
 expr2Statement r ctx e = exprFoldCtxM (expr2Statement' r) ctx e
 
 expr2Statement' :: Refine -> ECtx -> ENode -> State Int Expr
+expr2Statement' r ctx e@(EBuiltin _ f as)   = do (ps, as') <- (liftM unzip) $ mapIdxM (\a' i -> exprPrecompute r (CtxBuiltin e ctx i) a') as
+                                                 return $ exprSequence $ (catMaybes ps) ++ [eBuiltin f as']
 expr2Statement' r ctx e@(EApply _ f as)     = do (ps, as') <- (liftM unzip) $ mapIdxM (\a' i -> exprPrecompute r (CtxApply e ctx i) a') as
                                                  return $ exprSequence $ (catMaybes ps) ++ [eApply f as']
 expr2Statement' _ _     (EField _ e f)      = return $ exprModifyResult (\e' -> eField e' f) e

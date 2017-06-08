@@ -34,8 +34,7 @@ import Expr
 import Refine
 import Relation
 import SQL
---import Statement
---import Builtins
+import {-# SOURCE #-} Builtins
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
@@ -374,6 +373,8 @@ exprValidate1 :: (MonadError String me) => Refine -> ECtx -> ExprNode Expr -> me
 exprValidate1 r ctx (EVar p v)          = do _ <- checkVar p r ctx v
                                              return ()
 exprValidate1 r ctx (EPacket p)         = ctxCheckPkt p r ctx
+exprValidate1 r ctx e@(EBuiltin p f _)  = do fun <- checkBuiltin p f
+                                             (bfuncValidate fun) r ctx $ E e
 exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
                                                      $ "Number of arguments does not match function declaration"
@@ -496,6 +497,7 @@ ctxCheckSideEffects p r ctx =
     case ctx of 
          CtxRole _         -> return ()
          CtxFunc f _       -> when (funcPure f) complain
+         CtxBuiltin _ _ _  -> complain
          CtxApply _ _ _    -> complain
          CtxField _ _      -> complain
          CtxLocation _ _   -> complain

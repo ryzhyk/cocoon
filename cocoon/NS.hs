@@ -25,7 +25,7 @@ module NS(lookupType, checkType, getType,
           ctxMVars, ctxVars, ctxAllVars, 
           ctxRels,
           isLVar, 
-          --lookupBuiltin, checkBuiltin, getBuiltin,
+          lookupBuiltin, checkBuiltin, getBuiltin,
           packetTypeName) where
 
 import Data.List
@@ -39,7 +39,7 @@ import Pos
 import {-# SOURCE #-} Relation
 import {-# SOURCE #-} Expr
 import {-# SOURCE #-} Type
---import {-# SOURCE #-}Builtins
+import {-# SOURCE #-} Builtins
 
 packetTypeName = "Packet"
 
@@ -151,7 +151,8 @@ ctxMVars r ctx =
          CtxCheck rel         -> ([], map f2mf $ relArgs rel)
          CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
          CtxRuleR _ rl        -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
-         CtxApply _ _ _       -> ([], plvars ++ prvars) -- disallow assignments inside arguments, cause we care about correctness
+         CtxBuiltin _ _ _     -> ([], plvars ++ prvars) -- disallow assignments inside func & builtin args, cause we care about correctness
+         CtxApply _ _ _       -> ([], plvars ++ prvars)
          CtxField _ _         -> (plvars, prvars)
          CtxLocation _ _      -> ([], plvars ++ prvars)
          CtxStruct _ _ _      -> (plvars, prvars)
@@ -228,7 +229,7 @@ ctxRels r ctx =
     where (plrels, prrels) = ctxRels r $ ctxParent ctx
           --del t rels = filter ((/=t) . name) rels
 
-{-
+
 lookupBuiltin :: String -> Maybe Builtin
 lookupBuiltin n = find ((==n) . name) builtins
 
@@ -239,4 +240,4 @@ checkBuiltin p n = case lookupBuiltin n of
 
 getBuiltin :: String -> Builtin
 getBuiltin n = fromJust $ lookupBuiltin n
--}
+

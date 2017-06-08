@@ -144,7 +144,7 @@ expr2Assignments  _  _   e                  = error $"Z3Datalog.expr2Assignment 
 expr2Assignment :: [Var] -> Expr -> Assignment -> Assignment
 expr2Assignment []      _                                a = a
 expr2Assignment (f:fs)  (EBinOp And (EBinOp Eq _ val) e) a = expr2Assignment fs e (M.insert (name f) val a)
-expr2Assignment [f]     val                              a = M.insert (name f) val a
+expr2Assignment [f]     (EBinOp Eq _ val)                a = M.insert (name f) val a
 expr2Assignment fs      val                              _ = error $ "Z3Datalog.expr2Assignment " ++ show fs ++ " " ++ show val
 
 z3CloseSession :: Z3Session -> IO ()

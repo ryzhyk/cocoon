@@ -42,7 +42,7 @@ module Syntax( pktVar
              , ENode
              , Expr(..)
              , enode
-             , eVar, ePacket, eApply, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
+             , eVar, ePacket, eApply, eBuiltin, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork, eFor
              , eWith, eAny, ePHolder, eTyped, eRelPred
              , exprIsRelPred
@@ -421,6 +421,7 @@ instance Eq TypeDef where
 data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EPacket   {exprPos :: Pos}
                 | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
+                | EBuiltin  {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
                 | EField    {exprPos :: Pos, exprStruct :: e, exprField :: String}
                 | ELocation {exprPos :: Pos, exprRole :: String, exprKey :: e}
                 | EBool     {exprPos :: Pos, exprBVal :: Bool}
@@ -452,6 +453,7 @@ instance Eq e => Eq (ExprNode e) where
     (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
     (==) (EPacket _)              (EPacket _)                = True
     (==) (EApply _ f1 as1)        (EApply _ f2 as2)          = f1 == f2 && as1 == as2
+    (==) (EBuiltin _ f1 as1)      (EBuiltin _ f2 as2)        = f1 == f2 && as1 == as2
     (==) (EField _ s1 f1)         (EField _ s2 f2)           = s1 == s2 && f1 == f2
     (==) (ELocation _ r1 k1)      (ELocation _ r2 k2)        = r1 == r2 && k1 == k2
     (==) (EBool _ b1)             (EBool _ b2)               = b1 == b2
@@ -488,6 +490,7 @@ instance PP e => PP (ExprNode e) where
     pp (EVar _ v)          = pp v
     pp (EPacket _)         = pp pktVar
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EBuiltin _ f as)   = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
     pp (ELocation _ r k)   = pp r <> (brackets $ pp k)
     pp (EBool _ True)      = pp "true"
@@ -551,6 +554,7 @@ instance WithPos Expr where
 eVar v              = E $ EVar      nopos v
 ePacket             = E $ EPacket   nopos
 eApply f as         = E $ EApply    nopos f as
+eBuiltin f as       = E $ EBuiltin  nopos f as
 eField e f          = E $ EField    nopos e f
 eLocation r k       = E $ ELocation nopos r k
 eBool b             = E $ EBool     nopos b
@@ -619,6 +623,7 @@ data ECtx = CtxRefine
           | CtxRuleL     {ctxRel::Relation, ctxRule::Rule, ctxIdx::Int}
           | CtxRuleR     {ctxRel::Relation, ctxRule::Rule}
           | CtxApply     {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxBuiltin   {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
           | CtxField     {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxLocation  {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxStruct    {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}

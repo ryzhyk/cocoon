@@ -2,21 +2,16 @@
 
 module Builtins where
 
-import Text.PrettyPrint
 import Control.Monad.Except
 
 import Syntax
 import Name
-import Pos
-import qualified SMT.SMTSolver as SMT
+import {-# SOURCE #-} Eval
 
 data Builtin = Builtin { bfuncName        :: String
-                       , bfuncValidate    :: forall me . (MonadError String me) => Refine -> ECtx -> Pos -> [Expr] -> me ()
-                       , bfuncType        :: Refine -> ECtx -> [Expr] -> Type
-                       , bfuncPrintBoogie :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
-                       , bfuncPrintP4     :: Refine -> ECtx -> [Expr] -> [Doc] -> Doc
-                       , bfuncToSMT       :: [SMT.Expr] -> SMT.Expr
-                       , bfuncEval        :: [Expr] -> Expr
+                       , bfuncValidate    :: forall me . (MonadError String me) => Refine -> ECtx -> Expr -> me ()
+                       , bfuncType        :: Refine -> ECtx -> ExprNode (Maybe Type) -> Type
+                       , bfuncEval        :: Expr -> EvalState Expr
                        }
 
 instance WithName Builtin 

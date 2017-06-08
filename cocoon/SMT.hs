@@ -114,6 +114,7 @@ expr2SMT' ctx (EVarDecl _ _) | ctxInMatchPat ctx   = SMT.EBool True -- inside ma
 expr2SMT' _   (EVar _ v)                           = SMT.EVar v
 expr2SMT' _   (EPacket _)                          = SMT.EVar pktVar
 expr2SMT' _   (EApply _ f as)                      = SMT.EApply f $ map snd as
+expr2SMT' _   (EBuiltin _ _ _)                     = error $ "not implemented:  SMT.expr2SMT EBuiltin"
 expr2SMT' _   (EField _ (t,s) f)                   = let TStruct _ cs = typ' ?r t
                                                          cs' = structFieldConstructors cs f
                                                          es = map (\c -> (SMT.EIsInstance (name c) s, SMT.EField (name c) s f)) cs'
@@ -151,6 +152,7 @@ ctx2Field pref ctx                                   = error $ "SMT.ctx2Field " 
 exprFromSMT :: SMT.Expr -> Expr
 exprFromSMT (SMT.EBool b)      = eBool b
 exprFromSMT (SMT.EBit w i)     = eBit w i
+exprFromSMT (SMT.EInt i)       = eInt i
 exprFromSMT (SMT.EStruct n fs) = eStruct n $ map exprFromSMT fs
 exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
 

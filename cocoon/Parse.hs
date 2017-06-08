@@ -34,6 +34,8 @@ import Numeric
 import Syntax
 import Pos
 import Util
+import Builtins
+import Name
 
 reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#"]
 reservedNames = ["_",
@@ -306,6 +308,7 @@ term  =  elhs
      <|> term'
 term' = withPos $
          eapply
+     <|> ebuiltin
      <|> eloc
      <|> erelpred
      <|> estruct
@@ -325,7 +328,16 @@ term' = withPos $
      <|> eany
 
 eapply = eApply <$ isapply <*> funcIdent <*> (parens $ commaSep expr)
-    where isapply = try $ lookAhead $ funcIdent *> symbol "("
+    where isapply = try $ lookAhead $ do 
+                        f <- funcIdent
+                        when (elem f (map name builtins)) parserZero
+                        symbol "("
+ebuiltin = eBuiltin <$ isbuiltin <*> funcIdent <*> (parens $ commaSep expr)
+    where isbuiltin = try $ lookAhead $ do 
+                        f <- funcIdent
+                        when (notElem f (map name builtins)) parserZero
+                        symbol "("
+
 eloc = eLocation <$ isloc <*> roleIdent <*> (brackets expr)
     where isloc = try $ lookAhead $ roleIdent *> (brackets expr)
 ebool = eBool <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))

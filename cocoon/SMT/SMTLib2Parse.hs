@@ -167,6 +167,7 @@ parseAsn (n, e) = let t = varType $ fromJust $ find ((==n) . varName) $ smtVars 
 parseExpr :: (?q::SMTQuery) => Maybe Type -> SMTExpr -> Expr
 parseExpr _                 (ExpBool b)                  = EBool b
 parseExpr (Just (TBit w))   (ExpInt v)                   = EBit w v
+parseExpr _                 (ExpInt v)                   = EInt v
 parseExpr _                 (ExpApply ":var" [ExpInt i]) = EVar $ ":var" ++ show i
 parseExpr _                 (ExpApply "=" [e1, e2])      = EBinOp Eq (parseExpr Nothing e1) (parseExpr Nothing e2)
 parseExpr _                 (ExpApply "or" as)           = disj $ map (parseExpr $ Just TBool) as
@@ -197,4 +198,4 @@ parseExpr _                 (ExpApply n as) | isJust cons =
 --    where -- XXX: assume that comparisons are always between (integer) array indices
 --          SVal (UIntVal _ v1) = parseExpr (UInt Nothing 32) a1
 --          SVal (UIntVal _ v2) = parseExpr (UInt Nothing 32) a2
-parseExpr t e = error $ "storeFromExp " ++ show t ++ " " ++ show e
+parseExpr t e = error $ "SMTLib2Parse.parseExpr " ++ show t ++ " " ++ show e

@@ -124,7 +124,7 @@ execExpr e s@ControllerConnected{..} =
     case exprValidate ctlRefine CtxRefine e of
          Left er -> error er
          Right _ -> do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
-                       return (s, show val)
+                       return (s, intercalate ",\n" $ map show val)
 execExpr _ _ = error "execExpr called in disconnected state"
                     
 
