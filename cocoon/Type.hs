@@ -81,8 +81,8 @@ exprNodeType' r _   (EField _ e f)        = case e of
 exprNodeType' _ _   (ELocation _ _ _)     = Just tLocation
 exprNodeType' _ _   (EBool _ _)           = Just tBool
 exprNodeType' r ctx (EInt _ _)            = case ctxExpectType r ctx of
-                                             t@(Just (TBit _ _)) -> t
-                                             _                   -> Just tInt
+                                                 t@(Just (TBit _ _)) -> t
+                                                 _                   -> Just tInt
 exprNodeType' _ _   (EString _ _)         = Just tString
 exprNodeType' _ _   (EBit _ w _)          = Just $ tBit w
 exprNodeType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c
@@ -264,6 +264,7 @@ typeEnumerate r t =
 
 -- Infer expected type from context
 ctxExpectType :: Refine -> ECtx -> Maybe Type
+ctxExpectType _ CtxRefine                          = Nothing
 ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
 ctxExpectType _ (CtxPktGuard _)                    = Just tBool
 ctxExpectType _ (CtxRole _)                        = Just tSink

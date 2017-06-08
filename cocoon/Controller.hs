@@ -32,6 +32,7 @@ import System.IO
 import qualified Control.Concurrent.Lock as L
 import Data.IORef
 import Text.Parsec
+import Eval
 
 import Util
 import Syntax
