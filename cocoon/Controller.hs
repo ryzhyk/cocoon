@@ -20,6 +20,7 @@ module Controller (controllerStart) where
 
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 import Control.Exception
@@ -119,11 +120,13 @@ execCommand ("show":as)          s       = showcmd as s
 execCommand _                    _       = error "invalid command"
 
 execExpr :: Expr -> Action
-execExpr e s = do
-    case exprValidate (ctlRefine s) CtxRefine e of
+execExpr e s@ControllerConnected{..} =
+    case exprValidate ctlRefine CtxRefine e of
          Left er -> error er
-         Right _ -> return (s, "Evaluating expression " ++ show e)
-                --evalExpr (ctlRefine state) CtxRefine e
+         Right _ -> do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
+                       return (s, show val)
+execExpr _ _ = error "execExpr called in disconnected state"
+                    
 
 showcmd :: [String] -> Action
 showcmd as s@ControllerConnected{..} = do

@@ -713,7 +713,7 @@ ctxIsRole CtxRole{} = True
 ctxIsRole _         = False
 
 ctxInRole :: ECtx -> Bool
-ctxInRole ctx = any ctxInRole $ ctxAncestors ctx
+ctxInRole ctx = any ctxIsRole $ ctxAncestors ctx
 
 ctxIsTyped :: ECtx -> Bool
 ctxIsTyped CtxTyped{} = True

@@ -17,8 +17,7 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
 module Eval ( KMap
-            , evalExpr
-            , evalExpr') where
+            , evalExpr) where
 
 import qualified Data.Map as M
 import Data.Maybe
@@ -34,13 +33,15 @@ import Type
 import Name
 import NS
 import Util
+import Pos
 
 -- Key map: maps keys into their values
 type KMap = M.Map String Expr
 
-evalExpr :: (?r::Refine) => ECtx -> KMap -> DL.Session -> Expr -> IO (Expr, KMap)
-evalExpr ctx kmap dl e = let ?dl = dl in 
-                         runStateT (evalExpr' ctx e) kmap
+evalExpr :: Refine -> ECtx -> KMap -> DL.Session -> Expr -> IO (Expr, KMap)
+evalExpr r ctx kmap dl e = let ?dl = dl      
+                               ?r = r 
+                           in runStateT (evalExpr' ctx e) kmap
 
 evalExpr' :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> StateT KMap IO Expr
 evalExpr' ctx (E e) = evalExpr'' ctx e
@@ -61,7 +62,8 @@ evalExpr'' ctx e = do
         EField _ s f    -> do s' <- evalExpr' (CtxField e ctx) s
                               case enode s' of
                                    EStruct _ c fs -> do let cons = getConstructor ?r c
-                                                            fidx = fromJust $ findIndex ((==f) . name) $ consArgs cons
+                                                            fidx = maybe (error $ "field " ++ f ++ " does not exist in expression " ++ show e ++ " at " ++ show (pos e)) id
+                                                                         $ findIndex ((==f) . name) $ consArgs cons
                                                         return $ fs !! fidx
                                    _              -> return $ eField s' f
         EBool{}         -> return $ E e
@@ -81,7 +83,7 @@ evalExpr'' ctx e = do
                               case findIndex (match m' . fst) cs of
                                    Just i      -> do let (c, v) = cs !! i
                                                      kmap <- get
-                                                     assignTemplate c m'
+                                                     assignTemplate (CtxMatchPat e ctx i) c m'
                                                      v' <- evalExpr' (CtxMatchVal e ctx i) v
                                                      put kmap
                                                      return v'
@@ -100,7 +102,7 @@ evalExpr'' ctx e = do
                                                           el
                                    _             -> error $ "Condition does not evaluate to a constant in\n" ++ show e
         ESet _ l r      -> do r' <- evalExpr' (CtxSetR e ctx) r
-                              assignTemplate l r'
+                              assignTemplate (CtxSetL e ctx) l r'
                               return $ eTuple []
         EBinOp _ op l r -> do l' <- evalExpr' (CtxBinOpL e ctx) l
                               r' <- evalExpr' (CtxBinOpR e ctx) r
@@ -148,13 +150,40 @@ evalExpr'' ctx e = do
         _                   -> error $ "Eval.evalExpr " ++ show e
 
 match :: Expr -> Expr -> Bool
-match = undefined
+match (E pat) (E e) = 
+    case (pat, e) of
+         (_,               EVar _ _)        -> True
+         (ETuple _ ps,     ETuple _ es)     -> all (uncurry match) $ zip ps es
+         (EStruct _ pc ps, EStruct _ pe es) -> pc == pe && (all (uncurry match) $ zip ps es)
+         (_,               EVarDecl _ _)    -> True
+         (_,               EPHolder _)      -> True
+         (_,               ETyped _ e' _)   -> match (E pat) e'
+         _                                  -> False
+ 
+
+assignTemplate :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> Expr -> StateT KMap IO ()
+assignTemplate ctx (E l) (E r) = 
+    case (l, r) of
+         (EVar _ v,        _)                -> modify $ M.insert v $ E r
+         (EField _ e f,    _)                -> do E (EStruct _ c fs) <- evalExpr' (CtxField l ctx) e
+                                                   let cons = getConstructor ?r c
+                                                   case findIndex ((== f) . name) $ consArgs cons of 
+                                                        Nothing -> error $ "field " ++ f ++ " does not exist in " ++ show e ++ " at " ++ show (pos e)
+                                                        Just i  -> let e' = eStruct c $ (take i fs) ++ (E r : (drop (i+1) fs)) in
+                                                                   assignTemplate (CtxField l ctx) e e'
+         (ETuple _ ls,     ETuple _ rs)      -> mapIdxM_ (\(l', r') i -> assignTemplate (CtxTuple l ctx i) l' r') 
+                                                         $ zip ls rs 
+         (EStruct _ lc ls, EStruct _ rc rs)   | lc == rc  -> mapIdxM_ (\(l',r') i -> assignTemplate (CtxStruct l ctx i) l' r') 
+                                                                      $ zip ls rs
+                                              | otherwise -> error $ "constructor mismatch at " ++ show (pos l) ++ 
+                                                                     ": assigning value " ++ show r ++ "to " ++ show l
+         (EVarDecl _ v,    _)                -> modify $ M.insert v $ E r
+         (EPHolder _,      _)                -> return ()
+         (ETyped _ e _,    _)                -> assignTemplate (CtxTyped l ctx) e $ E r
+         _                                   -> error $ "Eval.assignTemplate " ++ show l ++ " " ++ show r
 
 assignment2Row :: Relation -> SMT.Assignment -> Expr
 assignment2Row Relation{..} asn = eStruct relName $ map (\f -> SMT.exprFromSMT $ asn M.! (name f)) relArgs
-
-assignTemplate :: Expr -> Expr -> StateT KMap IO ()
-assignTemplate = undefined
 
 evalBinOp :: Expr -> Expr
 evalBinOp e@(E (EBinOp _ op l r)) = 
