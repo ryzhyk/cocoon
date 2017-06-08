@@ -120,7 +120,7 @@ z3RemoveGroundRule z3 rel i = z3send z3 $ parens $ pp "rule" <+> (parens $ ppDis
 
 z3CheckRelationSAT :: Z3Session -> String -> IO Bool
 z3CheckRelationSAT z3 rel = do
-    res <- z3req z3 $ parens $ pp "query" <+> ppRelName rel <+> pp ":print-certificate false"
+    res <- z3req z3 $ parens $ pp "query" <+> ppRelName rel <+> pp ":print-answer false"
     case res of
          "sat"    -> return True
          "unsat"  -> return False
@@ -132,7 +132,7 @@ z3EnumRelation z3 rel = do
                     case res of
                          True  -> let ?q = (z3q z3) in expr2Assignments z3 rel <$> exprParser Nothing
                          False -> return []
-    z3call z3 (parens $ pp "query" <+> ppRelName rel <+> pp ":print-certificate true") parser
+    z3call z3 (parens $ pp "query" <+> ppRelName rel <+> pp ":print-answer true") parser
 
 expr2Assignments :: Z3Session -> String -> Expr -> [Assignment]
 expr2Assignments _  _   (EBool False)      = []
