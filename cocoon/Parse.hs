@@ -431,7 +431,7 @@ mkLit (Just w) v | w == 0              = fail "Unsigned literals must have width
                  | msb v < w           = return $ eBit w v
                  | otherwise           = fail "Value exceeds specified width"
 
-etable = [[postf $ choice [postSlice, postApply, postField, postType]]
+etable = [[postf $ choice [postSlice, postApply, postBuiltin, postField, postType]]
          ,[pref  $ choice [prefix "not" Not]]
          ,[binary "%" Mod AssocLeft]
          ,[binary "+" Plus AssocLeft,
@@ -457,13 +457,25 @@ pref  p = Prefix  . chainl1 p $ return       (.)
 postf p = Postfix . chainl1 p $ return (flip (.))
 postField = (\f end e -> E $ EField (fst $ pos e, end) e f) <$> field <*> getPosition
 postApply = (\(f, args) end e -> E $ EApply (fst $ pos e, end) f (e:args)) <$> dotcall <*> getPosition
+postBuiltin = (\(f, args) end e -> E $ EBuiltin (fst $ pos e, end) f (e:args)) <$> dotbuiltin <*> getPosition
 postType = (\t end e -> E $ ETyped (fst $ pos e, end) e t) <$> etype <*> getPosition
 postSlice  = try $ (\(h,l) end e -> E $ ESlice (fst $ pos e, end) e h l) <$> slice <*> getPosition
 slice = brackets $ (\h l -> (fromInteger h, fromInteger l)) <$> natural <*> (colon *> natural)
 
 field = dot *> varIdent
 dotcall = (,) <$ isapply <*> (dot *> funcIdent) <*> (parens $ commaSep expr)
-    where isapply = try $ lookAhead $ dot *> funcIdent *> symbol "("
+    where isapply = try $ lookAhead $ do 
+                        _ <- dot 
+                        f <- funcIdent
+                        when (elem f (map name builtins)) parserZero
+                        symbol "("
+
+dotbuiltin = (,) <$ isbuiltin <*> (dot *> funcIdent) <*> (parens $ commaSep expr)
+    where isbuiltin = try $ lookAhead $ do 
+                        _ <- dot 
+                        f <- funcIdent
+                        when (notElem f (map name builtins)) parserZero
+                        symbol "("
 
 etype = reservedOp ":" *> typeSpecSimple
 

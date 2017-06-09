@@ -21,3 +21,5 @@ view ParentPort( child_name    : port_id_t
 
 ParentPort(cn: port_id_t, cs: uuid_t, pn, ps) :- LogicalPort(cn, cs, pn, _),
                                                  LogicalPort(pn, ps, pp, _)
+
+function test(x:bool): bool = x
