@@ -227,10 +227,9 @@ instance WithName Relation where
 
 instance PP Relation where
     pp Relation{..} = (maybe empty pp relAnnotation) $$
-                      if' relMutable (pp "state") empty <+>
-                      (maybe (pp "table") (\_ -> pp "view") relDef) <+> pp relName <+> 
-                      (parens $ hsep $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <+>
-                      (maybe empty (\_ -> pp "=") relDef) $$
+                      (if' relMutable (pp "state") empty <+>
+                       (maybe (pp "table") (\_ -> pp "view") relDef) <+> pp relName <+> pp "(") $$ 
+                      (nest' $ (vcat $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <> pp ")") $$
                       (maybe empty (vcat . map (ppRule relName)) relDef)
 
 instance Show Relation where
