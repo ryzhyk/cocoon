@@ -77,14 +77,15 @@ exprNodeType' r ctx e@(EBuiltin _ f _)    = let bin = getBuiltin f
                                             in Just $ (bfuncType bin) r ctx e
 exprNodeType' r _   (EApply _ f _)        = Just $ funcType $ getFunc r f
 exprNodeType' r _   (EField _ e f)        = case e of
-                                              Nothing -> Nothing
-                                              Just e' -> let TStruct _ cs = typ' r e' in
-                                                         fmap fieldType $ find ((==f) . name) $ concatMap consArgs cs
+                                                 Nothing -> Nothing
+                                                 Just e' -> let TStruct _ cs = typ' r e' in
+                                                            fmap fieldType $ find ((==f) . name) $ concatMap consArgs cs
 exprNodeType' _ _   (ELocation _ _ _)     = Just tLocation
 exprNodeType' _ _   (EBool _ _)           = Just tBool
-exprNodeType' r ctx (EInt _ _)            = case ctxExpectType r ctx of
+exprNodeType' r ctx (EInt _ _)            = case fmap (typ' r) $ ctxExpectType r ctx of
                                                  t@(Just (TBit _ _)) -> t
-                                                 _                   -> Just tInt
+                                                 t@(Just (TInt _))   -> t
+                                                 _                   -> Nothing
 exprNodeType' _ _   (EString _ _)         = Just tString
 exprNodeType' _ _   (EBit _ w _)          = Just $ tBit w
 exprNodeType' r _   (EStruct _ c _)       = Just $ tUser $ name $ consType r c

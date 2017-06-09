@@ -130,14 +130,14 @@ execExpr _ _ = error "execExpr called in disconnected state"
 
 showcmd :: [String] -> Action
 showcmd as s@ControllerConnected{..} = do
-    let res = case as of
-                   ["tables"]    -> intercalate "\n" $ map name tables
-                   ["views"]     -> intercalate "\n" $ map name views
-                   ["relations"] -> intercalate "\n" $ map name rels
-                   [t]           -> maybe (error $ "unknown relation " ++ t)
-                                          show
-                                          (find ((==t) . name) rels)
-                   _             -> error "unknown command"
+    res <- case as of
+                ["tables"]    -> return $ intercalate "\n" $ map name tables
+                ["views"]     -> return $ intercalate "\n" $ map name views
+                ["relations"] -> return $ intercalate "\n" $ map name rels
+                [t]           -> maybe (error $ "unknown relation " ++ t)
+                                       (return . show)
+                                       (find ((==t) . name) rels)
+                _             -> error "unknown command"
     return (s, res)
     where 
     rels = refineRels ctlRefine
@@ -221,9 +221,6 @@ readDB = mapM_ (\rel -> do rows <- SQL.readTable (ctlDB ?s) rel
 
 
 -- :validate
---
---role syntax, sans side effects, packets, plus for loops
---interpreter
 --
 --insert relname (<val1>, <val2>)
 --the (p in <relation> | <cond>) p

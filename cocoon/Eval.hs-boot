@@ -6,7 +6,10 @@ import Control.Monad.State.Strict
 import Syntax
 import qualified SMT.Datalog as DL
 
-type KMap = M.Map String Expr
+type MENode = Maybe (ExprNode MExpr)
+newtype MExpr = ME MENode
+
+type KMap = M.Map String MExpr
 type EvalState a = StateT (KMap, [Expr]) IO a
 
 eget :: EvalState KMap

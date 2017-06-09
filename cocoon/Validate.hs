@@ -365,7 +365,7 @@ exprTraverseTypeME r = exprTraverseCtxWithM (\ctx e -> do
                             Just t' -> assertR r (matchType' r t t') (pos e) 
                                                $ "Couldn't match expected type " ++ show t' ++ " with actual type " ++ show t {-++ " (context: " ++ show ctx ++ ")"-}
                        return t
-         Nothing -> error $ "Expression " ++ show e ++ " has unknown type") 
+         Nothing -> error $ "Expression " ++ show e ++ " has unknown type in " ++ show ctx) 
 
 -- This function does not perform type checking: just checks that all functions and
 -- variables are defined; the number of arguments matches declarations, etc.

@@ -534,7 +534,7 @@ instance PP e => Show (ExprNode e) where
 
 type ENode = ExprNode Expr
 
-newtype Expr = E (ExprNode Expr)
+newtype Expr = E ENode
 enode :: Expr -> ExprNode Expr
 enode (E n) = n
 

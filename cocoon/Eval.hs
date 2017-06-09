@@ -17,6 +17,8 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams, RecordWildCards #-}
 
 module Eval ( KMap
+            , MENode
+            , MExpr(..)
             , EvalState
             , eget
             , eput
@@ -29,7 +31,9 @@ import Data.Maybe
 import Data.Bits 
 import Data.List
 import Control.Monad.State.Strict
+import Text.PrettyPrint
 
+import Expr
 import qualified SMT           as SMT
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.Datalog   as DL
@@ -39,10 +43,30 @@ import Name
 import NS
 import Util
 import Pos
+import PP
 import {-# SOURCE #-} Builtins
 
+type MENode = Maybe (ExprNode MExpr)
+
+newtype MExpr = ME MENode
+
+instance PP MExpr where
+    pp (ME n) = pp n
+
+instance Show MExpr where
+    show = render . pp
+
+meField  s f   = ME $ Just $ EField  nopos s f
+meBit    w v   = ME $ Just $ EBit    nopos w v
+meBool   b     = ME $ Just $ EBool   nopos b
+meSlice  e h l = ME $ Just $ ESlice  nopos e h l
+meTuple  vs    = ME $ Just $ ETuple  nopos vs
+meStruct c fs  = ME $ Just $ EStruct nopos c fs
+meUnOp   op e  = ME $ Just $ EUnOp   nopos op e
+meNot          = meUnOp Not
+
 -- Key map: maps keys into their values
-type KMap = M.Map String Expr
+type KMap = M.Map String MExpr
 
 type EvalState a = StateT (KMap, [Expr]) IO a
 
@@ -62,12 +86,17 @@ evalExpr :: Refine -> ECtx -> KMap -> DL.Session -> Expr -> IO ([Expr], KMap)
 evalExpr r ctx kmap dl e = do let ?dl = dl      
                                   ?r = r 
                               (res, (kmap', ys)) <- runStateT (evalExpr' ctx e) (kmap, [])
-                              return (ys ++ [res], kmap')
+                              res' <- mexpr2Expr res
+                              return (ys ++ [res'], kmap')
 
-evalExpr' :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> EvalState Expr
+evalExpr' :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> EvalState MExpr
 evalExpr' ctx (E e) = evalExpr'' ctx e
 
-evalExpr'' :: (?r::Refine, ?dl::DL.Session) => ECtx -> ENode -> EvalState Expr
+-- "strict" version -- requires expession to be fully assigned
+evalExprS :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> EvalState Expr
+evalExprS ctx e = evalExpr' ctx e >>= (lift . mexpr2Expr)
+
+evalExpr'' :: (?r::Refine, ?dl::DL.Session) => ECtx -> ENode -> EvalState MExpr
 evalExpr'' ctx e = do
     case e of
         EVar _ v        -> (liftM (M.! v)) eget
@@ -81,78 +110,81 @@ evalExpr'' ctx e = do
                               eput kmap
                               return v
         EBuiltin _ f as -> do let bin = getBuiltin f
-                              as' <- mapIdxM (\a i -> evalExpr' (CtxBuiltin e ctx i) a) as
-                              (bfuncEval bin) $ eBuiltin f as'
-        EField _ s f    -> do s' <- evalExpr' (CtxField e ctx) s
-                              case enode s' of
+                              as' <- mapIdxM (\a i -> evalExprS (CtxBuiltin e ctx i) a) as
+                              (liftM expr2MExpr) $ (bfuncEval bin) $ eBuiltin f as'
+        EField _ s f    -> do ME s' <- evalExpr' (CtxField e ctx) s
+                              when (isNothing s') $ error $ show s ++ " has not been assigned at " ++ show (pos e)
+                              case fromJust s' of
                                    EStruct _ c fs -> do let cons = getConstructor ?r c
-                                                            fidx = maybe (error $ "field " ++ f ++ " does not exist in expression " ++ show e ++ " at " ++ show (pos e)) id
+                                                        fidx <- maybe (error $ "field " ++ f ++ " does not exist in expression " ++ show e ++ " at " ++ show (pos e)) return
                                                                          $ findIndex ((==f) . name) $ consArgs cons
                                                         return $ fs !! fidx
-                                   _              -> return $ eField s' f
-        EBool{}         -> return $ E e
+                                   _              -> return $ meField (ME s') f
+        EBool{}         -> return $ expr2MExpr $ E e
         EInt{}          -> return $ case exprType ?r ctx (E e) of
-                                         TInt _   -> E e
-                                         TBit _ w -> eBit w (exprIVal e)
+                                         TInt _   -> expr2MExpr $ E e
+                                         TBit _ w -> meBit w (exprIVal e)
                                          _        -> error $ "EVal.evalExpr EInt " ++ show e
-        EString{}       -> return $ E e
-        EBit{}          -> return $ E e
-        EStruct _ c fs  -> liftM (eStruct c) $ mapIdxM (\f i -> evalExpr' (CtxStruct e ctx i) f) fs
-        ETuple _ fs     -> liftM eTuple $ mapIdxM (\f i -> evalExpr' (CtxTuple e ctx i) f) fs
-        ESlice _ op h l -> do op' <- evalExpr' (CtxSlice e ctx) op
+        EString{}       -> return $ expr2MExpr $ E e
+        EBit{}          -> return $ expr2MExpr $ E e
+        EStruct _ c fs  -> liftM (meStruct c) $ mapIdxM (\f i -> evalExpr' (CtxStruct e ctx i) f) fs
+        ETuple _ fs     -> liftM meTuple $ mapIdxM (\f i -> evalExpr' (CtxTuple e ctx i) f) fs
+        ESlice _ op h l -> do op' <- evalExprS (CtxSlice e ctx) op
                               return $ case enode op' of
-                                            EBit _ w v -> eBit w $ bitSlice v h l
-                                            _          -> eSlice op' h l
-        EMatch _ m cs   -> do m' <- evalExpr' (CtxMatchExpr e ctx) m
+                                            EBit _ w v -> meBit w $ bitSlice v h l
+                                            _          -> meSlice (expr2MExpr op') h l
+        EMatch _ m cs   -> do m' <- evalExprS (CtxMatchExpr e ctx) m
                               case findIndex (match m' . fst) cs of
                                    Just i      -> do let (c, v) = cs !! i
                                                      kmap <- eget
-                                                     assignTemplate (CtxMatchPat e ctx i) c m'
+                                                     assignTemplate (CtxMatchPat e ctx i) c $ expr2MExpr m'
                                                      v' <- evalExpr' (CtxMatchVal e ctx i) v
                                                      eput kmap
                                                      return v'
                                    Nothing     -> error $ "No match found in\n" ++ show e ++ 
                                                           "\nwhere match expression evaluates to " ++ show m'
-        EVarDecl _ v    -> do let v' = error $ "variable " ++ v ++ " has undefined value"
+        EVarDecl _ v    -> do let v' = emptyVal $ exprType ?r ctx $ E e
                               emodify $ M.insert v v'
                               return v'
         ESeq _ e1 e2    -> do _ <- evalExpr' (CtxSeq1 e ctx) e1
                               evalExpr' (CtxSeq2 e ctx) e2
-        EITE _ c t el   -> do E c' <- evalExpr' (CtxITEIf e ctx) c
+        EITE _ c t el   -> do E c' <- evalExprS (CtxITEIf e ctx) c
                               case c' of
                                    EBool _ True  -> evalExpr' (CtxITEThen e ctx) t
-                                   EBool _ False -> maybe (return $ eTuple [])
+                                   EBool _ False -> maybe (return $ meTuple [])
                                                           (evalExpr' (CtxITEElse e ctx))
                                                           el
                                    _             -> error $ "Condition does not evaluate to a constant in\n" ++ show e
         ESet _ l r      -> do r' <- evalExpr' (CtxSetR e ctx) r
                               assignTemplate (CtxSetL e ctx) l r'
-                              return $ eTuple []
-        EBinOp _ op l r -> do l' <- evalExpr' (CtxBinOpL e ctx) l
-                              r' <- evalExpr' (CtxBinOpR e ctx) r
-                              return $ evalBinOp $ eBinOp op l' r'
-        EUnOp  _ Not a -> do E a' <- evalExpr' (CtxUnOp e ctx) a
+                              return $ meTuple []
+        EBinOp _ op l r -> do l' <- evalExprS (CtxBinOpL e ctx) l
+                              r' <- evalExprS (CtxBinOpR e ctx) r
+                              return $ expr2MExpr $ evalBinOp $ eBinOp op l' r'
+        EUnOp  _ Not a -> do E a' <- evalExprS (CtxUnOp e ctx) a
                              return $ case a' of
-                                           EBool _ v -> eBool $ not v
-                                           _         -> eNot $ E a'
+                                           EBool _ v -> meBool $ not v
+                                           _         -> meNot $ expr2MExpr $ E a'
         EFor _ v t c b -> do let rel = getRelation ?r t
                              rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
                              mapM_ (\row -> do kmap <- eget
-                                               emodify $ M.insert v row
-                                               E c' <- evalExpr' (CtxForCond e ctx) c 
+                                               emodify $ M.insert v $ expr2MExpr row
+                                               lift $ putStrLn $ "row: " ++ show row
+                                               E c' <- evalExprS (CtxForCond e ctx) c
+                                               lift $ putStrLn $ "c': " ++ show c'
                                                case c' of
                                                     EBool{} -> return ()
-                                                    _       -> error $ "Query condition does not evaluate to a constant in\n" ++ show e
+                                                    _       -> error $ "Query condition does not evaluate to a constant in\n" ++ show e ++ "\nrow: " ++ show row ++ " c': " ++ show c' 
                                                when (exprBVal c') $ do _ <- evalExpr' (CtxForBody e ctx) b
                                                                        return ()
                                                eput kmap)
                                    rows
-                             return $ eTuple []
+                             return $ meTuple []
         EWith _ v t c b d -> do let rel = getRelation ?r t
                                 rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
                                 rows' <- filterM (\row -> do kmap <- eget
-                                                             emodify $ M.insert v row
-                                                             E c' <- evalExpr' (CtxWithCond e ctx) c 
+                                                             emodify $ M.insert v $ expr2MExpr row
+                                                             E c' <- evalExprS (CtxWithCond e ctx) c
                                                              case c' of
                                                                   EBool{} -> return ()
                                                                   _       -> error $ "Query condition does not evaluate to a constant in\n" ++ show e
@@ -161,7 +193,7 @@ evalExpr'' ctx e = do
                                                  rows
                                 case rows' of
                                      [row] -> do kmap <- eget
-                                                 emodify $ M.insert v row
+                                                 emodify $ M.insert v $ expr2MExpr row
                                                  res <- evalExpr' (CtxWithBody e ctx) b
                                                  eput kmap
                                                  return res
@@ -172,6 +204,21 @@ evalExpr'' ctx e = do
                                                       (intercalate "\n" $ map show rows') 
         ETyped _ v _        -> evalExpr' (CtxTyped e ctx) v
         _                   -> error $ "Eval.evalExpr " ++ show e
+
+emptyVal :: (?r::Refine) => Type -> MExpr
+emptyVal t = emptyVal' $ typ' ?r t
+
+emptyVal' :: Type -> MExpr
+emptyVal' (TStruct _ [c]) = meStruct (name c) $ map (\_ -> ME Nothing) $ consArgs c
+emptyVal' (TTuple _ as)   = meTuple $ map (\_ -> ME Nothing) as
+emptyVal' _               = ME Nothing
+
+mexpr2Expr :: MExpr -> IO Expr
+mexpr2Expr (ME Nothing)  = error "not assigned"
+mexpr2Expr (ME (Just e)) = liftM E $ exprMapM mexpr2Expr e
+
+expr2MExpr :: Expr -> MExpr
+expr2MExpr = exprFold (\e -> ME $ Just e)
 
 match :: Expr -> Expr -> Bool
 match (E pat) (E e) = 
@@ -185,25 +232,29 @@ match (E pat) (E e) =
          _                                  -> False
  
 
-assignTemplate :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> Expr -> EvalState ()
-assignTemplate ctx (E l) (E r) = 
-    case (l, r) of
-         (EVar _ v,        _)                -> emodify $ M.insert v $ E r
-         (EField _ e f,    _)                -> do E (EStruct _ c fs) <- evalExpr' (CtxField l ctx) e
+assignTemplate :: (?r::Refine, ?dl::DL.Session) => ECtx -> Expr -> MExpr -> EvalState ()
+assignTemplate ctx (E l) r@(ME mr) = 
+    case (l, mr) of
+         (EVar _ v,        _)                -> emodify $ M.insert v r
+         (EField _ e f,    _)                -> do ME me <- evalExpr' (CtxField l ctx) e
+                                                   when (isNothing me) $ error $ show e ++ " has not been assigned at " ++ show (pos e)
+                                                   let Just (EStruct _ c fs) = me
                                                    let cons = getConstructor ?r c
                                                    case findIndex ((== f) . name) $ consArgs cons of 
                                                         Nothing -> error $ "field " ++ f ++ " does not exist in " ++ show e ++ " at " ++ show (pos e)
-                                                        Just i  -> let e' = eStruct c $ (take i fs) ++ (E r : (drop (i+1) fs)) in
+                                                        Just i  -> let e' = meStruct c $ (take i fs) ++ (r : (drop (i+1) fs)) in
                                                                    assignTemplate (CtxField l ctx) e e'
-         (ETuple _ ls,     ETuple _ rs)      -> mapIdxM_ (\(l', r') i -> assignTemplate (CtxTuple l ctx i) l' r') 
+         (ETuple _ _,     Nothing)           -> error $ "right-hand side expression has not been assigned at " ++ show (pos l)
+         (ETuple _ ls,    Just (ETuple _ rs))-> mapIdxM_ (\(l', r') i -> assignTemplate (CtxTuple l ctx i) l' r') 
                                                          $ zip ls rs 
-         (EStruct _ lc ls, EStruct _ rc rs)   | lc == rc  -> mapIdxM_ (\(l',r') i -> assignTemplate (CtxStruct l ctx i) l' r') 
-                                                                      $ zip ls rs
-                                              | otherwise -> error $ "constructor mismatch at " ++ show (pos l) ++ 
-                                                                     ": assigning value " ++ show r ++ "to " ++ show l
-         (EVarDecl _ v,    _)                -> emodify $ M.insert v $ E r
+         (EStruct _ _ _,   Nothing)          -> error $ "right-hand side expression has not been assigned at " ++ show (pos l)
+         (EStruct _ lc ls, Just (EStruct _ rc rs)) | lc == rc  -> mapIdxM_ (\(l',r') i -> assignTemplate (CtxStruct l ctx i) l' r') 
+                                                                           $ zip ls rs
+                                                   | otherwise -> error $ "constructor mismatch at " ++ show (pos l) ++ 
+                                                                          ": assigning " ++ rc ++ " to " ++ lc
+         (EVarDecl _ v,    _)                -> emodify $ M.insert v r
          (EPHolder _,      _)                -> return ()
-         (ETyped _ e _,    _)                -> assignTemplate (CtxTyped l ctx) e $ E r
+         (ETyped _ e _,    _)                -> assignTemplate (CtxTyped l ctx) e r
          _                                   -> error $ "Eval.assignTemplate " ++ show l ++ " " ++ show r
 
 assignment2Row :: Relation -> SMT.Assignment -> Expr
@@ -247,6 +298,32 @@ evalBinOp e@(E (EBinOp _ op l r)) =
                                             Or   -> l
                                             Impl -> eNot l
                                             _    -> error $ "Eval.evalBinOp " ++ show e
+         (EBit _ w v1, EInt _ v2)     -> case op of
+                                            Eq     -> eBool (v1 == v2)
+                                            Neq    -> eBool (v1 /= v2)
+                                            Lt     -> eBool (v1 < v2)
+                                            Gt     -> eBool (v1 > v2)
+                                            Lte    -> eBool (v1 <= v2)
+                                            Gte    -> eBool (v1 >= v2)
+                                            Plus   -> eBit  w ((v1 + v2) `mod` (1 `shiftL` w))
+                                            Minus  -> eBit  w ((v1 - v2) `mod` (1 `shiftL` w))
+                                            ShiftR -> eBit  w (v1 `shiftR` fromInteger(v2))
+                                            ShiftL -> eBit  w ((v1 `shiftL` fromInteger(v2)) `mod` (1 `shiftL` w))
+                                            Mod    -> eBit  w (v1 `mod` v2)
+                                            _      -> error $ "Eval.evalBinOp " ++ show e
+         (EInt _ v1, EBit _ w v2)     -> case op of
+                                            Eq     -> eBool (v1 == v2)
+                                            Neq    -> eBool (v1 /= v2)
+                                            Lt     -> eBool (v1 < v2)
+                                            Gt     -> eBool (v1 > v2)
+                                            Lte    -> eBool (v1 <= v2)
+                                            Gte    -> eBool (v1 >= v2)
+                                            Plus   -> eBit  w ((v1 + v2) `mod` (1 `shiftL` w))
+                                            Minus  -> eBit  w ((v1 - v2) `mod` (1 `shiftL` w))
+                                            ShiftR -> eInt  (v1 `shiftR` fromInteger(v2))
+                                            ShiftL -> eInt  (v1 `shiftL` fromInteger(v2))
+                                            Mod    -> eInt (v1 `mod` v2)
+                                            _      -> error $ "Eval.evalBinOp " ++ show e
          (EBit _ w1 v1, EBit _ w2 v2) -> let w = max w1 w2 in
                                          case op of
                                             Eq     -> eBool (v1 == v2)
@@ -275,7 +352,6 @@ evalBinOp e@(E (EBinOp _ op l r)) =
                                             ShiftL -> eInt (v1 `shiftL` fromInteger(v2))
                                             Mod    -> eInt (v1 `mod` v2)
                                             _      -> error $ "Eval.evalBinOp " ++ show e
-
          (EString _ s1, EString _ s2) -> case op of
                                             Eq     -> eBool (s1 == s2)
                                             Neq    -> eBool (s1 /= s2)
