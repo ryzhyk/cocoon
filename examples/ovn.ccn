@@ -392,10 +392,12 @@ role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] =
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
     var cts: ct_flow_state_t;
     the (x in CTState | x.port==sport.name) {
-        (x.ctst, cts) = ct_track_from(x.ctst, pkt)
+        (x.ctst, cts) = ct_track_from(x.ctst, pkt);
+        CTState.delete(_.port == sport.name);
+        CTState.put(x)
     } default {
-        (var st, cts) = ct_track_from(ct_state_new(), pkt)
-        //CTState.insert(sport, st)
+        (var st, cts) = ct_track_from(ct_state_new(), pkt);
+        CTState.put(CTState{sport.name, st})
     };
 
     // invalid - drop
@@ -437,10 +439,11 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // send to connection tracker
     var cts : ct_flow_state_t;
     the (s in CTState | s.port == port.name) {
-        (s.ctst, cts) = ct_track_to(s.ctst, pkt)
+        (s.ctst, cts) = ct_track_to(s.ctst, pkt);
+        CTState.put(s)
     } default {
-        (var st, cts) = ct_track_to(ct_state_new(), pkt)
-        //insert(CTState, sport, st)
+        (var st, cts) = ct_track_to(ct_state_new(), pkt);
+        CTState.put(CTState{port.name, st})
     };
     // invalid - drop
     if (cts == CTInvalid) drop;

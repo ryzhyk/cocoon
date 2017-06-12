@@ -22,7 +22,6 @@ module Validate ( validate
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
-import Debug.Trace
 
 import Syntax
 import NS
@@ -429,6 +428,12 @@ exprValidate1 r ctx (ERelPred p rel as) = do ctxCheckRelPred p r ctx
                                              rel' <- checkRelation p r ctx rel
                                              assertR r (length as == length (relArgs rel')) p
                                                      $ "Number of arguments does not match relation declaration"
+exprValidate1 r ctx (EPut p rel _)      = do ctxCheckSideEffects p r ctx
+                                             Relation{..} <- checkRelation p r ctx rel
+                                             assertR r relMutable p $ "Cannot modify immutable relation"
+exprValidate1 r ctx (EDelete p rel _)   = do ctxCheckSideEffects p r ctx
+                                             Relation{..} <- checkRelation p r ctx rel
+                                             assertR r relMutable p $ "Cannot modify immutable relation"
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
@@ -439,7 +444,7 @@ checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p
 exprValidate2 :: (MonadError String me) => Refine -> ECtx -> ExprNode Type -> me ()
 exprValidate2 r _   (EField p e f)      = case typ' r e of
                                                t@(TStruct _ _) -> assertR r (isJust $ find ((==f) . name) $ structArgs t) p
-                                                                          $ "Unknown field " ++ f
+                                                                          $ "Unknown field \"" ++ f ++ "\" in struct of type " ++ show t 
                                                _               -> errR r (pos e) $ "Expression is not a struct"
 exprValidate2 r _   (ESlice p e h l)    = case typ' r e of
                                                TBit _ w -> do assertR r (h >= l) p 

@@ -59,7 +59,6 @@ import Data.Maybe
 import Control.Monad
 import Control.Monad.Identity
 import Control.Monad.State
-import Debug.Trace
 
 import Syntax
 import NS
@@ -120,6 +119,8 @@ exprFoldCtxM' f ctx   (EPHolder p)        = f ctx $ EPHolder p
 exprFoldCtxM' f ctx e@(ETyped p x t)      = do x' <- exprFoldCtxM f (CtxTyped e ctx) x
                                                f ctx $ ETyped p x' t
 exprFoldCtxM' f ctx e@(ERelPred p rel as) = f ctx =<< (liftM $ ERelPred p rel) (mapIdxM (\a i -> exprFoldCtxM f (CtxRelPred e ctx i) a) as)
+exprFoldCtxM' f ctx e@(EPut p rel v)      = f ctx =<< (liftM $ EPut p rel) (exprFoldCtxM f (CtxPut e ctx) v)
+exprFoldCtxM' f ctx e@(EDelete p rel c)   = f ctx =<< (liftM $ EDelete p rel) (exprFoldCtxM f (CtxDelete e ctx) c)
 
 exprMapM :: (Monad m) => (a -> m b) -> ExprNode a -> m (ExprNode b)
 exprMapM g e = case e of
@@ -153,6 +154,8 @@ exprMapM g e = case e of
                    EPHolder p        -> return $ EPHolder p
                    ETyped p v t      -> (liftM $ \v' -> ETyped p v' t) (g v)
                    ERelPred p rel as -> (liftM $ ERelPred p rel) $ mapM g as
+                   EPut p rel v      -> (liftM $ EPut p rel) $ g v
+                   EDelete p rel c   -> (liftM $ EDelete p rel) $ g c
 
 
 exprMap :: (a -> b) -> ExprNode a -> ExprNode b
@@ -214,6 +217,8 @@ exprCollectCtxM f op ctx e = exprFoldCtxM g ctx e
                                      EPHolder _        -> x'
                                      ETyped _ v _      -> x' `op` v
                                      ERelPred _ _ as   -> foldl' op x' as
+                                     EPut _ _ v        -> x' `op` v
+                                     EDelete _ _ c     -> x' `op` c
 
 
 exprCollectM :: (Monad m) => (ExprNode b -> m b) -> (b -> b -> b) -> Expr -> m b
@@ -365,6 +370,8 @@ expr2Statement' r ctx e@(EBinOp _ op e1 e2) = do (pre1, e1') <- exprPrecompute r
                                                  return $ exprSequence $ (catMaybes [pre1, pre2]) ++ [eBinOp op e1' e2']
 expr2Statement' _ _     (EUnOp _ op e)      = return $ exprModifyResult (eUnOp op) e
 expr2Statement' _ _     (ETyped _ e t)      = return $ exprModifyResult (\e' -> eTyped e' t) e
+expr2Statement' r ctx e@(EPut _ t v)        = do (pre, v') <- exprPrecompute r (CtxPut e ctx) v
+                                                 return $ exprSequence $ (maybeToList pre) ++ [ePut t v']
 expr2Statement' _ _     e                   = return $ E e
 
 exprModifyResult :: (Expr -> Expr) -> Expr -> Expr
@@ -498,6 +505,8 @@ exprIsStatement (EFork    {})                 = True
 exprIsStatement (EWith    {})                 = True
 exprIsStatement (EAny     {})                 = True
 exprIsStatement (ETyped _ (E (EVarDecl{})) _) = True
+exprIsStatement (EPut _ _ _)                  = True
+exprIsStatement (EDelete _ _ _)               = True
 exprIsStatement _                             = False
 
 exprVarRename :: (String -> String) -> Expr -> Expr

@@ -128,9 +128,14 @@ exprNodeType' _ _   (EFork _ _ _ _ _)      = Just tSink
 exprNodeType' _ _   (EFor  _ _ _ _ _)      = Just $ tTuple []
 exprNodeType' _ _   (EWith _ _ _ _ b _)    = b
 exprNodeType' _ _   (EAny  _ _ _ _ b _)    = b
-exprNodeType' r ctx (EPHolder _)           = ctxExpectType r ctx
+exprNodeType' r ctx (EPHolder _)           = case ctxInDelete ctx of 
+                                                  Nothing                              -> ctxExpectType r ctx
+                                                  Just (CtxDelete (EDelete _ rel _) _) -> Just $ relRecordType $ getRelation r rel
+                                                  _                                    -> error $ "exprNodeType _: invalid context"
 exprNodeType' _ _   (ETyped _ _ t)         = Just t
 exprNodeType' _ _   (ERelPred _ _ _)       = Just tBool
+exprNodeType' _ _   (EPut _ _ _)           = Just $ tTuple []
+exprNodeType' _ _   (EDelete _ _ _)        = Just $ tTuple []
 
 
 exprTypes :: Refine -> ECtx -> Expr -> [Type]
@@ -353,4 +358,6 @@ ctxExpectType r (CtxAnyDef _ ctx)                  = ctxExpectType r ctx
 ctxExpectType _ (CtxTyped (ETyped _ _ t) _)        = Just t
 ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r $ exprRel e in
                                                      if' (i < length args) (Just $ fieldType $ args !! i) Nothing
+ctxExpectType r (CtxPut (EPut _ rel _) _)          = Just $ relRecordType $ getRelation r rel
+ctxExpectType _ (CtxDelete _ _)                    = Just tBool
 ctxExpectType _ ctx                                = error $ "ctxExpectType " ++ show ctx

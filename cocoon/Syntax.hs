@@ -44,7 +44,7 @@ module Syntax( pktVar
              , enode
              , eVar, ePacket, eApply, eBuiltin, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork, eFor
-             , eWith, eAny, ePHolder, eTyped, eRelPred
+             , eWith, eAny, ePHolder, eTyped, eRelPred, ePut, eDelete
              , exprIsRelPred
              , ECtx(..)
              , ctxParent, ctxAncestors
@@ -55,6 +55,7 @@ module Syntax( pktVar
              , ctxIsSeq1, ctxInSeq1
              , ctxIsRole, ctxInRole
              , ctxIsTyped
+             , ctxIsDelete, ctxInDelete
              , conj
              , disj
              , exprSequence) where
@@ -447,6 +448,8 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EPHolder  {exprPos :: Pos}
                 | ETyped    {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
                 | ERelPred  {exprPos :: Pos, exprRel :: String, exprArgs :: [e]}
+                | EPut      {exprPos :: Pos, exprTable :: String, exprVal :: e}
+                | EDelete   {exprPos :: Pos, exprTable :: String, exprCond :: e}
 
 instance Eq e => Eq (ExprNode e) where
     (==) (EVar _ v1)              (EVar _ v2)                = v1 == v2
@@ -479,6 +482,8 @@ instance Eq e => Eq (ExprNode e) where
     (==) (EPHolder _)             (EPHolder _)               = True
     (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
     (==) (ERelPred _ r1 as1)      (ERelPred _ r2 as2)        = r1 == r2 && as1 == as2
+    (==) (EPut _ r1 v1)           (EPut _ r2 v2)             = r1 == r2 && v1 == v2
+    (==) (EDelete _ r1 c1)        (EPut _ r2 c2)             = r1 == r2 && c1 == c2
     (==) _                        _                          = False
 
 instance WithPos (ExprNode e) where
@@ -527,6 +532,8 @@ instance PP e => PP (ExprNode e) where
     pp (EPHolder _)        = pp "_"
     pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
     pp (ERelPred _ rel as) = pp rel <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EPut _ rel v)      = pp rel <> pp "." <> pp "put" <> (parens $ pp v)
+    pp (EDelete _ rel c)   = pp rel <> pp "." <> pp "delete" <> (parens $ pp c)
 
 instance PP e => Show (ExprNode e) where
     show = render . pp
@@ -584,6 +591,8 @@ eAny v t c b d      = E $ EAny      nopos v t c b d
 ePHolder            = E $ EPHolder  nopos
 eTyped e t          = E $ ETyped    nopos e t
 eRelPred rel as     = E $ ERelPred  nopos rel as
+ePut rel v          = E $ EPut      nopos rel v
+eDelete rel c       = E $ EDelete   nopos rel c
 
 exprIsRelPred :: Expr -> Bool
 exprIsRelPred (E (ERelPred{})) = True
@@ -656,6 +665,8 @@ data ECtx = CtxRefine
           | CtxAnyDef    {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxTyped     {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxRelPred   {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
+          | CtxPut       {ctxParExpr::ENode, ctxPar::ECtx}
+          | CtxDelete    {ctxParExpr::ENode, ctxPar::ECtx}
           deriving(Show)
 
 ctxParent :: ECtx -> ECtx
@@ -722,3 +733,10 @@ ctxInRole ctx = any ctxIsRole $ ctxAncestors ctx
 ctxIsTyped :: ECtx -> Bool
 ctxIsTyped CtxTyped{} = True
 ctxIsTyped _          = False
+
+ctxIsDelete :: ECtx -> Bool
+ctxIsDelete CtxDelete{} = True
+ctxIsDelete _           = False
+
+ctxInDelete :: ECtx -> Maybe ECtx
+ctxInDelete ctx = find ctxIsDelete $ ctxAncestors ctx

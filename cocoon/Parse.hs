@@ -64,6 +64,8 @@ reservedNames = ["_",
                  "pkt",
                  "primary",
                  "procedure",
+                 "put",
+                 "delete",
                  "references",
                  "refine",
                  "role",
@@ -308,6 +310,8 @@ term  =  elhs
      <|> term'
 term' = withPos $
          eapply
+     <|> eput
+     <|> edelete
      <|> ebuiltin
      <|> eloc
      <|> erelpred
@@ -405,6 +409,10 @@ eany    = eAny <$ reserved "any"
                <*> ((option eTrue (reservedOp "|" *> expr)) <* symbol ")")
                <*> term
                <*> (optionMaybe $ reserved "default" *> term)
+eput    = ePut <$ isput <*> (relIdent <* dot <* reserved "put") <*> (parens expr)
+               where isput = try $ lookAhead $ relIdent <* dot <* reserved "put"
+edelete = eDelete <$ isdel <*> (relIdent <* dot <* reserved "delete") <*> (parens lambda)
+                  where isdel = try $ lookAhead $ relIdent <* dot <* reserved "delete"
 epholder = ePHolder <$ reserved "_"
 
 width = optionMaybe (try $ ((fmap fromIntegral parseDec) <* (lookAhead $ char '\'')))
@@ -484,6 +492,15 @@ binary n fun  = Infix $ (\le re -> E $ EBinOp (fst $ pos le, snd $ pos re) fun l
 sbinary n fun = Infix $ (\l  r  -> E $ fun (fst $ pos l, snd $ pos r) l r) <$ reservedOp n
 
 assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedOp "="
+
+{- lambda-expression; currently only allowed in .delete statements -}
+lambda =  buildExpressionParser etable lamterm
+      <?> "lambda"
+
+lamterm  =  epholder
+        <|> (withPos $ eTuple <$> (parens $ commaSep lambda))
+        <|> braces lambda
+        <|> term'
 
 {- F-expression (variable of field name) -}
 fexpr =  buildExpressionParser fetable fterm

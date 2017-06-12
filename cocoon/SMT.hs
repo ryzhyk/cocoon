@@ -27,7 +27,6 @@ module SMT ( struct2SMT
 import Data.Maybe
 import Data.List
 import Control.Monad.State
-import Debug.Trace
 
 import qualified SMT.SMTSolver as SMT
 import qualified SMT.Datalog   as DL
