@@ -29,7 +29,7 @@ import Data.List
 import Control.Monad.State
 
 import qualified SMT.SMTSolver as SMT
-import qualified SMT.Datalog   as DL
+import qualified Datalog.Datalog   as DL
 --import qualified SMT.SMTLib2   as SMT
 import Syntax
 import Name

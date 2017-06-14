@@ -33,15 +33,13 @@ import System.Process
 import System.Exit
 import Control.Monad.Except
 import Data.String.Utils
-import Data.Char
-import Numeric
 
 import Name
 import Util
 import PP
 import SMT.SMTSolver
 import SMT.SMTLib2Parse
-import SMT.Datalog
+import Datalog.Datalog
 import Ops
 
 data SMT2Config = SMT2Config {

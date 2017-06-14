@@ -4,7 +4,7 @@ import qualified Data.Map as M
 import Control.Monad.State.Strict
 
 import Syntax
-import qualified SMT.Datalog as DL
+import qualified Datalog.Datalog as DL
 
 type MENode = Maybe (ExprNode MExpr)
 newtype MExpr = ME MENode

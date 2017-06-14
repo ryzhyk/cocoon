@@ -18,7 +18,7 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards, ImplicitParams #-}
 
-module SMT.Z3Datalog(z3DatalogEngine) where
+module Datalog.Z3Datalog(z3DatalogEngine) where
 
 import qualified Text.Parsec as P
 import Text.PrettyPrint
@@ -32,7 +32,7 @@ import qualified Data.Map as M
 import Name
 import Ops
 import PP
-import SMT.Datalog
+import Datalog.Datalog
 import SMT.SMTLib2
 import SMT.SMTLib2Parse
 import SMT.SMTSolver

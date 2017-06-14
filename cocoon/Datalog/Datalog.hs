@@ -18,12 +18,12 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards #-}
 
-module SMT.Datalog( DatalogEngine(..)
-                  , Relation(..)
-                  , Rule(..)
-                  , RuleId
-                  , GroundRule(..)
-                  , Session(..)) where
+module Datalog.Datalog( DatalogEngine(..)
+                      , Relation(..)
+                      , Rule(..)
+                      , RuleId
+                      , GroundRule(..)
+                      , Session(..)) where
 
 import Data.Int
 

@@ -34,9 +34,9 @@ import Control.Monad.State.Strict
 import Text.PrettyPrint
 
 import Expr
-import qualified SMT           as SMT
-import qualified SMT.SMTSolver as SMT
-import qualified SMT.Datalog   as DL
+import qualified SMT             as SMT
+import qualified SMT.SMTSolver   as SMT
+import qualified Datalog.Datalog as DL
 import Syntax
 import Type
 import Name
@@ -203,6 +203,19 @@ evalExpr'' ctx e = do
                                      _     -> error $ "query returned multiple rows in\n" ++ show e ++ ":\n" ++
                                                       (intercalate "\n" $ map show rows') 
         ETyped _ v _        -> evalExpr' (CtxTyped e ctx) v
+--        EPut _ rel v        -> do v'@(E (EStruct _ _ fs)) <- evalExprS (CtxPut e ctx) v
+--                                  let Just pkey = relPrimaryKey $ getRelation r rel
+--                                  pkeyfs <- mapM ((\f -> (liftM $ eEq (eField ePHolder f)) (evalExprs (eField v' f))) . name) pkey 
+--                                  _ <- evalExpr' ctx $ eDelete rel $ (conj pkeyfs)
+--                                  lift $ (addGroundRule ?dl) $ GroundRule rel fs ???
+--                                  -- validate
+--                                  -- ????
+--        EDelete _ rel c     -> 
+--                                  -- lookup by primary key
+--                                  -- delete old value if exists
+--                                  removeGroundRule    :: String -> RuleId -> IO (),
+--                                  -- insert new value
+--                                  addGroundRule       :: GroundRule       -> IO (),
         _                   -> error $ "Eval.evalExpr " ++ show e
 
 emptyVal :: (?r::Refine) => Type -> MExpr
