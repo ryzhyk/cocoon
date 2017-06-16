@@ -119,7 +119,10 @@ expr2SMT' _   (EField _ (t,s) f)                   = let TStruct _ cs = typ' ?r 
                                                          es = map (\c -> (SMT.EIsInstance (name c) s, SMT.EField (name c) s f)) cs'
                                                      in SMT.ECond (init es) $ snd $ last es
 expr2SMT' _   (EBool _ b)                          = SMT.EBool b
-expr2SMT' _   (EInt _ i)                           = SMT.EInt i
+expr2SMT' ctx (EInt _ i)                           = case typ' ?r $ exprType ?r ctx $ eInt i of
+                                                          TBit _ w -> SMT.EBit w i
+                                                          TInt _   -> SMT.EInt i
+                                                          _        -> error $ "non-integer type in SMT.expr2SMT EInt"
 expr2SMT' _   (EString _ s)                        = SMT.EString s
 expr2SMT' _   (EBit _ w i)                         = SMT.EBit w i
 expr2SMT' ctx (EStruct _ c fs) | ctxInMatchPat ctx = let -- inside match case - convert to is- check, conjoin with fields

@@ -132,12 +132,12 @@ typ q mf (EVar n)          = maybe (varType $ fromJust $ find ((==n) . name) $ s
                                    (snd . fromJust . find ((==n) . fst) . funcArgs)
                                    mf
 typ q _  (EField c _ f)    = fromJust $ lookup f $ concatMap snd cs
-                             where Struct _ cs = smtConstr2Struct q c
+                             where Struct _ cs = getStruct q c
 typ _ _  (EBool _)         = TBool
 typ _ _  (EBit w _)        = TBit w
 typ _ _  (EInt _)          = TInt
 typ _ _  (EString _)       = TString
-typ q _  (EStruct c _)     = TStruct $ structName $ smtConstr2Struct q c
+typ q _  (EStruct c _)     = TStruct $ structName $ getStruct q c
 typ _ _  (EIsInstance _ _) = TBool
 typ q mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                            | elem op [Plus, Minus, Mod] = typ q mf e1
@@ -154,8 +154,8 @@ data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtExprs   :: [Expr]
                          }
 
-smtConstr2Struct :: SMTQuery -> String -> Struct
-smtConstr2Struct q c = fromJust $ find (isJust . lookup c . structCons) $ smtStructs q
+getStruct :: SMTQuery -> String -> Struct
+getStruct q c = fromJust $ find (isJust . lookup c . structCons) $ smtStructs q
 
 data SMTSolver = SMTSolver {
     -- Input:  list of formula
