@@ -34,6 +34,7 @@ import Numeric
 import Util
 import SMT.SMTSolver
 import Ops
+import Name
 
 -- appended to each assertion name
 assertName :: String
@@ -179,9 +180,9 @@ parseExpr t                 (ExpApply "ite" [i,th,el])   = if' cond (parseExpr t
 parseExpr _                 (ExpApply n as) | isJust cons = 
     if length fs /= length as
        then error "SMTLib2Parse.parseExpr: incorrect number of fields in a struct"
-       else EStruct n (map (\((_,t), e) -> parseExpr (Just t) e) $ zip fs as)
-    where cons = find ((==n) . fst) $ concatMap structCons $ smtStructs ?q
-          fs = snd $ fromJust cons
+       else EStruct n (map (\(a, e) -> parseExpr (Just $ varType a) e) $ zip fs as)
+    where cons = find ((==n) . name) $ concatMap structCons $ smtStructs ?q
+          fs = consArgs $ fromJust cons
 
 --parseExpr (ExpIdent i) = case lookupEnumerator i of
 --         Just _  -> SVal $ EnumVal i

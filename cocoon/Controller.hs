@@ -45,7 +45,8 @@ import Type
 import Parse
 import Validate
 import qualified SQL
-import qualified Datalog.Datalog   as DL
+import qualified Datalog.Datalog  as DL
+import qualified Datalog.Dataflog as DL
 import qualified Datalog.Z3Datalog as DL
 import qualified SMT           as SMT
 import qualified SMT.SMTSolver as SMT

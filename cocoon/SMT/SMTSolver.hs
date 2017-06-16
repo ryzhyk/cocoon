@@ -16,6 +16,8 @@ limitations under the License.
 -}
 -- Generic interface of an SMT solver
 
+{-# LANGUAGE LambdaCase #-}
+
 module SMT.SMTSolver where
 
 import qualified Data.Map as M
@@ -47,8 +49,15 @@ instance Show Type where
     show (TStruct n)  = n
     show (TArray t l) = "[" ++ show t ++ "; " ++ show l ++ "]"
 
+data Constructor = Constructor { consName :: String 
+                               , consArgs :: [Var]
+                               }
+
+instance WithName Constructor where
+    name = consName
+
 data Struct = Struct { structName   :: String 
-                     , structCons   :: [(String, [(String,Type)])]
+                     , structCons   :: [Constructor]
                      }
 
 instance WithName Struct where
@@ -107,6 +116,23 @@ exprMap g   (ESlice e1 h l)   = g $ ESlice (exprMap g e1) h l
 exprMap g   (ECond cs d)      = g $ ECond (map (\(e1,e2) -> (exprMap g e1, exprMap g e2)) cs) $ exprMap g d
 exprMap g   (ERelPred r as)   = g $ ERelPred r $ map (exprMap g) as
 
+exprCollect :: (Expr -> [a]) -> Expr -> [a]
+exprCollect f e@(EApply _ as)     = (concatMap (exprCollect f) as) ++ f e
+exprCollect f e@(EField _ s _)    = (exprCollect f s) ++ f e
+exprCollect f e@(EStruct _ as)    = (concatMap (exprCollect f) as) ++ f e
+exprCollect f e@(EIsInstance _ a) = (exprCollect f a) ++ f e
+exprCollect f e@(EBinOp _ e1 e2)  = (exprCollect f e1) ++ (exprCollect f e2) ++ f e
+exprCollect f e@(EUnOp _ a)       = (exprCollect f a) ++ f e
+exprCollect f e@(ESlice a _ _)    = (exprCollect f a) ++ f e
+exprCollect f e@(ECond cs d)      = (concatMap (\(c,v) -> exprCollect f c ++ exprCollect f v) cs) ++ exprCollect f d ++ f e
+exprCollect f e@(ERelPred _ as)   = (concatMap (exprCollect f) as) ++ f e
+exprCollect f e                   = f e
+
+exprVars :: Expr -> [String]
+exprVars e = nub $ exprCollect (\case 
+                                 EVar v -> [v]
+                                 _      -> []) e
+
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)
 
@@ -131,7 +157,7 @@ typ :: SMTQuery -> Maybe Function -> Expr -> Type
 typ q mf (EVar n)          = maybe (varType $ fromJust $ find ((==n) . name) $ smtVars q)
                                    (snd . fromJust . find ((==n) . fst) . funcArgs)
                                    mf
-typ q _  (EField c _ f)    = fromJust $ lookup f $ concatMap snd cs
+typ q _  (EField c _ f)    = varType $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
                              where Struct _ cs = getStruct q c
 typ _ _  (EBool _)         = TBool
 typ _ _  (EBit w _)        = TBit w
@@ -155,7 +181,10 @@ data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          }
 
 getStruct :: SMTQuery -> String -> Struct
-getStruct q c = fromJust $ find (isJust . lookup c . structCons) $ smtStructs q
+getStruct q c = fromJust $ find (isJust . find ((==c) . name) . structCons) $ smtStructs q
+
+getConstructor :: SMTQuery -> String -> Constructor
+getConstructor q c = head $ concatMap (filter ((==c) . name) . structCons) $ smtStructs q
 
 data SMTSolver = SMTSolver {
     -- Input:  list of formula
@@ -172,10 +201,10 @@ data SMTSolver = SMTSolver {
 allValues :: SMTQuery -> Type -> [Expr]
 allValues _ TBool       = [EBool True, EBool False]
 allValues _ (TBit w)    = map (EBit w) [0..2^w-1]
-allValues q (TStruct n) = concatMap (map (EStruct n) . allvals . snd) cs
+allValues q (TStruct n) = concatMap (map (EStruct n) . allvals . consArgs) cs
     where Struct _ cs = fromJust $ find ((==n) . name) $ smtStructs q
           allvals []          = [[]]
-          allvals ((_,t):fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q t
+          allvals (f:fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q $ varType f
 allValues _ t           = error $ "Not implemented SMTSolver.allValues " ++ show t
 
 allSolutionsVar :: SMTSolver -> SMTQuery -> String -> [Expr]

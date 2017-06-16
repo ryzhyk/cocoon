@@ -76,7 +76,7 @@ import Util
 
 struct2SMT :: (?r::Refine) => String -> [Constructor] -> SMT.Struct
 struct2SMT n cs =
-    SMT.Struct n $ map (\c -> (name c, map (\f -> (name f, typ2SMT $ typ f)) $ consArgs c)) cs
+    SMT.Struct n $ map (\c -> SMT.Constructor (name c) $ map (\f -> SMT.Var (name f) (typ2SMT $ typ f)) $ consArgs c) cs
 
 func2SMT :: (?r::Refine) => Function -> SMT.Function
 func2SMT f@Function{..} = SMT.Function funcName 

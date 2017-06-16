@@ -187,7 +187,7 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
                      $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
              assertR r (isJust $ find ((== "switch") . name) relArgs) p 
                      "Relation with #switch_port annotation must have a column named \"switch\""
-             maybe (errR r p "The \"switch\" column much be declared as foreign key")
+             maybe (errR r p "The \"switch\" column must be declared as foreign key")
                    (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
                                                  assertR r (case relAnnotation rel' of
                                                                     Just (RelSwitch _) -> True

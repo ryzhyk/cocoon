@@ -98,7 +98,7 @@ instance SMTPP Struct where
     smtpp q (Struct n cs) = parens $ pp "declare-datatypes ()" 
                                    <+> (parens $ parens $ pp n 
                                         <+> (hsep 
-                                            $ map (\(cn, fs) -> parens $ pp cn <+> (hsep $ map (\(f,t) -> parens $ pp (cn ++ f) <+> smtpp q t) fs)) cs))
+                                            $ map (\(Constructor cn fs) -> parens $ pp cn <+> (hsep $ map (\(Var f t) -> parens $ pp (cn ++ f) <+> smtpp q t) fs)) cs))
 
 smtppExpr :: SMTQuery -> Maybe Function -> Expr -> Doc
 smtppExpr _ _  (EVar n)           = pp n
