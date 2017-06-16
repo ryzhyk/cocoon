@@ -17,7 +17,7 @@ limitations under the License.
 
 -- Datalog implementation on top of the differential Dataflow library:
 
-{-# LANGUAGE RecordWildCards, ImplicitParams #-}
+{-# LANGUAGE RecordWildCards, ImplicitParams, LambdaCase #-}
 
 module Datalog.Dataflog (mkRust, mkRule) where
 
@@ -57,6 +57,41 @@ tuple_' []  = parens empty
 tuple_' [x] = x
 tuple_' xs  = parens $ commaCat xs
 
+lambda :: Doc -> Doc -> Doc
+lambda as e = pp "|" <> as <> pp "|" <+> e
+
+mkType :: Type -> Doc
+mkType TBool                = pp "bool"
+mkType TInt                 = pp "BigUint"
+mkType TString              = pp "String"
+mkType (TBit w) | w <= 8    = pp "u8"
+                | w <= 16   = pp "u16"
+                | w <= 32   = pp "u32"
+                | w <= 64   = pp "u64"
+                | otherwise = pp "BigUint"
+mkType (TStruct s)          = pp s
+mkType TArray{}             = error "not implemented: Dataflog.mkType TArray"
+
+mkStruct :: Struct -> Doc
+mkStruct (Struct n cs) = pp "#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone, Hash)]" $$
+                         enum $$
+                         def $$    
+                         pp ("unsafe_abomonate!(" ++ n ++ ");")
+    where 
+    enum = (pp "enum" <+> pp n <+> pp "{") $$
+           (nest' $ vcat $ punctuate comma cs') $$
+           pp "}"
+    cs' = map (\case
+                Constructor c [] -> pp c
+                Constructor c fs -> pp c <+> pp "{" <> (commaSep $ map (\(Var v t) -> pp v <> pp ":" <+> mkType t) fs) <> pp "}") cs
+    Constructor cn cas : _= cs
+    defas = case cas of
+                 [] -> empty
+                 _  -> pp "{" <> (commaSep $ map (\a -> pp (name a) <> pp ": Default::default()") cas) <> pp "}"
+    def = (pp "impl Default for" <+> pp n <+> pp "{") $$
+          (nest' $ pp "fn default() -> " <+> pp n <+> pp "{" $$ (nest' $ pp n <> pp "::" <> pp cn <> defas <> pp "}")) $$
+          pp "}"
+    
 mkRule :: (?s::DFSession) => Rule -> Doc
 mkRule rule@Rule{..} = mkRuleP rule [] [] empty (order [] preds npreds) conds
     where 
@@ -143,9 +178,6 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
                               pp "." <> pp "map" <> 
                               (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars': _vars'))))
 
-lambda :: Doc -> Doc -> Doc
-lambda as e = pp "|" <> as <> pp "|" <+> e
-
 mkFilter :: (?s::DFSession) => Expr -> Expr -> Doc
 mkFilter e pat | pat' == pp "_" = empty
                | otherwise = pp "match" <+> mkExpr e <+> 
@@ -196,8 +228,8 @@ mkExpr (EBinOp op e1 e2)    =
          Mod    -> f "%"
          ShiftR -> f ">>"
          ShiftL -> f "<<"
-         Concat -> error "not implemented: Dataflog.mkExpr Concat"
          Impl   -> mkExpr $ EBinOp Or (EUnOp Not e1) e2
+         Concat -> error "not implemented: Dataflog.mkExpr Concat"
     where f o = parens $ mkExpr e1 <+> pp o <+> mkExpr e2
 
 mkExpr (EUnOp Not e)        = parens $ pp "!" <> mkExpr e
