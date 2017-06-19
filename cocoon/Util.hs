@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, TupleSections #-}
 
 module Util where
 
@@ -23,6 +23,7 @@ import Control.Monad.Except
 import Data.List
 import Data.Maybe
 import Data.Bits
+import qualified Data.Map as M
 
 import Pos
 import Name 
@@ -68,6 +69,14 @@ grCycle g = case mapMaybe nodeCycle (nodes g) of
   where
     nodeCycle n = listToMaybe $ map (\s -> map (\i -> (i, fromJust $ lab g i)) (n:(esp s n g))) $ 
                                 filter (\s -> elem n (reachable s g)) $ suc g n
+
+-- Group graph nodes; aggregate edges
+grGroup :: (DynGraph gr) => gr a b -> [[Node]] -> gr [Node] b
+grGroup g groups = insEdges ((concatMap (concatMap gsuc)) groups)
+                   $ insNodes (zip [0..] groups) empty 
+    where nodegroup :: M.Map Node Int
+          nodegroup = M.fromList $ concat $ mapIdx (\gr i -> map (,i) gr) groups
+          gsuc node = map (\(_,s,l) -> (nodegroup M.! node, nodegroup M.! s, l)) $ out g node 
 
 --Logarithm to base 2. Equivalent to floor(log2(x))
 log2 :: Integer -> Int

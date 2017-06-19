@@ -41,7 +41,7 @@ data Rule = Rule { ruleVars :: [Var]
                  , ruleHead :: Expr
                  , ruleBody :: Expr
                  , ruleId   :: RuleId -- get rid of this
-                 }
+                 } deriving (Eq)
 
 data GroundRule = GroundRule { gruleRel  :: String
                              , gruleArgs :: [Expr]
