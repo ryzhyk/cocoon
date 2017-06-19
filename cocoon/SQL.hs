@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams #-}
+{-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams, OverloadedStrings #-}
 
 -- Cocoon's SQL backend
 
@@ -63,13 +63,13 @@ vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
 
 --andSep' []  = empty
 --andSep' [x] = x
---andSep' xs  = parens $ hsep $ punctuate (pp " and") xs
+--andSep' xs  = parens $ hsep $ punctuate (" and") xs
 
 --vandSep = vandSep' . filter (not . isEmpty)
 
 --vandSep' []  = empty
 --vandSep' [x] = x
---vandSep' xs  = parens $ vcat $ punctuate (pp " and") xs
+--vandSep' xs  = parens $ vcat $ punctuate (" and") xs
 
 -- TODO
 -- Special tables
@@ -84,17 +84,17 @@ vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
 -- store the table on switche's local controller
 mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
-                               vcat $ intersperse (pp "") $ createdb : 
+                               vcat $ intersperse ("") $ createdb : 
                                                             (map mkTypeDef tdefs) ++ 
                                                             (map mkRel rels) ++
                                                             (map mkFun funs)
                                                             
     where rels = filter (not . relIsView) $ refineRelsSorted r
-          createdb = pp "drop database if exists" <+> pp dbname <> semi
+          createdb = "drop database if exists" <+> pp dbname <> semi
                      $$
-                     pp "create database" <+> pp dbname <> semi
+                     "create database" <+> pp dbname <> semi
                      $$
-                     pp "\\c" <+> pp dbname
+                     "\\c" <+> pp dbname
           funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
           types = nub $ concatMap (relTypes r) rels
           types' = nub $ map (typ' r) $ typeSort r types
@@ -104,21 +104,21 @@ mkSchema dbname r@Refine{..} = let ?r = r in
 
 mkTypeDef :: (?r::Refine) => TypeDef -> Doc
 mkTypeDef (TypeDef _ n (Just (TStruct _ cs))) = 
-    pp "create type" <+> pp n <+> pp "as (" $$
+    "create type" <+> pp n <+> "as (" $$
     (nest' $ vcommaSep $ t ++ (map (\f -> pp (name f) <+> (mkType $ typ f)) $ structFields cs)) $$
-    pp ");"
+    ");"
     where needtag = length cs > 1
           t = (if' needtag [pp tag <+> (mkType $ tagType cs)] [])
 mkTypeDef t = error $ "SQL.mkTypeDef " ++ show t
 
 mkFun :: (?r::Refine) => Function -> Doc
 mkFun f@Function{..} = 
-            pp "create function" <+> (pp $ name f) <+> (parens $ commaSep $ map (\a -> (pp $ name a) <+> mkType (typ a)) funcArgs) <+> 
-            pp "returns" <+> mkType funcType <+> pp "as $$" $$
-            pp "begin" $$
+            "create function" <+> (pp $ name f) <+> (parens $ commaSep $ map (\a -> (pp $ name a) <+> mkType (typ a)) funcArgs) <+> 
+            "returns" <+> mkType funcType <+> "as $$" $$
+            "begin" $$
             (nest' $ mkExpr (CtxFunc f CtxRefine) $ fromJust funcDef) $$
-            pp "end;" $$  
-            pp "$$ language plpgsql" <> semi
+            "end;" $$  
+            "$$ language plpgsql" <> semi
 
 mkExpr :: (?r::Refine) => ECtx -> Expr -> Doc
 mkExpr ctx e = mkNormalizedExprF ctx e'
@@ -129,18 +129,18 @@ mkExpr ctx e = mkNormalizedExprF ctx e'
 
 mkRel :: (?r::Refine) => Relation -> Doc
 mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
-                         pp "create table" <+> pp relName <+> pp "("
+                         "create table" <+> pp relName <+> "("
                          $$
                          (nest' $ vcommaSep $ cols ++ map sel2 cons)
                          $$
-                         pp ");"
+                         ");"
                          $$
                          mkNotify relName
                          $$
                          (vcat $ map sel3 cons)
     where
     -- Primary table
-    cols = (pp serialcol <+> pp "bigserial") :
+    cols = (pp serialcol <+> "bigserial") :
            map mkColumn relArgs
     cons = mapIdx (mkConstraint rel) relConstraints
     -- Delta table
@@ -188,12 +188,12 @@ pattern2Constr _    _ _               = eTrue
 
 -- view context
 mkNormalizedExprV :: (?r::Refine) => ECtx -> Expr -> Doc
-mkNormalizedExprV ctx = let ?sep = pp "$"
+mkNormalizedExprV ctx = let ?sep = "$"
                         in mkNormalizedExpr ctx
 
 -- function context
 mkNormalizedExprF :: (?r::Refine) => ECtx -> Expr -> Doc
-mkNormalizedExprF ctx = let ?sep = pp "."
+mkNormalizedExprF ctx = let ?sep = "."
                         in mkNormalizedExpr ctx
 
 mkNormalizedExpr :: (?r::Refine, ?sep::Doc) => ECtx -> Expr -> Doc
@@ -202,36 +202,36 @@ mkNormalizedExpr ctx e = snd $ exprFoldCtx (\ctx' en -> let d =  mkNormalizedExp
                                                         in (e', d)) ctx e
 
 mkNormalizedExprRet :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode (Expr, Doc) -> Doc
-mkNormalizedExprRet ctx e | ctxMustReturn ctx && not (exprIsStatement $ enode ex)  = pp "return" <+> e' <> semi
-                          | ctxExpectsStat ctx && not (exprIsStatement $ enode ex) = pp "perform" <+> e' <> semi
+mkNormalizedExprRet ctx e | ctxMustReturn ctx && not (exprIsStatement $ enode ex)  = "return" <+> e' <> semi
+                          | ctxExpectsStat ctx && not (exprIsStatement $ enode ex) = "perform" <+> e' <> semi
                           | otherwise                                              = e'
     where e' = mkNormalizedExpr' ctx e
           ex = E $ exprMap fst e
 
 mkNormalizedExpr' :: (?r::Refine, ?sep::Doc) => ECtx -> ExprNode (Expr, Doc) -> Doc
 mkNormalizedExpr' _    (EVar _ v)                    = pp v
-mkNormalizedExpr' _    (EField _ (_, s') f)          = s' <> (if' (isUpper s0 && notElem '.' ss) (pp ".") ?sep) <> pp f
+mkNormalizedExpr' _    (EField _ (_, s') f)          = s' <> (if' (isUpper s0 && notElem '.' ss) (".") ?sep) <> pp f
     where s0:ss = render s'
 mkNormalizedExpr' _    (EBool _ b)                   = mkVal $ enode $ eBool b
 mkNormalizedExpr' _    (EString _ s)                 = mkVal $ enode $ eString s
 mkNormalizedExpr' _    (EBit _ w v)                  = mkVal $ enode $ eBit w v
-mkNormalizedExpr' _    (EUnOp _ Not (_,e'))          = parens $ pp "not" <+> e'
+mkNormalizedExpr' _    (EUnOp _ Not (_,e'))          = parens $ "not" <+> e'
 mkNormalizedExpr' _    (EBinOp _ op (_,l') (_, r'))  = parens $ 
     case op of
-         Eq     -> l' <+> pp "="   <+> r'
-         Neq    -> l' <+> pp "<>"  <+> r'
-         Lt     -> l' <+> pp "<"   <+> r'
-         Gt     -> l' <+> pp ">"   <+> r'
-         Lte    -> l' <+> pp "<="  <+> r'
-         Gte    -> l' <+> pp ">="  <+> r'
-         And    -> l' <+> pp "and" <+> r'
-         Or     -> l' <+> pp "or"  <+> r'
-         Impl   -> parens (pp "not" <+> l') <+> pp "or"  <+> r'
-         Plus   -> l' <+> pp "+"   <+> r'
-         Minus  -> l' <+> pp "-"   <+> r'
-         Mod    -> l' <+> pp "%"   <+> r'
-         ShiftR -> l' <+> pp ">>"  <+> r'
-         ShiftL -> l' <+> pp "<<"  <+> r'
+         Eq     -> l' <+> "="   <+> r'
+         Neq    -> l' <+> "<>"  <+> r'
+         Lt     -> l' <+> "<"   <+> r'
+         Gt     -> l' <+> ">"   <+> r'
+         Lte    -> l' <+> "<="  <+> r'
+         Gte    -> l' <+> ">="  <+> r'
+         And    -> l' <+> "and" <+> r'
+         Or     -> l' <+> "or"  <+> r'
+         Impl   -> parens ("not" <+> l') <+> "or"  <+> r'
+         Plus   -> l' <+> "+"   <+> r'
+         Minus  -> l' <+> "-"   <+> r'
+         Mod    -> l' <+> "%"   <+> r'
+         ShiftR -> l' <+> ">>"  <+> r'
+         ShiftL -> l' <+> "<<"  <+> r'
          _      -> error $ "SQL.mkNormalizedExpr EBinOp " ++ show op
 mkNormalizedExpr' _    (ETyped _  (_, e') _)         = e'
 mkNormalizedExpr' _    (EBuiltin _ _ _)              = error "not implemented: SQL.mkNormalizedExpr EBuiltin"
@@ -242,36 +242,36 @@ mkNormalizedExpr' _    (EStruct _ c fs)              =
         needtag = length cs > 1 in
     parens $ commaSep
     $ (if' needtag (mkVal $ enode $ tagVal cs c) empty) :
-      (map (\f -> maybe (pp "NULL") (snd . (fs !!)) $ elemIndex f as) 
+      (map (\f -> maybe ("NULL") (snd . (fs !!)) $ elemIndex f as) 
            $ structFields cs)
 mkNormalizedExpr' ctx e@(EMatch _ (m,m') cs)         = 
     match $$
-    (nest' $ pp "case" $$
+    (nest' $ "case" $$
              (nest' $ vcat $ mapIdx mkCase cs) $$
-             pp "end case;") $$
-    pp "end;"
+             "end case;") $$
+    "end;"
     where ex = exprMap fst e
           mtype = exprType ?r (CtxMatchExpr ex ctx) m
-          match = pp "declare" $$ (nest' $ pp matchvar <+> mkType mtype <> semi) $$
-                  pp "begin" $$ (nest' $ pp matchvar <+> pp ":=" <+> m' <> semi)
+          match = "declare" $$ (nest' $ pp matchvar <+> mkType mtype <> semi) $$
+                  "begin" $$ (nest' $ pp matchvar <+> ":=" <+> m' <> semi)
           mkCase ((pat, _), (_, v')) i = 
-            pp "when" <+> mkNormalizedExpr CtxRefine cond <+> pp "then" $$
+            "when" <+> mkNormalizedExpr CtxRefine cond <+> "then" $$
             (if' (null decls) 
-                 (pp "begin")
-                 (pp "declare" $$ (nest' $ vcat decls) $$ pp "begin" $$ (nest' $ vcat asns))) $$
-            nest' v' $$ pp "end" <> semi
+                 ("begin")
+                 ("declare" $$ (nest' $ vcat decls) $$ "begin" $$ (nest' $ vcat asns))) $$
+            nest' v' $$ "end" <> semi
             where cond  = pattern2Constr (eVar matchvar) mtype pat
                   (decls, asns) = unzip $
                           map (\(x, ctx') -> (pp x <+> mkType (fromJust $ ctxExpectType ?r ctx') <> semi, 
-                                              pp x <+> pp ":=" <+> (mkNormalizedExpr CtxRefine $ ctx2Field (eVar matchvar) ctx') <> semi)) 
+                                              pp x <+> ":=" <+> (mkNormalizedExpr CtxRefine $ ctx2Field (eVar matchvar) ctx') <> semi)) 
                               $ exprVarDecls (CtxMatchPat ex ctx i) pat
-mkNormalizedExpr' ctx   (EVarDecl _ v)     = pp "declare" $$ (nest' $ pp v <+> (mkType $ fromJust $ ctxExpectType ?r ctx)) <> semi
+mkNormalizedExpr' ctx   (EVarDecl _ v)     = "declare" $$ (nest' $ pp v <+> (mkType $ fromJust $ ctxExpectType ?r ctx)) <> semi
 mkNormalizedExpr' _     (EPHolder _)       = empty
-mkNormalizedExpr' _     (ESeq _ (_,e1') (_,e2'))     = e1' $$ pp "begin" $$ nest' e2' $$ pp "end" <> semi
-mkNormalizedExpr' _     (EITE _ (_,c') (_,t') me)    = pp "if" <+> c' <+> pp "then" $$
+mkNormalizedExpr' _     (ESeq _ (_,e1') (_,e2'))     = e1' $$ "begin" $$ nest' e2' $$ "end" <> semi
+mkNormalizedExpr' _     (EITE _ (_,c') (_,t') me)    = "if" <+> c' <+> "then" $$
                                                        (nest' t') $$
-                                                       (maybe empty ((pp "else" $$) . nest' . snd) me)
-mkNormalizedExpr' _     (ESet _ (_,l') (_,r'))       = l' <+> pp ":=" <+> r' <> semi
+                                                       (maybe empty (("else" $$) . nest' . snd) me)
+mkNormalizedExpr' _     (ESet _ (_,l') (_,r'))       = l' <+> ":=" <+> r' <> semi
 mkNormalizedExpr' _     e                            = error $ "SQL.mkNormalizedExpr " ++ (render $ pp $ exprMap fst e)
 
 mkColumn :: (?r::Refine) => Field -> Doc
@@ -319,11 +319,11 @@ mkType t = mkType' (typ' ?r t)
 
 mkType' :: (?r::Refine) => Type -> Doc
 mkType' t@TStruct{}              = pp $ name $ structTypeDef ?r t
-mkType'   TBool{}                = pp "boolean"
-mkType'   TString{}              = pp "text"
-mkType'   (TBit _ w) | w < 32    = pp "int"
-                     | w < 64    = pp "bigint"
-                     | otherwise = pp "bit" <> (parens $ pp w)
+mkType'   TBool{}                = "boolean"
+mkType'   TString{}              = "text"
+mkType'   (TBit _ w) | w < 32    = "int"
+                     | w < 64    = "bigint"
+                     | otherwise = "bit" <> (parens $ pp w)
 mkType' t                        = error $ "SQL.mkType " ++ show t
 
 tagType :: [Constructor] -> Type
@@ -340,8 +340,8 @@ defVal (TBit _ w)     = eBit w 0
 defVal t              = error $ "SQL.defVal " ++ show t
 
 mkVal :: (PP a) => ExprNode a -> Doc
-mkVal (EBool _ True)  = pp "true"
-mkVal (EBool _ False) = pp "false"
+mkVal (EBool _ True)  = "true"
+mkVal (EBool _ False) = "false"
 mkVal (EString _ str) = pp $ show str
 mkVal (EBit _ w v) | w < 64    = pp v
                    | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) [0..w-1]) ++ "'"
@@ -349,23 +349,23 @@ mkVal e               = error $ "SQL.mkVal " ++ (render $ pp e)
 
 mkConstraint :: (?r::Refine) => Relation -> Constraint -> Int -> (Doc, Doc, Doc)
 mkConstraint rel (PrimaryKey _ fs) _           = 
-    (empty, pp "primary key" <+> (parens $ commaSep $ concatMap (map colName . field2cols rel) fs), empty)
+    (empty, "primary key" <+> (parens $ commaSep $ concatMap (map colName . field2cols rel) fs), empty)
 mkConstraint rel (ForeignKey _ fs rname fs') _ = 
     ( empty
     , let rel' = getRelation ?r rname in
-      pp "foreign key" <+> 
+      "foreign key" <+> 
       (parens $ commaSep $ concatMap (map colName . field2cols rel) fs) <+>
-      pp "references" <+> 
+      "references" <+> 
       (pp rname <+> (parens $ commaSep $ concatMap (map colName . field2cols rel') fs'))
     , empty)
 mkConstraint rel (Unique _ fs) _ = 
     ( empty,
       empty,
-      pp "create unique index on" <+> (pp $ name rel) <+>
+      "create unique index on" <+> (pp $ name rel) <+>
       (parens $ commaSep
        $ map mkSqlCol
        $ concatMap (\f -> e2cols (exprType ?r (CtxRelKey rel) f) f) fs) <> semi)
-mkConstraint rel (Check _ cond) i              = (mkFun func, pp "check" <> parens call, empty)
+mkConstraint rel (Check _ cond) i              = (mkFun func, "check" <> parens call, empty)
     where fname    = "check" ++ name rel ++ "$" ++ show i
           fields   = exprVars (CtxCheck rel) cond
           fargs    = map (\(v, ctx) -> Field nopos v (exprType ?r ctx (eVar v))) fields
@@ -381,7 +381,7 @@ mkConstraint rel (Check _ cond) i              = (mkFun func, pp "check" <> pare
 
 mkSqlCol :: (Expr, Type, Bool) -> Doc
 mkSqlCol (e, _, False) = colName e
-mkSqlCol (e, t, True)  = pp "coalesce" <> (parens $ colName e <> comma <+> (mkVal $ enode $ defVal t))
+mkSqlCol (e, t, True)  = "coalesce" <> (parens $ colName e <> comma <+> (mkVal $ enode $ defVal t))
 
 -- Runtime interface to the DB
 

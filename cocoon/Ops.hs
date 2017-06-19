@@ -13,6 +13,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
+
+{-# LANGUAGE OverloadedStrings #-}
+
 module Ops where
 
 import Text.PrettyPrint
@@ -37,21 +40,21 @@ data BOp = Eq
          deriving (Eq)
 
 instance PP BOp where
-    pp Eq     = pp "=="
-    pp Neq    = pp "!="
-    pp Lt     = pp "<"
-    pp Gt     = pp ">"
-    pp Lte    = pp "<="
-    pp Gte    = pp ">="
-    pp And    = pp "and"
-    pp Or     = pp "or"
-    pp Impl   = pp "=>"
-    pp Plus   = pp "+"
-    pp Minus  = pp "-"
-    pp Mod    = pp "%"
-    pp ShiftR = pp ">>"
-    pp ShiftL = pp "<<"
-    pp Concat = pp "++"
+    pp Eq     = "=="
+    pp Neq    = "!="
+    pp Lt     = "<"
+    pp Gt     = ">"
+    pp Lte    = "<="
+    pp Gte    = ">="
+    pp And    = "and"
+    pp Or     = "or"
+    pp Impl   = "=>"
+    pp Plus   = "+"
+    pp Minus  = "-"
+    pp Mod    = "%"
+    pp ShiftR = ">>"
+    pp ShiftL = "<<"
+    pp Concat = "++"
 
 instance Show BOp where
     show = render . pp
@@ -60,7 +63,7 @@ data UOp = Not
            deriving (Eq)
 
 instance PP UOp where
-    pp Not = pp "not"
+    pp Not = "not"
 
 instance Show UOp where
     show = render . pp

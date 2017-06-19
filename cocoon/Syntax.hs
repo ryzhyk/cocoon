@@ -15,7 +15,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE FlexibleContexts, RecordWildCards #-}
+{-# LANGUAGE FlexibleContexts, RecordWildCards, OverloadedStrings #-}
 
 module Syntax( pktVar
              , Spec(..)
@@ -72,7 +72,7 @@ import Name
 import Ops
 import PP
 
-pktVar = "pkt"
+pktVar = "pkt" :: String
 
 data Spec = Spec [Refine]
 
@@ -91,11 +91,11 @@ instance WithPos Refine where
     atPos r p = r{refinePos = p}
 
 instance PP Refine where
-    pp Refine{..} = (pp "refine" <+> (hcat $ punctuate comma $ map pp refineTarget) <+> lbrace)
+    pp Refine{..} = ("refine" <+> (hcat $ punctuate comma $ map pp refineTarget) <+> lbrace)
                     $$
                     (nest' $ (vcat $ map pp refineTarget)
                              $$
-                             (vcat $ map ((pp "state" <+>) . pp) refineState)
+                             (vcat $ map (("state" <+>) . pp) refineState)
                              $$
                              (vcat $ map pp refineFuncs)
                              $$
@@ -132,7 +132,7 @@ instance WithName Field where
     name = fieldName
 
 instance PP Field where
-    pp (Field _ n t) = pp n <> pp ":" <+>pp t
+    pp (Field _ n t) = pp n <> ":" <+>pp t
 
 instance Show Field where
     show = render . pp
@@ -154,7 +154,7 @@ instance WithName Role where
     name = roleName
 
 instance PP Role where
-    pp Role{..} = (pp "role" <+> pp roleName <+> (brackets $ pp roleKey <+> pp "in" <+> pp roleTable <+> pp "|" <+> pp roleCond <+> pp "/" <+> pp rolePktGuard <+> pp "="))
+    pp Role{..} = ("role" <+> pp roleName <+> (brackets $ pp roleKey <+> "in" <+> pp roleTable <+> "|" <+> pp roleCond <+> "/" <+> pp rolePktGuard <+> "="))
                   $$
                   (nest' $ pp roleBody)
 
@@ -188,11 +188,11 @@ instance WithPos Constraint where
 
 
 instance PP Constraint where
-    pp (PrimaryKey _ as)       = pp "primary key" <+> (parens $ hsep $ punctuate comma $ map pp as)
-    pp (ForeignKey _ as f fas) = pp "foreign key" <+> (parens $ hsep $ punctuate comma $ map pp as) <+> pp "references" 
+    pp (PrimaryKey _ as)       = "primary key" <+> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (ForeignKey _ as f fas) = "foreign key" <+> (parens $ hsep $ punctuate comma $ map pp as) <+> "references" 
                                  <+> pp f <+> (parens $ hsep $ punctuate comma $ map pp fas)
-    pp (Unique _ as)           = pp "unique" <+> (parens $ hsep $ punctuate comma $ map pp as)
-    pp (Check _ e)             = pp "check" <+> pp e
+    pp (Unique _ as)           = "unique" <+> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (Check _ e)             = "check" <+> pp e
    
 instance Show Constraint where
     show = render . pp
@@ -205,8 +205,8 @@ instance WithPos RelAnnotation where
     atPos a p = a{annotPos = p}
 
 instance PP RelAnnotation where
-    pp (RelPort _ (inport, outport)) = pp "#switch_port" <> (parens $ pp inport <> comma <> pp outport)
-    pp (RelSwitch _)                 = pp "#switch"
+    pp (RelPort _ (inport, outport)) = "#switch_port" <> (parens $ pp inport <> comma <> pp outport)
+    pp (RelSwitch _)                 = "#switch"
 
 instance Show RelAnnotation where
     show = render . pp
@@ -228,9 +228,9 @@ instance WithName Relation where
 
 instance PP Relation where
     pp Relation{..} = (maybe empty pp relAnnotation) $$
-                      (if' relMutable (pp "state") empty <+>
-                       (maybe (pp "table") (\_ -> pp "view") relDef) <+> pp relName <+> pp "(") $$ 
-                      (nest' $ (vcat $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <> pp ")") $$
+                      (if' relMutable ("state") empty <+>
+                       (maybe ("table") (\_ -> "view") relDef) <+> pp relName <+> "(") $$ 
+                      (nest' $ (vcat $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <> ")") $$
                       (maybe empty (vcat . map (ppRule relName)) relDef)
 
 instance Show Relation where
@@ -241,7 +241,7 @@ data Rule = Rule { rulePos :: Pos
                  , ruleRHS :: [Expr]}
 
 ppRule :: String -> Rule -> Doc
-ppRule rel Rule{..} = pp rel <> (parens $ hsep $ punctuate comma $ map pp ruleLHS) <+> pp ":-" <+> (hsep $ punctuate comma $ map pp ruleRHS)
+ppRule rel Rule{..} = pp rel <> (parens $ hsep $ punctuate comma $ map pp ruleLHS) <+> ":-" <+> (hsep $ punctuate comma $ map pp ruleRHS)
 
 relIsView :: Relation -> Bool
 relIsView = isJust . relDef
@@ -263,7 +263,7 @@ instance WithPos Assume where
     atPos a p = a{assPos = p}
 
 instance PP Assume where 
-    pp Assume{..} = pp "assume" <+> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
+    pp Assume{..} = "assume" <+> (parens $ hsep $ punctuate comma $ map pp assVars) <+> pp assExpr
 
 instance Show Assume where
     show = render . pp
@@ -284,10 +284,10 @@ instance WithName Function where
     name = funcName
 
 instance PP Function where
-    pp Function{..} = ((if' funcPure (pp "function") (pp "procedure")) <+> pp funcName 
+    pp Function{..} = ((if' funcPure ("function") ("procedure")) <+> pp funcName 
                        <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
                        <> colon <+> pp funcType 
-                       <+> (maybe empty (\_ -> pp "=") funcDef))
+                       <+> (maybe empty (\_ -> "=") funcDef))
                       $$
                        (maybe empty (nest' . pp) funcDef)
 
@@ -382,17 +382,17 @@ instance WithPos Type where
     atPos t p = t{typePos = p}
 
 instance PP Type where
-    pp (TLocation _)    = pp "Location"
-    pp (TBool _)        = pp "bool"
-    pp (TInt _)         = pp "int" 
-    pp (TString _)      = pp "string" 
-    pp (TBit _ w)       = pp "bit<" <> pp w <> pp ">" 
+    pp (TLocation _)    = "Location"
+    pp (TBool _)        = "bool"
+    pp (TInt _)         = "int" 
+    pp (TString _)      = "string" 
+    pp (TBit _ w)       = "bit<" <> pp w <> ">" 
     pp (TArray _ t l)   = brackets $ pp t <> semi <+> pp l
     pp (TStruct _ cons) = vcat $ punctuate (char '|') $ map pp cons
     pp (TTuple _ as)    = parens $ hsep $ punctuate comma $ map pp as
     pp (TOpaque _ n)    = pp n
     pp (TUser _ n)      = pp n
-    pp (TSink _)        = pp "sink"
+    pp (TSink _)        = "sink"
 
 instance Show Type where
     show = render . pp
@@ -410,7 +410,7 @@ instance WithName TypeDef where
     name = tdefName
 
 instance PP TypeDef where
-    pp TypeDef{..} = pp "typedef" <+> pp tdefName <+> maybe empty ((pp "=" <+>) . pp)  tdefType
+    pp TypeDef{..} = "typedef" <+> pp tdefName <+> maybe empty (("=" <+>) . pp)  tdefType
 
 instance Show TypeDef where
     show = render . pp
@@ -497,43 +497,43 @@ instance PP e => PP (ExprNode e) where
     pp (EBuiltin _ f as)   = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
     pp (ELocation _ r k)   = pp r <> (brackets $ pp k)
-    pp (EBool _ True)      = pp "true"
-    pp (EBool _ False)     = pp "false"
+    pp (EBool _ True)      = "true"
+    pp (EBool _ False)     = "false"
     pp (EInt _ v)          = pp v
     pp (EString _ s)       = pp s
-    pp (EBit _ w v)        = pp w <> pp "'d" <> pp v
+    pp (EBit _ w v)        = pp w <> "'d" <> pp v
     pp (EStruct _ s fs)    = pp s <> (braces $ hsep $ punctuate comma $ map pp fs)
     pp (ETuple _ fs)       = parens $ hsep $ punctuate comma $ map pp fs
     pp (ESlice _ e h l)    = pp e <> (brackets $ pp h <> colon <> pp l)
-    pp (EMatch _ e cs)     = pp "match" <+> pp e <+> (braces $ vcat 
+    pp (EMatch _ e cs)     = "match" <+> pp e <+> (braces $ vcat 
                                                        $ punctuate comma 
                                                        $ (map (\(c,v) -> pp c <> colon <+> pp v) cs))
-    pp (EVarDecl _ v)      = pp "var" <+> pp v
+    pp (EVarDecl _ v)      = "var" <+> pp v
     pp (ESeq _ l r)        = (pp l <> semi) $$ pp r
-    pp (EPar _ l r)        = (pp l <> pp "|" ) $$ pp r
-    pp (EITE _ c t me)     = (pp "if" <+> pp c <+> lbrace)
+    pp (EPar _ l r)        = (pp l <> "|" ) $$ pp r
+    pp (EITE _ c t me)     = ("if" <+> pp c <+> lbrace)
                              $$
                              (nest' $ pp t)
                              $$
-                             rbrace <+> (maybe empty (\e -> (pp "else" <+> lbrace) $$ (nest' $ pp e) $$ rbrace) me)
-    pp (EDrop _)           = pp "drop"
-    pp (ESet _ l r)        = pp l <+> pp "=" <+> pp r
-    pp (ESend  _ e)        = pp "send" <+> pp e
+                             rbrace <+> (maybe empty (\e -> ("else" <+> lbrace) $$ (nest' $ pp e) $$ rbrace) me)
+    pp (EDrop _)           = "drop"
+    pp (ESet _ l r)        = pp l <+> "=" <+> pp r
+    pp (ESend  _ e)        = "send" <+> pp e
     pp (EBinOp _ op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp _ op e)      = parens $ pp op <+> pp e
-    pp (EFor  _ v t c b)   = (pp "for"  <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
-    pp (EFork _ v t c b)   = (pp "fork" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) $$ (nest' $ pp b)
-    pp (EWith _ v t c b d) = (pp "the" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
+    pp (EFor  _ v t c b)   = ("for"  <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) $$ (nest' $ pp b)
+    pp (EFork _ v t c b)   = ("fork" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) $$ (nest' $ pp b)
+    pp (EWith _ v t c b d) = ("the" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) 
                              $$ (nest' $ pp b)
-                             $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
-    pp (EAny _ v t c b d)  = (pp "any" <+> (parens $ pp v <+> pp "in" <+> pp t <+> pp "|" <+> pp c)) 
+                             $$ (maybe empty (\e -> "default" <+> pp e)  d)
+    pp (EAny _ v t c b d)  = ("any" <+> (parens $ pp v <+> "in" <+> pp t <+> "|" <+> pp c)) 
                              $$ (nest' $ pp b)
-                             $$ (maybe empty (\e -> pp "default" <+> pp e)  d)
-    pp (EPHolder _)        = pp "_"
-    pp (ETyped _ e t)      = parens $ pp e <> pp ":" <+> pp t
+                             $$ (maybe empty (\e -> "default" <+> pp e)  d)
+    pp (EPHolder _)        = "_"
+    pp (ETyped _ e t)      = parens $ pp e <> ":" <+> pp t
     pp (ERelPred _ rel as) = pp rel <> (parens $ hsep $ punctuate comma $ map pp as)
-    pp (EPut _ rel v)      = pp rel <> pp "." <> pp "put" <> (parens $ pp v)
-    pp (EDelete _ rel c)   = pp rel <> pp "." <> pp "delete" <> (parens $ pp c)
+    pp (EPut _ rel v)      = pp rel <> "." <> "put" <> (parens $ pp v)
+    pp (EDelete _ rel c)   = pp rel <> "." <> "delete" <> (parens $ pp c)
 
 instance PP e => Show (ExprNode e) where
     show = render . pp

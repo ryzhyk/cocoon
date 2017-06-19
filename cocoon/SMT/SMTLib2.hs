@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE ImplicitParams, RecordWildCards #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings #-}
 
 -- Interface to SMT2 format
 
@@ -82,20 +82,20 @@ printQuery q@SMTQuery{..} =
                                          <+> (parens $ char '!' <+> smtppExpr q Nothing e <+> text ":named" <+> text assertName <> int i)) smtExprs)
 
 instance SMTPP Var where
-    smtpp q (Var n t) = parens $  pp "declare-const"
+    smtpp q (Var n t) = parens $  "declare-const"
                               <+> pp (mkIdent n)
                               <+> smtpp q t
 
 instance SMTPP Type where
-    smtpp _ TBool        = pp "Bool"
-    smtpp _ TInt         = pp "Int"
-    smtpp _ TString      = pp "String"
+    smtpp _ TBool        = "Bool"
+    smtpp _ TInt         = "Int"
+    smtpp _ TString      = "String"
     smtpp _ (TBit w)     = pp $ "(_ BitVec " ++ show w ++ ")"
     smtpp _ (TStruct n)  = pp n
-    smtpp q (TArray t _) = parens $ pp "Array" <+> pp "Int" <+> smtpp q t
+    smtpp q (TArray t _) = parens $ "Array" <+> "Int" <+> smtpp q t
 
 instance SMTPP Struct where
-    smtpp q (Struct n cs) = parens $ pp "declare-datatypes ()" 
+    smtpp q (Struct n cs) = parens $ "declare-datatypes ()" 
                                    <+> (parens $ parens $ pp n 
                                         <+> (hsep 
                                             $ map (\(Constructor cn fs) -> parens $ pp cn <+> (hsep $ map (\(Var f t) -> parens $ pp (cn ++ f) <+> smtpp q t) fs)) cs))
@@ -103,62 +103,62 @@ instance SMTPP Struct where
 smtppExpr :: SMTQuery -> Maybe Function -> Expr -> Doc
 smtppExpr _ _  (EVar n)           = pp n
 smtppExpr q mf (EField c e f)     = parens $ text (c ++ f) <+> smtppExpr q mf e
-smtppExpr _ _  (EBool True)       = pp "true"
-smtppExpr _ _  (EBool False)      = pp "false"
+smtppExpr _ _  (EBool True)       = "true"
+smtppExpr _ _  (EBool False)      = "false"
 smtppExpr _ _  (EBit w v)         = pp $ "(_ bv" ++ show v ++ " " ++ show w ++ ")"
 smtppExpr _ _  (EInt v)           = pp v
 smtppExpr _ _  (EString s)        = pp $ "\"" ++ s ++ "\""
-smtppExpr q mf (EIsInstance c e)  = parens $ pp "is-" <> pp c <+> smtppExpr q mf e
+smtppExpr q mf (EIsInstance c e)  = parens $ "is-" <> pp c <+> smtppExpr q mf e
 smtppExpr _ _  (EStruct c [])     = pp c
 smtppExpr q mf (EStruct c fs)     = parens (pp c <+> (hsep $ map (smtppExpr q mf) fs))
 smtppExpr q mf (EBinOp Neq e1 e2) = smtppExpr q mf $ EUnOp Not $ EBinOp Eq e1 e2
 smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtpp q op <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
 smtppExpr q mf (EUnOp op e)       = parens $ smtpp q op <+> smtppExpr q mf e
 smtppExpr q mf (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtppExpr q mf e
-smtppExpr q mf (ECond cs d)       = foldr (\(c,v) e -> parens $ pp "ite" <+> smtppExpr q mf c <+> smtppExpr q mf v <+> e) (smtppExpr q mf d) cs
+smtppExpr q mf (ECond cs d)       = foldr (\(c,v) e -> parens $ "ite" <+> smtppExpr q mf c <+> smtppExpr q mf v <+> e) (smtppExpr q mf d) cs
 smtppExpr _ _  (EApply f [])      = ppFName f
 smtppExpr q mf (EApply f as)      = parens $ ppFName f <+> (hsep $ map (smtppExpr q mf) as)
 smtppExpr _ _  (ERelPred r [])    = ppRelName r
 smtppExpr q mf (ERelPred r as)    = parens $ ppRelName r <+> (hsep $ map (smtppExpr q mf) as)
 
 instance SMTPP BOp where
-    smtpp _ Eq     = pp "="
+    smtpp _ Eq     = "="
     smtpp _ Neq    = error "SMTLib2.smtpp !="
-    smtpp _ Lt     = pp "bvult"
-    smtpp _ Gt     = pp "bvugt"
-    smtpp _ Lte    = pp "bvule"
-    smtpp _ Gte    = pp "bvuge"
-    smtpp _ And    = pp "and"
-    smtpp _ Or     = pp "or"
-    smtpp _ Impl   = pp "=>"
-    smtpp _ Plus   = pp "bvadd"
-    smtpp _ Minus  = pp "bvsub"
-    smtpp _ ShiftR = pp "bvlshr"
-    smtpp _ ShiftL = pp "bvshl"
-    smtpp _ Mod    = pp "bvurem"
-    smtpp _ Concat = pp "concat"
+    smtpp _ Lt     = "bvult"
+    smtpp _ Gt     = "bvugt"
+    smtpp _ Lte    = "bvule"
+    smtpp _ Gte    = "bvuge"
+    smtpp _ And    = "and"
+    smtpp _ Or     = "or"
+    smtpp _ Impl   = "=>"
+    smtpp _ Plus   = "bvadd"
+    smtpp _ Minus  = "bvsub"
+    smtpp _ ShiftR = "bvlshr"
+    smtpp _ ShiftL = "bvshl"
+    smtpp _ Mod    = "bvurem"
+    smtpp _ Concat = "concat"
 
 instance SMTPP UOp where
-    smtpp _ Not   = pp "not"
+    smtpp _ Not   = "not"
 
 instance SMTPP Function where
-    smtpp q f@Function{..} = parens $   pp "define-fun" <+> ppFName funcName 
+    smtpp q f@Function{..} = parens $   "define-fun" <+> ppFName funcName 
                                     <+> (parens $ hsep $ map (\(a,t) -> parens $ pp a <+> smtpp q t) funcArgs) 
                                     <+> smtpp q funcType
                                     <+> smtppExpr q (Just f) funcDef
 
 instance SMTPP Relation where
-    smtpp q (Relation n as) = (parens $ pp "declare-rel" <+> ppDisRelName n <+> (parens $ smtpp q $ TBit 64)) $$
-                              (parens $ pp "declare-rel" <+> ppRelName n <+> (parens $ hsep $ map (smtpp q . varType) as))
+    smtpp q (Relation n as) = (parens $ "declare-rel" <+> ppDisRelName n <+> (parens $ smtpp q $ TBit 64)) $$
+                              (parens $ "declare-rel" <+> ppRelName n <+> (parens $ hsep $ map (smtpp q . varType) as))
 
 instance SMTPP GroundRule where
-    smtpp q (GroundRule r as i) = parens $ pp "rule" <+> 
-                                  (parens $ pp "=>" <+> (parens $ pp "not" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i)))) 
+    smtpp q (GroundRule r as i) = parens $ "rule" <+> 
+                                  (parens $ "=>" <+> (parens $ "not" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i)))) 
                                                     <+> (smtppExpr q Nothing $ ERelPred r as))
 instance SMTPP Rule where
-    smtpp q (Rule vs h b i) = (vcat $ map (\v -> parens $ pp "declare-var" <+> (pp $ varname $ name v) <+> smtpp q (varType v)) vs) $$
-                              (parens $ pp "rule" <+> 
-                                        (parens $ pp "=>" <+> smtppExpr q Nothing b' <+> smtppExpr q Nothing h'))
+    smtpp q (Rule vs h b i) = (vcat $ map (\v -> parens $ "declare-var" <+> (pp $ varname $ name v) <+> smtpp q (varType v)) vs) $$
+                              (parens $ "rule" <+> 
+                                        (parens $ "=>" <+> smtppExpr q Nothing b' <+> smtppExpr q Nothing h'))
         where ERelPred rname _ = h
               varname x = "__" ++ rname ++ "_" ++ show i ++ "_" ++ x
               subst e = exprMap subst' e
