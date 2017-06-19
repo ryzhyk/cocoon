@@ -25,6 +25,7 @@ import System.Console.GetOpt
 import Control.Exception
 import Control.Monad
 
+import qualified Datalog.Dataflog as DL
 import Parse
 import Validate
 import SQL
@@ -42,6 +43,7 @@ data TOption = CCN String
              | Port String
         
 data CCNAction = ActionSQL 
+               | ActionDL
                | ActionController
                | ActionCLI
                | ActionNone
@@ -49,7 +51,7 @@ data CCNAction = ActionSQL
 
 options :: [OptDescr TOption]
 options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
-          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, controller"
+          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, dl, controller, cli"
           , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
           , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
           , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
@@ -85,6 +87,7 @@ addOption config (Action a)     = do a' <- case a of
                                                 "sql"        -> return ActionSQL
                                                 "controller" -> return ActionController
                                                 "cli"        -> return ActionCLI
+                                                "dl"         -> return ActionDL
                                                 _            -> error "invalid action"
                                      return config{confAction = a'}
 addOption config (Bound b)      = do b' <- case reads b of
@@ -131,6 +134,13 @@ main = do
                  schfile = workdir </> addExtension basename "schema"
              writeFile schfile $ render schema
              putStrLn $ "Schema written to file " ++ schfile
+         ActionDL -> do
+             combined <- readValidate fname workdir
+             --let rust = mkRust 
+             --    rsfile = workdir </> addExtension basename "rs"
+             --writeFile rsfile $ render rust
+             --putStrLn $ "Datalog program written to file " ++ rsfile
+             return ()
          ActionController -> do 
              combined <- readValidate fname workdir
              putStrLn "Starting controller"

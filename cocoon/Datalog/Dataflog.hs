@@ -19,7 +19,7 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards, ImplicitParams, LambdaCase, OverloadedStrings #-}
 
-module Datalog.Dataflog (mkRust, mkRule) where
+module Datalog.Dataflog (mkRust) where
 
 import Text.PrettyPrint
 import Data.List
@@ -34,6 +34,7 @@ import PP
 import Ops
 import SMT.SMTSolver
 import Datalog.Datalog
+import Datalog.DataflogTemplate
 
 data DFSession = DFSession { dfQ     :: SMTQuery
                            , dfRels  :: [Relation]}
@@ -54,17 +55,24 @@ ruleBodyRels' (EUnOp Not (ERelPred n _)) = [n]
 ruleBodyRels' (EBinOp And l r)           = ruleBodyRels' l ++ ruleBodyRels' r
 ruleBodyRels' _                          = []
 
-mkRust :: [Struct] -> [Function] -> [Relation] -> [Rule] -> Doc
+mkRust ::  [Struct] -> [Function] -> [Relation] -> [Rule] -> Doc
 mkRust structs funs rels rules = 
-        ("let" <+> (tuple retvars) <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
+    let q = SMTQuery structs [] funs [] in
+    let ?s = DFSession q rels in
+    let decls = vcat $ map mkStruct structs
+        logic = mkRules rules
+    in dataflogTemplate decls logic
+
+mkRules :: (?s::DFSession) => [Rule] -> Doc
+mkRules rules = 
+        ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
         (tuple retvals <> semi) $$
         "}"
     where
+    rels = dfRels ?s
     retvars = concatMap (\rl -> ["mut" <+> (pp $ hname rl), pp $ name rl]) rels
     retvals = concatMap (\rl -> [(pp $ hname rl), pp $ name rl]) rels
-    q = SMTQuery structs [] funs []
-    df = DFSession q rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
     -- graph with relations as nodes and edges labeled with rules (labels are not unique)
     relgraph = G.insEdges (concatMap (\rule -> let r1 = relidx (ruleHeadRel rule) in
@@ -82,7 +90,6 @@ mkRust structs funs rels rules =
     --  generate nested scope
     mkSCC :: G.Node -> Doc
     mkSCC sc = 
-        let ?s = df in
         let screls = fromJust $ G.lab sccgraph sc
             collects = map (mkRelDecl . (rels !!)) screls
             rs = map (\r -> "let" <+> (pp $ ruleHeadRel r) <+> "=" <+> (pp $ ruleHeadRel r) <> ".concat(&" <> mkRule r <> ");") 
@@ -93,7 +100,6 @@ mkRust structs funs rels rules =
 
     mkChildScope :: [G.Node] -> Doc
     mkChildScope screls =
-        let ?s = df in
         let header = "let" <+> (tuple $ map (pp . name . (rels !!)) screls) <+> "= outer.scoped::<u64,_,_>(|inner| {"
             -- rules in this scope
             scrules = nub $ map sel3 $ G.labEdges $ G.delNodes (G.nodes relgraph \\ screls) relgraph 

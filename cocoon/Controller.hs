@@ -22,7 +22,6 @@ import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Map as M
 import Data.List
-import Data.Maybe
 import Control.Exception
 import Control.Monad
 import "daemons" System.Daemon
@@ -37,19 +36,15 @@ import Eval
 
 import Util
 import Syntax
-import Refine
-import NS
-import Relation
 import Name
-import Type
 import Parse
 import Validate
 import qualified SQL
-import qualified Datalog.Datalog  as DL
-import qualified Datalog.Dataflog as DL
+import qualified Datalog.Datalog   as DL
 import qualified Datalog.Z3Datalog as DL
-import qualified SMT           as SMT
-import qualified SMT.SMTSolver as SMT
+import qualified Datalog           as DL
+import qualified SMT               as SMT
+import qualified SMT.SMTSolver     as SMT
 
 
 data ControllerState = ControllerDisconnected { ctlDBName       :: String
@@ -175,20 +170,11 @@ disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connect
 
 startDLSession :: (?r::Refine) => IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession = do
-    let rels = refineRelsSorted ?r
-    let funcs = map (getFunc ?r) $ nub $ concatMap (relFuncsRec ?r) rels
-    let funcs' = map SMT.func2SMT funcs
-    let structs = map (\t -> SMT.struct2SMT (name t) $ typeCons $ fromJust $ tdefType t)
-                  $ nub $ map (structTypeDef ?r . typ' ?r) 
-                  $ filter (\case 
-                             TStruct _ _ -> True
-                             _           -> False) 
-                  $ typeSort ?r $ nub $ concatMap (relTypes ?r) rels
-    let dlrels = zip rels $ map SMT.rel2DL rels
-    let (allrels, allrules) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) dlrels
-    dl@DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs' allrels
+    let (structs, funcs, rels) = DL.refine2DL ?r
+    let (allrels, allrules) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) rels
+    dl@DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs allrels
     mapM_ addRule $ concat allrules
-    return (dl, map (mapSnd (map (fst . last) . snd)) dlrels)
+    return (dl, map (mapSnd (map (fst . last) . snd)) rels)
 
 
 closeDLSession :: DL.Session -> IO ()

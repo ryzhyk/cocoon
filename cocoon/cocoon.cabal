@@ -19,7 +19,7 @@ executable cocoon
   main-is:             cocoon.hs
   -- other-modules:       
   other-extensions:    FlexibleContexts, TypeSynonymInstances, FlexibleInstances, RecordWildCards
-  build-depends:       base >=4.7 , mtl >=2.2 , parsec >=3.1 , fgl >=5.5 , pretty >=1.1 , containers, filepath >= 1.3, process >=1.4, MissingH >= 1.3, tuple >= 0.3, json >= 0.9.1, directory >= 1.2.5.1, heredoc >= 0.2, unix >= 2.7, postgresql-simple >= 0.5, bytestring >= 0.10, aeson >= 1.0, scientific >= 0.3.4, unordered-containers >= 0.2.7.1, text >= 1.1.1, daemons >= 0.2.1, pipes >= 4.0, haskeline >= 0.7, concurrent-extra >= 0.7
+  build-depends:       base >=4.7 , mtl >=2.2 , parsec >=3.1 , fgl >=5.5 , pretty >=1.1 , containers, filepath >= 1.3, process >=1.4, MissingH >= 1.3, tuple >= 0.3, json >= 0.9.1, directory >= 1.2.5.1, heredoc >= 0.2, unix >= 2.7, postgresql-simple >= 0.5, bytestring >= 0.10, aeson >= 1.0, scientific >= 0.3.4, unordered-containers >= 0.2.7.1, text >= 1.1.1, daemons >= 0.2.1, pipes >= 4.0, haskeline >= 0.7, concurrent-extra >= 0.7, raw-strings-qq >= 1.1
   -- hs-source-dirs:      
   default-language:    Haskell2010
   ghc-options:         -Wall -fno-warn-missing-signatures
