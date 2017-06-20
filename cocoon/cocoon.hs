@@ -26,6 +26,7 @@ import Control.Exception
 import Control.Monad
 
 import qualified Datalog.Dataflog as DL
+import qualified Datalog as DL
 import Parse
 import Validate
 import SQL
@@ -136,11 +137,13 @@ main = do
              putStrLn $ "Schema written to file " ++ schfile
          ActionDL -> do
              combined <- readValidate fname workdir
-             --let rust = mkRust 
-             --    rsfile = workdir </> addExtension basename "rs"
-             --writeFile rsfile $ render rust
-             --putStrLn $ "Datalog program written to file " ++ rsfile
-             return ()
+             let (structs, funcs, rels) = DL.refine2DL combined
+                 rels' = concatMap ((\(r,rs) -> map fst $ r:(concat rs)) . snd) rels
+                 rules = concatMap ((\(r,rs) -> concatMap snd $ r:(concat rs)) . snd) rels
+                 rust = DL.mkRust structs funcs rels' rules
+                 rsfile = workdir </> addExtension basename "rs"
+             writeFile rsfile $ render rust
+             putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
              combined <- readValidate fname workdir
              putStrLn "Starting controller"

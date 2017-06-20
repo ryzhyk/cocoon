@@ -5,6 +5,8 @@ module Datalog.DataflogTemplate where
 import Text.RawString.QQ
 import Text.PrettyPrint
 
+import PP
+
 dataflogTemplate :: Doc -> Doc -> Doc
 dataflogTemplate decls rules = [r|extern crate timely;
 #[macro_use]
@@ -77,7 +79,7 @@ fn main() {
     timely::execute_from_args(std::env::args(), |worker| {
 |]
     $$
-    rules
+    (nest' $ nest' rules)
     $$ [r|        //path.insert(Edge::Edge{f: 1, t: 2});
         //path.insert(Edge::Edge{f: 2, t: 3});
         //let e = *path.epoch();

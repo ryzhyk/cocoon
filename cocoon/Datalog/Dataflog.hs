@@ -67,12 +67,12 @@ mkRules :: (?s::DFSession) => [Rule] -> Doc
 mkRules rules = 
         ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
-        (tuple retvals <> semi) $$
-        "}"
+        (tuple retvals) $$
+        "});"
     where
     rels = dfRels ?s
     retvars = concatMap (\rl -> ["mut" <+> (pp $ hname rl), pp $ name rl]) rels
-    retvals = concatMap (\rl -> [(pp $ hname rl), pp $ name rl]) rels
+    retvals = concatMap (\rl -> [(pp $ hname rl), (pp $ name rl) <> ".probe()"]) rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
     -- graph with relations as nodes and edges labeled with rules (labels are not unique)
     relgraph = G.insEdges (concatMap (\rule -> let r1 = relidx (ruleHeadRel rule) in
@@ -92,7 +92,7 @@ mkRules rules =
     mkSCC sc = 
         let screls = fromJust $ G.lab sccgraph sc
             collects = map (mkRelDecl . (rels !!)) screls
-            rs = map (\r -> "let" <+> (pp $ ruleHeadRel r) <+> "=" <+> (pp $ ruleHeadRel r) <> ".concat(&" <> mkRule r <> ");") 
+            rs = map (\r -> "let" <+> (pp $ ruleHeadRel r) <+> "=" <+> (pp $ ruleHeadRel r) <> ".concat(&(" <> mkRule r <> "));") 
                  $ filter (all (\rel -> notElem (relidx rel) screls) . ruleBodyRels) -- non-recursive rules only
                  $ nub $ map sel3 $ G.inn sccgraph sc
             child = mkChildScope screls
@@ -200,7 +200,7 @@ mkRule rule@Rule{..} = mkRuleP rule [] [] empty (order [] preds npreds) conds
 mkRuleP :: (?s::DFSession) => Rule -> [String] -> [String] -> Doc -> [Expr] -> [Expr] -> Doc
 mkRuleP Rule{..} [] vars pref [] [] = 
     -- pref.map(|<vars>|(<args>))
-    pref <> "." <> "map" <> (parens $ "|" <> _vars <> "|" <+> _args)
+    pref $$ ("." <> "map" <> (parens $ "|" <> _vars <> "|" <+> _args))
     where ERelPred _ args = ruleHead
           _vars = tuple $ map pp vars
           _args = tuple $ map mkExpr args
@@ -232,27 +232,28 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
     _args = tuple $ map mkExpr args
     _vars = tuple $ map pp vars
     _jvars = tuple' $ map pp jvars
-    _jvars' = tuple' $ map pp jvars'
-    _care' = map pp care'
-    _vars' = map pp vars'
+    _jvars' = case preds' of
+                   [] -> []
+                   _  -> [tuple' $ map pp jvars']
+    _care' = tuple $ map pp care'
+    _vars' = tuple' $ map pp vars'
     filters = filter (/= empty) $ map (\(ra, a) -> mkFilter (EVar $ name ra) a) $ zip relArgs args
     _filters = case filters of
                     [] -> empty
-                    _  -> "." <> "filter" <> (parens $ lambda _args (hsep $ intersperse ("&&") filters))
+                    _  -> "." <> "filter" <> (parens $ lambda ("&" <> _args) (hsep $ intersperse ("&&") filters))
     pref' = if' (pref == empty)
                 -- <rname>.filter(<filters>).map(|<args>|(<jvars'>, <vars'>))
-                (pp rname <> _filters <>
-                             "." <> "map" <> (parens $ lambda _args (tuple $ _jvars':_vars') )) 
+                (pp rname <> (_filters
+                              $$ ("." <> "map" <> (parens $ lambda _args (tuple $ _jvars' ++ [_vars']) )))) 
                 (if' sign
                      -- <pref>.join_map(<rname>.filter(<filters>).map(|<args>|(<jvars>, <care'>)), |(<jvars>, <vars>, <care'>)|(<jvars'>, <vars'>))
-                     (pref <> "." <> "join_map" <> (parens 
-                              (pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args (tuple $ _jvars:_care'))) <> comma <+>
-                              ("|" <> tuple [_jvars, _vars, tuple _care'] <> "|" <+> (tuple $ _jvars':_vars'))))
+                     (pref $$ ("." <> "join_map" <> (parens $
+                               "&" <> (parens $ (pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args (tuple [_jvars,_care'])))) <> comma <+>
+                               ("|" <> commaSep ["&" <> _jvars, "&" <> _vars, "&" <> _care'] <> "|" <+> (tuple $ _jvars' ++ [_vars'])))))
                      -- <pref>.antijoin(<rname>.filter(<filters>).map(|<args>|<jvars>)).map(|(<jvars>, <vars>)|(<jvars'>, <vars'>))
-                     (pref <> "." <> "antijoin" <> 
-                              (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args _jvars)) <>
-                              "." <> "map" <> 
-                              (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars': _vars'))))
+                     (pref $$ ("." <> "antijoin" <> 
+                               (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args _jvars)) $$
+                               ("." <> "map" <> (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars' ++ [_vars']))))))
 
 mkFilter :: (?s::DFSession) => Expr -> Expr -> Doc
 mkFilter e pat | pat' == "_" = empty
@@ -328,9 +329,11 @@ mkRuleC rule@Rule{..} jvars vars pref preds conds =
         (mkRuleP rule jvars vars pref preds conds)
         (mkRuleP rule jvars vars pref' preds conds'')
     where 
-    _jvars = tuple' $ map pp jvars
-    _vars = map pp vars
+    _jvars = case preds of
+                  [] -> []
+                  _  -> [tuple' $ map pp jvars]
+    _vars = tuple' $ map pp vars
     (conds', conds'') = partition (\e -> null $ exprVars e \\ (jvars ++ vars)) conds
     _conds = mkExpr $ conj conds'
-    f = "." <> "filter" <> (parens $ "|" <> (tuple $ _jvars:_vars) <> "|" <+> _conds)
-    pref' = pref <> f
+    f = "." <> "filter" <> (parens $ "|" <> "&" <> (tuple $ _jvars ++ [_vars]) <> "|" <+> _conds)
+    pref' = pref $$ f
