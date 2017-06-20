@@ -16,7 +16,7 @@ limitations under the License.
 -}
 -- Generic interface of an SMT solver
 
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, OverloadedStrings #-}
 
 module SMT.SMTSolver where
 
@@ -95,10 +95,30 @@ data Expr = EVar        String
           | ESlice      Expr Int Int
           | ECond       [(Expr, Expr)] Expr
           | ERelPred    String [Expr]
-          deriving (Show, Eq)
+          deriving (Eq)
+
 
 instance PP Expr where
-    pp = text . show
+    pp (EVar v)          = pp v
+    pp (EApply f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
+    pp (EField _ s f)    = pp s <> "." <> pp f
+    pp (EBool True)      = "true"
+    pp (EBool False)     = "false"
+    pp (EBit w v)        = pp w <> "'d" <> pp v
+    pp (EInt i)          = pp i
+    pp (EString s)       = "\"" <> pp s <> "\""
+    pp (EStruct c as)    = pp c <> "{" <> (hsep $ punctuate comma $ map pp as)  <> "}"
+    pp (EIsInstance c e) = "is_" <> pp c <> parens (pp e)
+    pp (EBinOp op l r)   = parens $ pp l <+> pp op <+> pp r
+    pp (EUnOp op e)      = parens $ pp op <+> pp e 
+    pp (ESlice e h l)    = pp e <> "[" <> pp h <> ":" <> pp l <> "]" 
+    pp (ECond cs d)      = "case {" <>
+                           (nest' $ (hsep $ map (\(c,e) -> pp c <> ":" <+> pp e <> comma) cs) <+> "default:" <+> pp d) <>
+                           "}"
+    pp (ERelPred p as)   = pp p <> (parens $ hsep $ punctuate comma $ map pp as)
+
+instance Show Expr where
+    show = render . pp
 
 exprMap :: (Expr -> Expr) -> Expr -> Expr
 exprMap g e@(EVar _)          = g e

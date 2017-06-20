@@ -16,7 +16,7 @@ limitations under the License.
 
 -- Generic interface to a Datalog engine
 
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 
 module Datalog.Datalog( DatalogEngine(..)
                       , Relation(..)
@@ -26,8 +26,10 @@ module Datalog.Datalog( DatalogEngine(..)
                       , Session(..)) where
 
 import Data.Int
+import Text.PrettyPrint
 
 import Name
+import PP
 import SMT.SMTSolver
 
 data Relation = Relation { relName :: String 
@@ -42,6 +44,12 @@ data Rule = Rule { ruleVars :: [Var]
                  , ruleBody :: Expr
                  , ruleId   :: RuleId -- get rid of this
                  } deriving (Eq)
+
+instance PP Rule where
+    pp Rule{..} = pp ruleHead <+> ":-" <+> pp ruleBody
+
+instance Show Rule where
+    show = render . pp
 
 data GroundRule = GroundRule { gruleRel  :: String
                              , gruleArgs :: [Expr]
