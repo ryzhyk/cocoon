@@ -18,6 +18,16 @@ use std::ops::*;
 use num::bigint::BigUint;
 use abomonation::Abomonation;
 
+#[macro_use] 
+extern crate serde_derive;
+extern crate serde;
+extern crate serde_json;
+use std::ops::*;
+use serde::ser::*;
+use serde::de::*;
+use std::str::FromStr;
+use serde::de::Error;
+
 use timely::progress::nested::product::Product;
 use timely::dataflow::*;
 use timely::dataflow::scopes::Child;
@@ -80,6 +90,28 @@ impl Default for uint {
     fn default() -> uint {uint{x: BigUint::default()}}
 }
 unsafe_abomonate!(uint);
+
+impl Serialize for uint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        serializer.serialize_str(&self.x.to_str_radix(10))
+    }
+}
+
+impl<'de> Deserialize<'de> for uint {
+    fn deserialize<D>(deserializer: D) -> Result<uint, D::Error>
+        where D: Deserializer<'de>
+    {
+        match String::deserialize(deserializer) {
+            Ok(s) => match BigUint::from_str(&s) {
+                        Ok(i)  => Ok(uint{x:i}),
+                        Err(e) => Err(D::Error::custom(format!("invalid integer value: {}", s)))
+                     },
+            Err(e) => Err(e)
+        }
+    }
+}
 
 impl uint {
     #[inline]

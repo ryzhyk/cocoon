@@ -42,6 +42,31 @@ data DFSession = DFSession { dfQ     :: SMTQuery
 hname :: Relation -> String
 hname rel = "_" ++ name rel
 
+commaSep = hsep . punctuate comma
+commaCat = hcat . punctuate comma
+
+tuple xs = tuple_ $ filter (/= empty) xs
+tuple_ []  = parens empty
+tuple_ [x] = x
+tuple_ xs  = parens $ commaCat xs
+
+reftuple xs = reftuple_ $ map (filter (/= empty)) xs
+reftuple_ [[x]]  = x
+reftuple_ xss    = "&" <> reftuple__ xss
+
+reftuple__ [xs] = reftuple___ xs
+reftuple__ xss  = parens $ commaSep $ map reftuple___ xss
+
+reftuple___ []  = parens empty
+reftuple___ [x] = "ref" <+> x
+reftuple___ xs  = parens $ commaCat $ map ("ref" <+>) xs
+
+lambda :: Doc -> Doc -> Doc
+lambda as e = "|" <> as <> "|" <+> e
+
+lambdam :: Doc -> Doc -> Doc
+lambdam as e = "|_x_| match _x_ {" <> as <+> "=>" <+> e <> ", _ => unreachable!()}"
+
 ruleHeadRel :: Rule -> String
 ruleHeadRel rl = n
     where ERelPred n _ = ruleHead rl
@@ -120,30 +145,6 @@ mkRelDecl rel = "let (mut" <+> n' <> comma <+> n <> ") = outer.new_collection::<
           n' = pp $ hname rel
           args = map (mkType . varType) $ relArgs rel
 
-commaSep = hsep . punctuate comma
-commaCat = hcat . punctuate comma
-
-tuple xs = tuple_ $ filter (/= empty) xs
-tuple_ []  = parens empty
-tuple_ [x] = x
-tuple_ xs  = parens $ commaCat xs
-
-reftuple xs = reftuple_ $ map (filter (/= empty)) xs
-reftuple_ [[x]]  = x
-reftuple_ xss    = "&" <> reftuple__ xss
-
-reftuple__ [xs] = reftuple___ xs
-reftuple__ xss  = parens $ commaSep $ map reftuple___ xss
-
-reftuple___ []  = parens empty
-reftuple___ [x] = "ref" <+> x
-reftuple___ xs  = parens $ commaCat $ map ("ref" <+>) xs
-
-lambda :: Doc -> Doc -> Doc
-lambda as e = "|" <> as <> "|" <+> e
-
-lambdam :: Doc -> Doc -> Doc
-lambdam as e = "|_x_| match _x_ {" <> as <+> "=>" <+> e <> ", _ => unreachable!()}"
 
 mkType :: Type -> Doc
 mkType TBool                = "bool"
@@ -158,7 +159,7 @@ mkType (TStruct s)          = pp s
 mkType TArray{}             = error "not implemented: Dataflog.mkType TArray"
 
 mkStruct :: Struct -> Doc
-mkStruct (Struct n cs) = "#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone, Hash)]" $$
+mkStruct (Struct n cs) = "#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone, Hash, Serialize, Deserialize)]" $$
                          enum $$
                          def $$    
                          pp ("unsafe_abomonate!(" ++ n ++ ");")
