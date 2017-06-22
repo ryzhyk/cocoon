@@ -1,6 +1,5 @@
 {-
 Copyrights (c) 2017. VMware, Inc. All right reserved. 
-Copyrights (c) 2016. Samsung Electronics Ltd. All right reserved. 
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -35,9 +34,6 @@ import Ops
 import SMT.SMTSolver
 import Datalog.Datalog
 import Datalog.DataflogTemplate
-
-data DFSession = DFSession { dfQ     :: SMTQuery
-                           , dfRels  :: [Relation]}
 
 hname :: Relation -> String
 hname rel = "_" ++ name rel
@@ -82,20 +78,20 @@ ruleBodyRels' _                          = []
 
 mkRust ::  [Struct] -> [Function] -> [Relation] -> [Rule] -> Doc
 mkRust structs funs rels rules = 
-    let q = SMTQuery structs [] funs [] in
-    let ?s = DFSession q rels in
+    let ?q = SMTQuery structs [] funs [] in
+    let ?rels = rels in
     let decls = vcat $ map mkStruct structs
         logic = mkRules rules
     in dataflogTemplate decls logic
 
-mkRules :: (?s::DFSession) => [Rule] -> Doc
+mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
         ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
         (tuple retvals) $$
         "});"
     where
-    rels = dfRels ?s
+    rels = ?rels
     retvars = concatMap (\rl -> ["mut" <+> (pp $ hname rl), pp $ name rl]) rels
     retvals = concatMap (\rl -> [(pp $ hname rl), (pp $ name rl) <> ".probe()"]) rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
@@ -178,7 +174,7 @@ mkStruct (Struct n cs) = "#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone,
           (nest' $ "fn default() -> " <+> pp n <+> "{" $$ (nest' $ pp n <> "::" <> pp cn <> defas <> "}")) $$
           "}"
     
-mkRule :: (?s::DFSession) => Rule -> Doc
+mkRule :: (?q::SMTQuery, ?rels::[Relation]) => Rule -> Doc
 mkRule rule = mkRuleP rule' [] [] empty (order [] preds npreds) conds
     where 
     rule'@Rule{..} = removeFields rule
@@ -198,7 +194,7 @@ mkRule rule = mkRuleP rule' [] [] empty (order [] preds npreds) conds
               (nps', nps'') = partition (\np -> null $ exprVars np \\ vs') nps
 
 -- Get rid of subexpressions of the form var.field. 
-removeFields :: (?s::DFSession) => Rule -> Rule
+removeFields :: (?q::SMTQuery) => Rule -> Rule
 removeFields rule@Rule{..} = 
     case vcons of
          [] -> rule
@@ -224,7 +220,7 @@ removeFields rule@Rule{..} =
     -- collect all v.f subexpressions.
     vcons :: [(String, Constructor)]
     vcons = nub $ exprCollect f ruleHead ++ exprCollect f ruleBody
-        where f (EField c (EVar v) _) = [(v, getConstructor (dfQ ?s) c)]
+        where f (EField c (EVar v) _) = [(v, getConstructor ?q c)]
               f _                     = []
     fvar v f = "_" ++ v ++ "_" ++ f
     -- TODO: make sure constructors match
@@ -241,7 +237,7 @@ removeFields rule@Rule{..} =
  preds - remaining predicates in the body of the rule
  conds - remaining arithmetic constraints in the body of the rule
  -}
-mkRuleP :: (?s::DFSession) => Rule -> [String] -> [String] -> Doc -> [Expr] -> [Expr] -> Doc
+mkRuleP :: (?q::SMTQuery, ?rels::[Relation]) => Rule -> [String] -> [String] -> Doc -> [Expr] -> [Expr] -> Doc
 mkRuleP Rule{..} [] vars pref [] [] = 
     -- pref.map(|<vars>|(<args>))
     pref $$ ("." <> "map" <> (parens $ "|" <> _vars <> "|" <+> _args))
@@ -272,7 +268,7 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
                                EUnOp Not (ERelPred rn as) -> (False, rn, as)
                                ERelPred rn as             -> (True,  rn, as)
                                _                          -> error $ "Dataflog.mkRuleP: invalid predicate " ++ show p
-    Relation{..} = fromJust $ find ((== rname) . name) $ dfRels ?s
+    Relation{..} = fromJust $ find ((== rname) . name) ?rels
     _args = tuple $ map (mkExpr True) args
     _vars = tuple $ map pp vars
     _jvars = tuple $ map pp jvars
@@ -304,18 +300,18 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
                                (parens $ "&" <> (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambdam _args _jvars))) $$
                                ("." <> "map" <> (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars' ++ [_vars']))))))
 
-mkFilter :: (?s::DFSession) => Expr -> Expr -> Doc
+mkFilter :: (?q::SMTQuery) => Expr -> Expr -> Doc
 mkFilter e pat | pat' == "_" = empty
                | otherwise = "match" <+> mkExpr False e <+> 
                              "{" <> pat' <+> "=>" <+> "true" <> comma <+> "_" <+> "=>" <+> "false" <> "}"
     where pat' = mkFilter' pat
 
-mkFilter' :: (?s::DFSession) => Expr -> Doc
+mkFilter' :: (?q::SMTQuery) => Expr -> Doc
 mkFilter' (EVar _) = "_"
 mkFilter' (EStruct c as) | length structCons == 1 && (all (== "_") afs) = "_"
                          | otherwise = pp structName <> "::" <> pp c <> as'
-    where Struct{..} = getStruct (dfQ ?s) c 
-          args = consArgs $ getConstructor (dfQ ?s) c
+    where Struct{..} = getStruct ?q c 
+          args = consArgs $ getConstructor ?q c
           afs = map mkFilter' as
           as' = case as of
                      [] -> empty
@@ -323,7 +319,7 @@ mkFilter' (EStruct c as) | length structCons == 1 && (all (== "_") afs) = "_"
                                                $ zip args afs) <> "}"
 mkFilter' e = error $ "Dataflog.mkFilter' " ++ show e
 
-mkExpr :: (?s::DFSession) => Bool ->  Expr -> Doc
+mkExpr :: (?q::SMTQuery) => Bool ->  Expr -> Doc
 mkExpr True  (EVar v)           = pp v
 mkExpr False (EVar v)           = pp v <> ".clone()"
 mkExpr p     (EApply f as)      = pp f <> (parens $ commaSep $ map (mkExpr p) as)
@@ -337,8 +333,8 @@ mkExpr _     (EInt i)             = "uint::parse_bytes" <>
 mkExpr _     (EString s)          = pp $ "\"" ++ s ++ "\""
 mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
                                     (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr p a) $ zip args as) <> "}"
-    where s = getStruct (dfQ ?s) c
-          args = consArgs $ getConstructor (dfQ ?s) c
+    where s = getStruct ?q c
+          args = consArgs $ getConstructor ?q c
 mkExpr _     EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
 mkExpr p     (EBinOp op e1 e2)    = 
     case op of
@@ -372,7 +368,7 @@ mkExpr _     ERelPred{}           = error "not implemented: Dataflog.mkExpr ERel
 {- Recursive step of rule translation: filter based on arith constraints 
    whose variables have been introduced by now
  -}
-mkRuleC :: (?s::DFSession) => Rule -> [String] -> [String] -> Doc -> [Expr] -> [Expr] -> Doc
+mkRuleC :: (?q::SMTQuery, ?rels::[Relation]) => Rule -> [String] -> [String] -> Doc -> [Expr] -> [Expr] -> Doc
 mkRuleC rule@Rule{..} jvars vars pref preds conds =
     if' (null conds')
         (mkRuleP rule jvars vars pref preds conds)
