@@ -51,7 +51,7 @@ instance Show Type where
 
 data Constructor = Constructor { consName :: String 
                                , consArgs :: [Var]
-                               }
+                               } deriving (Eq)
 
 instance WithName Constructor where
     name = consName
@@ -62,6 +62,10 @@ data Struct = Struct { structName   :: String
 
 instance WithName Struct where
     name (Struct n _) = n
+
+
+fieldConstructors :: Struct -> String -> [Constructor]
+fieldConstructors s f = filter (any ((== f) . name) . consArgs) $ structCons s
 
 data Var = Var { varName :: String
                , varType :: Type} 

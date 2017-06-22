@@ -124,27 +124,36 @@ commaSep = hsep . punctuate comma
 commaCat = hcat . punctuate comma
 
 tuple xs = tuple_ $ filter (/= empty) xs
-tuple_ []  = empty
+tuple_ []  = parens empty
 tuple_ [x] = x
 tuple_ xs  = parens $ commaCat xs
 
-tuple' xs = tuple_' $ filter (/= empty) xs
-tuple_' []  = parens empty
-tuple_' [x] = x
-tuple_' xs  = parens $ commaCat xs
+reftuple xs = reftuple_ $ map (filter (/= empty)) xs
+reftuple_ [[x]]  = x
+reftuple_ xss    = "&" <> reftuple__ xss
+
+reftuple__ [xs] = reftuple___ xs
+reftuple__ xss  = parens $ commaSep $ map reftuple___ xss
+
+reftuple___ []  = parens empty
+reftuple___ [x] = "ref" <+> x
+reftuple___ xs  = parens $ commaCat $ map ("ref" <+>) xs
 
 lambda :: Doc -> Doc -> Doc
 lambda as e = "|" <> as <> "|" <+> e
 
+lambdam :: Doc -> Doc -> Doc
+lambdam as e = "|_x_| match _x_ {" <> as <+> "=>" <+> e <> ", _ => unreachable!()}"
+
 mkType :: Type -> Doc
 mkType TBool                = "bool"
-mkType TInt                 = "BigUint"
+mkType TInt                 = "uint"
 mkType TString              = "String"
 mkType (TBit w) | w <= 8    = "u8"
                 | w <= 16   = "u16"
                 | w <= 32   = "u32"
                 | w <= 64   = "u64"
-                | otherwise = "BigUint"
+                | otherwise = "uint"
 mkType (TStruct s)          = pp s
 mkType TArray{}             = error "not implemented: Dataflog.mkType TArray"
 
@@ -169,8 +178,9 @@ mkStruct (Struct n cs) = "#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone,
           "}"
     
 mkRule :: (?s::DFSession) => Rule -> Doc
-mkRule rule@Rule{..} = mkRuleP rule [] [] empty (order [] preds npreds) conds
+mkRule rule = mkRuleP rule' [] [] empty (order [] preds npreds) conds
     where 
+    rule'@Rule{..} = removeFields rule
     -- decompose the rule into a list of relatinal predicates and arithmetic constraints
     (preds, npreds, conds) = decompose ruleBody
     decompose (EBinOp And x xs)        = let (ps1, nps1, cs1) = decompose x 
@@ -185,6 +195,39 @@ mkRule rule@Rule{..} = mkRuleP rule [] [] empty (order [] preds npreds) conds
     order vs (p:ps) nps = p : nps' ++ order vs' ps nps''
         where vs' = nub $ vs  ++ exprVars p
               (nps', nps'') = partition (\np -> null $ exprVars np \\ vs') nps
+
+-- Get rid of subexpressions of the form var.field. 
+removeFields :: (?s::DFSession) => Rule -> Rule
+removeFields rule@Rule{..} = 
+    case vcons of
+         [] -> rule
+         _  -> let subst1 e@(EField _ (EVar v) f) = case lookup v vcons of
+                                                         Nothing  -> e
+                                                         _        -> EVar $ fvar v f
+                   subst1 e                       = e
+                   subst2 e@(EVar v) = case lookup v vcons of
+                                            Nothing -> e
+                                            Just c  -> EStruct (name c) $ map (\f -> EVar $ fvar v (name f)) $ consArgs c
+                   subst2 e          = e
+                   -- substiture: v -> C{v_f1, v_f1, ...}
+                   --             v.f -> v_f
+                   h = exprMap subst2 $ exprMap subst1 ruleHead
+                   b = exprMap subst2 $ exprMap subst1 ruleBody
+                   vs = concatMap (\v -> case lookup (name v) vcons of
+                                              Just c -> map (\(Var f t) -> Var (fvar (name v) f) t) $ consArgs c
+                                              _      -> [v]) ruleVars
+                   -- update rule's variable list
+                   rule' = Rule vs h b ruleId
+               in removeFields rule'
+    where
+    -- collect all v.f subexpressions.
+    vcons :: [(String, Constructor)]
+    vcons = nub $ exprCollect f ruleHead ++ exprCollect f ruleBody
+        where f (EField c (EVar v) _) = [(v, getConstructor (dfQ ?s) c)]
+              f _                     = []
+    fvar v f = "_" ++ v ++ "_" ++ f
+    -- TODO: make sure constructors match
+    -- vcons' = sortAndGroup fst vcons
 
 {- Recursive step of rule translation: map_join
  jvars - variables that will be used in the next join.  The prefix of
@@ -203,7 +246,7 @@ mkRuleP Rule{..} [] vars pref [] [] =
     pref $$ ("." <> "map" <> (parens $ "|" <> _vars <> "|" <+> _args))
     where ERelPred _ args = ruleHead
           _vars = tuple $ map pp vars
-          _args = tuple $ map mkExpr args
+          _args = tuple $ map (mkExpr False) args
 mkRuleP rule [] vars pref [] conds = 
     mkRuleC rule [] vars pref [] conds
 mkRuleP rule@Rule{..} jvars vars pref preds conds = 
@@ -229,35 +272,40 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
                                ERelPred rn as             -> (True,  rn, as)
                                _                          -> error $ "Dataflog.mkRuleP: invalid predicate " ++ show p
     Relation{..} = fromJust $ find ((== rname) . name) $ dfRels ?s
-    _args = tuple $ map mkExpr args
+    _args = tuple $ map (mkExpr True) args
     _vars = tuple $ map pp vars
-    _jvars = tuple' $ map pp jvars
+    _jvars = tuple $ map pp jvars
     _jvars' = case preds' of
                    [] -> []
-                   _  -> [tuple' $ map pp jvars']
+                   _  -> [tuple $ map pp jvars']
+    _jvars'' = case preds' of
+                    [] -> []
+                    _  -> [tuple $ map ((<> ".clone()") . pp) jvars']
     _care' = tuple $ map pp care'
-    _vars' = tuple' $ map pp vars'
+    _vars' = tuple $ map pp vars'
+    _vars'' = tuple $ map ((<> ".clone()") . pp) vars'
+    _rargs = reftuple [map (pp . name) relArgs]
     filters = filter (/= empty) $ map (\(ra, a) -> mkFilter (EVar $ name ra) a) $ zip relArgs args
     _filters = case filters of
                     [] -> empty
-                    _  -> "." <> "filter" <> (parens $ lambda ("&" <> _args) (hsep $ intersperse ("&&") filters))
+                    _  -> "." <> "filter" <> (parens $ lambda _rargs (hsep $ intersperse ("&&") filters))
     pref' = if' (pref == empty)
                 -- <rname>.filter(<filters>).map(|<args>|(<jvars'>, <vars'>))
                 (pp rname <> (_filters
-                              $$ ("." <> "map" <> (parens $ lambda _args (tuple $ _jvars' ++ [_vars']) )))) 
+                              $$ ("." <> "map" <> (parens $ lambdam _args (tuple $ _jvars' ++ [_vars']) )))) 
                 (if' sign
                      -- <pref>.join_map(<rname>.filter(<filters>).map(|<args>|(<jvars>, <care'>)), |(<jvars>, <vars>, <care'>)|(<jvars'>, <vars'>))
                      (pref $$ ("." <> "join_map" <> (parens $
-                               "&" <> (parens $ (pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args (tuple [_jvars,_care'])))) <> comma <+>
-                               ("|" <> commaSep ["&" <> _jvars, "&" <> _vars, "&" <> _care'] <> "|" <+> (tuple $ _jvars' ++ [_vars'])))))
+                               "&" <> (parens $ (pp rname <> _filters <> "." <> "map" <> (parens $ lambdam _args (tuple [_jvars,_care'])))) <> comma <+>
+                               ("|" <> commaSep [reftuple [map pp jvars], reftuple [map pp vars], reftuple [map pp care']] <> "|" <+> (tuple $ _jvars'' ++ [_vars''])))))
                      -- <pref>.antijoin(<rname>.filter(<filters>).map(|<args>|<jvars>)).map(|(<jvars>, <vars>)|(<jvars'>, <vars'>))
                      (pref $$ ("." <> "antijoin" <> 
-                               (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambda _args _jvars)) $$
+                               (parens $ "&" <> (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambdam _args _jvars))) $$
                                ("." <> "map" <> (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars' ++ [_vars']))))))
 
 mkFilter :: (?s::DFSession) => Expr -> Expr -> Doc
 mkFilter e pat | pat' == "_" = empty
-               | otherwise = "match" <+> mkExpr e <+> 
+               | otherwise = "match" <+> mkExpr False e <+> 
                              "{" <> pat' <+> "=>" <+> "true" <> comma <+> "_" <+> "=>" <+> "false" <> "}"
     where pat' = mkFilter' pat
 
@@ -274,23 +322,24 @@ mkFilter' (EStruct c as) | length structCons == 1 && (all (== "_") afs) = "_"
                                                $ zip args afs) <> "}"
 mkFilter' e = error $ "Dataflog.mkFilter' " ++ show e
 
-mkExpr :: (?s::DFSession) => Expr -> Doc
-mkExpr (EVar v)             = pp v
-mkExpr (EApply f as)        = pp f <> (parens $ commaSep $ map mkExpr as)
-mkExpr (EField _ s f)       = mkExpr s <> "." <> pp f
-mkExpr (EBool True)         = "true"
-mkExpr (EBool False)        = "false"
-mkExpr (EBit w i) | w<=64   = pp i
-                  | otherwise = mkExpr $ EInt i
-mkExpr (EInt i)             = "BigUint::parse_bytes" <> 
-                              (parens $ "b\"" <> pp i <> "\"" <> comma <+> "10") <> ".unwrap()"
-mkExpr (EString s)          = pp $ "\"" ++ s ++ "\""
-mkExpr (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
-                              (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr a) $ zip args as) <> "}"
+mkExpr :: (?s::DFSession) => Bool ->  Expr -> Doc
+mkExpr True  (EVar v)           = pp v
+mkExpr False (EVar v)           = pp v <> ".clone()"
+mkExpr p     (EApply f as)      = pp f <> (parens $ commaSep $ map (mkExpr p) as)
+mkExpr p     (EField _ s f)     = mkExpr p s <> "." <> pp f
+mkExpr _     (EBool True)         = "true"
+mkExpr _     (EBool False)        = "false"
+mkExpr p     (EBit w i) | w<=64   = pp i
+                        | otherwise = mkExpr p $ EInt i
+mkExpr _     (EInt i)             = "uint::parse_bytes" <> 
+                                    (parens $ "b\"" <> pp i <> "\"" <> comma <+> "10") <> ".unwrap()"
+mkExpr _     (EString s)          = pp $ "\"" ++ s ++ "\""
+mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
+                                    (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr p a) $ zip args as) <> "}"
     where s = getStruct (dfQ ?s) c
           args = consArgs $ getConstructor (dfQ ?s) c
-mkExpr EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
-mkExpr (EBinOp op e1 e2)    = 
+mkExpr _     EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
+mkExpr p     (EBinOp op e1 e2)    = 
     case op of
          Eq     -> f "=="
          Neq    -> f "!="
@@ -305,20 +354,19 @@ mkExpr (EBinOp op e1 e2)    =
          Mod    -> f "%"
          ShiftR -> f ">>"
          ShiftL -> f "<<"
-         Impl   -> mkExpr $ EBinOp Or (EUnOp Not e1) e2
+         Impl   -> mkExpr p $ EBinOp Or (EUnOp Not e1) e2
          Concat -> error "not implemented: Dataflog.mkExpr Concat"
-    where f o = parens $ mkExpr e1 <+> o <+> mkExpr e2
-
-mkExpr (EUnOp Not e)        = parens $ "!" <> mkExpr e
-mkExpr (ESlice e h l)       = let e' = mkExpr e
-                                  e1 = if' (l == 0) e' (parens $ e' <+> ">>" <+> pp l)
-                                  mask = foldl' setBit 0 [0..(h-l)]
-                                  mask' = mkExpr $ EBit (h-l+1) mask
+    where f o = parens $ mkExpr p e1 <+> o <+> mkExpr p e2
+mkExpr p     (EUnOp Not e)        = parens $ "!" <> mkExpr p e
+mkExpr p     (ESlice e h l)       = let e' = mkExpr p e
+                                        e1 = if' (l == 0) e' (parens $ e' <+> ">>" <+> pp l)
+                                        mask = foldl' setBit 0 [0..(h-l)]
+                                        mask' = mkExpr p $ EBit (h-l+1) mask
                               in parens $ e1 <+> "&" <+> mask'
-mkExpr (ECond [] d)         = mkExpr d
-mkExpr (ECond ((c,e):cs) d) = "if" <+> mkExpr c <+> "{" <> mkExpr e <> "}" <+> 
-                              "else" <+> (mkExpr $ ECond cs d)
-mkExpr ERelPred{}           = error "not implemented: Dataflog.mkExpr ERelPred"
+mkExpr p     (ECond [] d)         = mkExpr p d
+mkExpr p     (ECond ((c,e):cs) d) = "if" <+> mkExpr p c <+> "{" <> mkExpr p e <> "}" <+> 
+                                    "else" <+> (mkExpr p $ ECond cs d)
+mkExpr _     ERelPred{}           = error "not implemented: Dataflog.mkExpr ERelPred"
 
 {- Recursive step of rule translation: filter based on arith constraints 
    whose variables have been introduced by now
@@ -331,9 +379,11 @@ mkRuleC rule@Rule{..} jvars vars pref preds conds =
     where 
     _jvars = case preds of
                   [] -> []
-                  _  -> [tuple' $ map pp jvars]
-    _vars = tuple' $ map pp vars
+                  _  -> [map pp jvars]
+    _vars = map pp vars
     (conds', conds'') = partition (\e -> null $ exprVars e \\ (jvars ++ vars)) conds
-    _conds = mkExpr $ conj conds'
-    f = "." <> "filter" <> (parens $ "|" <> "&" <> (tuple $ _jvars ++ [_vars]) <> "|" <+> _conds)
+    _conds = mkExpr False {-$ exprMap (\case
+                                EVar v -> EVar $ "(*" ++ v ++ ")"
+                                e      -> e)-} $ conj conds'
+    f = "." <> "filter" <> (parens $ "|" <> (reftuple $ _jvars ++ [_vars]) <> "|" <+> _conds)
     pref' = pref $$ f

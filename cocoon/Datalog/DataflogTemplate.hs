@@ -12,7 +12,10 @@ dataflogTemplate decls rules = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
+extern crate num;
+use std::ops::*;
 
+use num::bigint::BigUint;
 use abomonation::Abomonation;
 
 use timely::progress::nested::product::Product;
@@ -68,7 +71,59 @@ impl<'a, G: Scope, D: Default+Data+Hashable> Drop for Variable<'a, G, D> where G
                         .connect_loop(feedback);
         }
     }
-}|]
+}
+
+#[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone, Hash)]
+struct uint{x:BigUint}
+
+impl Default for uint {
+    fn default() -> uint {uint{x: BigUint::default()}}
+}
+unsafe_abomonate!(uint);
+
+impl uint {
+    #[inline]
+    pub fn parse_bytes(buf: &[u8], radix: u32) -> uint {
+        uint{x: BigUint::parse_bytes(buf, radix).unwrap()}
+    }
+}
+
+impl Shr<usize> for uint {
+    type Output = uint;
+
+    #[inline]
+    fn shr(self, rhs: usize) -> uint {
+        uint{x: self.x.shr(rhs)}
+    }
+}
+
+impl Shl<usize> for uint {
+    type Output = uint;
+
+    #[inline]
+    fn shl(self, rhs: usize) -> uint {
+        uint{x: self.x.shl(rhs)}
+    }
+}
+
+macro_rules! forward_binop {
+    (impl $imp:ident for $res:ty, $method:ident) => {
+        impl $imp<$res> for $res {
+            type Output = $res;
+
+            #[inline]
+            fn $method(self, other: $res) -> $res {
+                // forward to val-ref
+                uint{x: $imp::$method(self.x, other.x)}
+            }
+        }
+    }
+}
+
+forward_binop!(impl Add for uint, add);
+forward_binop!(impl Sub for uint, sub);
+forward_binop!(impl Div for uint, div);
+forward_binop!(impl Rem for uint, rem);|]
     $$
     decls
     $$ [r|

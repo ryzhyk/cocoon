@@ -142,6 +142,7 @@ main = do
                  rules = concatMap ((\(r,rs) -> concatMap snd $ r:(concat rs)) . snd) rels
                  rust = DL.mkRust structs funcs rels' rules
                  rsfile = workdir </> addExtension basename "rs"
+             mapM_ (putStrLn . show) rules
              writeFile rsfile $ render rust
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 

@@ -109,7 +109,9 @@ expr2SMT' _   (EBuiltin _ _ _)                     = error $ "not implemented:  
 expr2SMT' _   (EField _ (t,s) f)                   = let TStruct _ cs = typ' ?r t
                                                          cs' = structFieldConstructors cs f
                                                          es = map (\c -> (SMT.EIsInstance (name c) s, SMT.EField (name c) s f)) cs'
-                                                     in SMT.ECond (init es) $ snd $ last es
+                                                     in case es of
+                                                             [e] -> snd e
+                                                             _   -> SMT.ECond (init es) $ snd $ last es
 expr2SMT' _   (EBool _ b)                          = SMT.EBool b
 expr2SMT' ctx (EInt _ i)                           = case typ' ?r $ exprType ?r ctx $ eInt i of
                                                           TBit _ w -> SMT.EBit w i

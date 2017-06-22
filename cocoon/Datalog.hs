@@ -20,6 +20,7 @@ module Datalog(refine2DL) where
 import Control.Monad.State
 import Data.List
 import Data.Maybe
+import Data.String.Utils
 
 import Name
 import Pos
@@ -110,13 +111,14 @@ uniqueConstr rel fs = [fst $ rel2DL rel']
     where -- R_unique_(x1,x2) <- R(x1), R(x2), x1!=x2, x1.f == x2.f
           as1 = map (\f -> f{fieldName = fieldName f ++ "1"}) $ relArgs rel
           as2 = map (\f -> f{fieldName = fieldName f ++ "2"}) $ relArgs rel
-          relname = name rel ++ "_unique_" ++ (intercalate "_" $ map show fs)
+          relname = name rel ++ "_unique_" ++ (replace "." "_" $ intercalate "_" $ map show fs)
           neq = disj $ map (\(f1, f2) -> eNot $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
           rename suff = exprVarRename (++suff)
-          eq  = conj $ map (\f -> let fcond = fieldCond (CtxRelKey rel) f
+          eq  = conj $ map (\f -> eBinOp Eq (rename "1" f) (rename "2" f)
+                                  {-let fcond = fieldCond (CtxRelKey rel) f
                                       fcond1 = rename "1" fcond
                                       fcond2 = rename "2" fcond
-                                  in conj [fcond1, fcond2, eBinOp Eq (rename "1" f) (rename "2" f)]) fs
+                                  in conj [fcond1, fcond2, eBinOp Eq (rename "1" f) (rename "2" f)]-}) fs
           rel' = Relation nopos False relname (as1 ++ as2) [] Nothing 
                           $ Just [Rule nopos (map (eVar . name) $ as1 ++ as2) 
                                               [ eRelPred (name rel) (map (eVar . name) as1)

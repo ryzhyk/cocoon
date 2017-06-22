@@ -125,18 +125,18 @@ function is_nested(nested: nested_port_t): bool =
 
 table LogicalPort( name      : port_id_t
                  , switch_id : uuid_t
-                 , type      : port_type_t
+                 , ptype     : port_type_t
                  , nested    : nested_port_t
                  , enabled   : bool
                  , primary key (name)
                  , foreign key (switch_id)                 references LogicalSwitch(uuid)
-                 , foreign key (type.rport)                references LogicalRouterPort(name)
-                 , foreign key (type.network_name)         references LocalNetwork(name)
+                 , foreign key (ptype.rport)                references LogicalRouterPort(name)
+                 , foreign key (ptype.network_name)         references LocalNetwork(name)
 //                  , foreign key (type.vtep_physical_switch) references physical_network(name)
 //                  , foreign key (type.vtep_LogicalSwitch)  references LogicalSwitch(uuid)
                  , foreign key (nested.parent)             references LogicalPort(name)
-                 , unique (nested.parent, nested.tag) /* Siblings must have different tags */
-                 , check (is_nested(nested) => not isRouterPort(type)))
+                 /*, unique (nested.parent, nested.tag)*/ /* Siblings must have different tags */
+                 /*, check (is_nested(nested) => not * isRouterPort(ptype))*/)
 
 view ParentPort( child_name    : port_id_t
                , child_switch  : uuid_t
@@ -167,7 +167,7 @@ LogicalSwitchRouter(sw, r) :- LogicalPort(_, sw, PortRouter{rp}, _, _), LogicalR
 //       => lrouter1 == lrouter2
 
 // router port cannot be connected to both switch and other router
-assume LogicalPort(p, _, PortRouter{rport}, _, _) and LogicalRouterPort(rport, _, _, _, _, ppeer) => ppeer == PeerSwitch
+assume LogicalPort(p, _, PortRouter{rport}, _, _) and LogicalRouterPort(rport, _, _, _, ppeer) => ppeer == PeerSwitch
 
 //error :- LogicalPort(p: port_id_t, _, PortRouter{rport}, _, _), logical_router_port_peered(rport)
 
@@ -278,7 +278,7 @@ typedef router_port_peer_t = PeerSwitch
 table LogicalRouterPort( name    : port_id_t
                        , router  : uuid_t
                        , network : netmask_t
-                       , mac     : mac_addr_t
+                       //, mac     : mac_addr_t
                        , enabled : bool
                        , peer    : router_port_peer_t
                        , primary key (name)
@@ -301,7 +301,7 @@ the (lrp in LogicalRouterPort | lrp.name == p) {
 
 //error :- LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}), logical_router_port_peered(peer)
 
-assume LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}) and LogicalRouterPort(peer, _, _, _, _, ppeer) 
+assume LogicalRouterPort(p, _, _, _, PeerRouter{peer}) and LogicalRouterPort(peer, _, _, _, ppeer) 
        => ppeer.peer_port == p
 
 //error :- LogicalRouterPort(p, _, _, _, _, PeerRouter{peer}), logical_router_port_peered(peer, _, _, _, _, PeerRouter{ppeer}), ppeer != p
@@ -367,7 +367,7 @@ state table CTState ( port: port_id_t
                      , primary key (port))
 
 function iLogicalPort(port: LogicalPort): bool =
-    (isRegularPort(port.type) or isLocalnetPort(port.type)) and port.nested==NestedPortNone
+    (isRegularPort(port.ptype) or isLocalnetPort(port.ptype)) and port.nested==NestedPortNone
 
 role LogicalPortIn[port in LogicalPort | iLogicalPort(port)] = 
     // drop all packets if port is disabled
@@ -479,7 +479,7 @@ procedure lportSendOut(port: LogicalPort): sink =
     if iLogicalPort(port) {
         send LogicalPortOut[port]
     } else {
-        the (rp in LogicalRouterPort | rp.name==port.type.rport)
+        the (rp in LogicalRouterPort | rp.name==port.ptype.rport)
             send RouterPortIn[rp]
     }
 
