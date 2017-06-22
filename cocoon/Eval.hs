@@ -165,8 +165,7 @@ evalExpr'' ctx e = do
                              return $ case a' of
                                            EBool _ v -> meBool $ not v
                                            _         -> meNot $ expr2MExpr $ E a'
-        EFor _ v t c b -> do let rel = getRelation ?r t
-                             rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
+        EFor _ v t c b -> do rows <- lift $ (liftM $ map fact2Row) $ DL.enumRelation ?dl t
                              mapM_ (\row -> do kmap <- eget
                                                emodify $ M.insert v $ expr2MExpr row
                                                lift $ putStrLn $ "row: " ++ show row
@@ -180,8 +179,7 @@ evalExpr'' ctx e = do
                                                eput kmap)
                                    rows
                              return $ meTuple []
-        EWith _ v t c b d -> do let rel = getRelation ?r t
-                                rows <- lift $ (liftM $ map (assignment2Row rel)) $ DL.enumRelation ?dl t
+        EWith _ v t c b d -> do rows <- lift $ (liftM $ map fact2Row) $ DL.enumRelation ?dl t
                                 rows' <- filterM (\row -> do kmap <- eget
                                                              emodify $ M.insert v $ expr2MExpr row
                                                              E c' <- evalExprS (CtxWithCond e ctx) c
@@ -270,8 +268,8 @@ assignTemplate ctx (E l) r@(ME mr) =
          (ETyped _ e _,    _)                -> assignTemplate (CtxTyped l ctx) e r
          _                                   -> error $ "Eval.assignTemplate " ++ show l ++ " " ++ show r
 
-assignment2Row :: Relation -> SMT.Assignment -> Expr
-assignment2Row Relation{..} asn = eStruct relName $ map (\f -> SMT.exprFromSMT $ asn M.! (name f)) relArgs
+fact2Row :: DL.Fact -> Expr
+fact2Row DL.Fact{..} = SMT.exprFromSMT $ SMT.EStruct factRel factArgs
 
 evalBinOp :: Expr -> Expr
 evalBinOp e@(E (EBinOp _ op l r)) = 

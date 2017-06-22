@@ -40,17 +40,18 @@ import Name
 import Parse
 import Validate
 import qualified SQL
-import qualified Datalog.Datalog   as DL
-import qualified Datalog.Z3Datalog as DL
-import qualified Datalog           as DL
-import qualified SMT               as SMT
-import qualified SMT.SMTSolver     as SMT
+import qualified Datalog.Datalog         as DL
+import qualified Datalog.DataflogSession as DL
+import qualified Datalog                 as DL
+import qualified SMT                     as SMT
 
 
 data ControllerState = ControllerDisconnected { ctlDBName       :: String
+                                              , ctlDFPath       :: FilePath
                                               , ctlRefine       :: Refine
                                               }
                      | ControllerConnected    { ctlDBName       :: String
+                                              , ctlDFPath       :: FilePath
                                               , ctlRefine       :: Refine
                                               , ctlDL           :: DL.Session
                                               , ctlConstraints  :: [(Relation, [DL.Relation])]
@@ -59,18 +60,18 @@ data ControllerState = ControllerDisconnected { ctlDBName       :: String
 
 type DaemonState = (Maybe Handle, ControllerState)
 
-data Violation = Violation Relation Constraint SMT.Assignment
+data Violation = Violation Relation Constraint DL.Fact
 
 instance Show Violation where
-    show (Violation rel c asn) = "row " ++ show asn ++ " violates constraint " ++ show c ++ " on table " ++ name rel
+    show (Violation rel c f) = "row " ++ show f ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
-controllerStart :: String -> FilePath -> Int -> Refine -> IO ()
-controllerStart dbname logfile port r = do
+controllerStart :: String -> FilePath -> FilePath -> Int -> Refine -> IO ()
+controllerStart dbname dfpath logfile port r = do
     let dopts = DaemonOptions{ daemonPort           = port
                              , daemonPidFile        = InHome
                              , printOnDaemonStarted = True}
     lock <- L.new
-    ref <- newIORef (Nothing, ControllerDisconnected dbname r)
+    ref <- newIORef (Nothing, ControllerDisconnected dbname dfpath r)
     ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
 controllerLoop :: L.Lock -> IORef DaemonState -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
@@ -147,8 +148,8 @@ connect ControllerDisconnected{..} = do
     let ?r = ctlRefine
     db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
     (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
-        (dl, constr) <- startDLSession
-        (do let ?s = ControllerConnected ctlDBName ctlRefine dl constr db
+        (dl, constr) <- startDLSession ctlDFPath
+        (do let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine dl constr db
             populateDB
             return (?s, "Connected"))
          `catch` \e -> do
@@ -165,17 +166,15 @@ disconnect :: Action
 disconnect ControllerConnected{..} = do
     closeDLSession ctlDL
     PG.close ctlDB
-    return $ (ControllerDisconnected ctlDBName ctlRefine , "Disconnected")
+    return $ (ControllerDisconnected ctlDBName ctlDFPath ctlRefine , "Disconnected")
 disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
-startDLSession :: (?r::Refine) => IO (DL.Session, [(Relation, [DL.Relation])])
-startDLSession = do
+startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
+startDLSession dfpath = do
     let (structs, funcs, rels) = DL.refine2DL ?r
-    let (allrels, allrules) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) rels
-    dl@DL.Session{..} <- (DL.newSession DL.z3DatalogEngine) structs funcs allrels
-    mapM_ addRule $ concat allrules
+    let (allrels, _) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) rels
+    dl@DL.Session{..} <- DL.newSession dfpath structs funcs allrels
     return (dl, map (mapSnd (map (fst . last) . snd)) rels)
-
 
 closeDLSession :: DL.Session -> IO ()
 closeDLSession dl = DL.closeSession dl
@@ -185,7 +184,6 @@ populateDB = do
     PG.withTransaction (ctlDB ?s) $ readDB
     validateConstraints
     
-
 validateConstraints :: (?s::ControllerState) => IO ()
 validateConstraints = do
     violations <- checkConstraints 
@@ -195,16 +193,16 @@ validateConstraints = do
 checkConstraints :: (?s::ControllerState) => IO [Violation]
 checkConstraints = 
     (liftM concat) 
-    $ mapM (\(rel, dlrels) -> do assigns <- mapM (DL.enumRelation (ctlDL ?s) . name) dlrels
-                                 return $ concatMap (\(asns, constr) -> map (Violation rel constr) asns) 
+    $ mapM (\(rel, dlrels) -> do facts <- mapM (DL.enumRelation (ctlDL ?s) . name) dlrels
+                                 return $ concatMap (\(fs, constr) -> map (Violation rel constr) fs) 
                                         $ filter (not . null . fst)
-                                        $ zip assigns (relConstraints rel)) 
+                                        $ zip facts (relConstraints rel)) 
     $ ctlConstraints ?s
    
 readDB :: (?r::Refine, ?s::ControllerState) => IO ()
 readDB = mapM_ (\rel -> do rows <- SQL.readTable (ctlDB ?s) rel
-                           mapM_ (\(idx, args) -> (DL.addGroundRule $ ctlDL ?s) 
-                                                  $ DL.GroundRule (name rel) (map (SMT.expr2SMT CtxRefine) args) idx) rows) 
+                           mapM_ (\args -> (DL.addFact $ ctlDL ?s) 
+                                           $ DL.Fact (name rel) (map (SMT.expr2SMT CtxRefine) args)) rows) 
          $ filter (not . relIsView) $ refineRels ?r
 
 

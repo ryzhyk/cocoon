@@ -310,7 +310,7 @@ mkFilter' :: (?q::SMTQuery) => Expr -> Doc
 mkFilter' (EVar _) = "_"
 mkFilter' (EStruct c as) | length structCons == 1 && (all (== "_") afs) = "_"
                          | otherwise = pp structName <> "::" <> pp c <> as'
-    where Struct{..} = getStruct ?q c 
+    where Struct{..} = getConsStruct ?q c 
           args = consArgs $ getConstructor ?q c
           afs = map mkFilter' as
           as' = case as of
@@ -333,7 +333,7 @@ mkExpr _     (EInt i)             = "uint::parse_bytes" <>
 mkExpr _     (EString s)          = pp $ "\"" ++ s ++ "\""
 mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
                                     (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr p a) $ zip args as) <> "}"
-    where s = getStruct ?q c
+    where s = getConsStruct ?q c
           args = consArgs $ getConstructor ?q c
 mkExpr _     EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
 mkExpr p     (EBinOp op e1 e2)    = 

@@ -385,7 +385,7 @@ mkSqlCol (e, t, True)  = "coalesce" <> (parens $ colName e <> comma <+> (mkVal $
 
 -- Runtime interface to the DB
 
-readTable :: (?r::Refine) => PG.Connection -> Relation -> IO [(Int64, [Expr])]
+readTable :: (?r::Refine) => PG.Connection -> Relation -> IO [[Expr]]
 readTable pg rel@Relation{..} = do
     let q = "select to_json(" ++ relName ++ ") from " ++ relName
     PG.fold_ pg (fromString q) [] (\rows (x::[JSON.Value]) -> do rows' <- mapM (\(JSON.Object val) -> do putStrLn $ show val
@@ -401,12 +401,12 @@ parseBool (JSON.Bool b) = b
 parseString :: JSON.Value -> String
 parseString (JSON.String t) = unpack t
 
-parseRow :: (?r::Refine) => Relation -> JSON.Object -> (Int64, [Expr])
-parseRow Relation{..} json = (i, args)
-    where -- extract "_serial"
-          i = parseInt $ json HM.! (pack serialcol)
-          -- extract fields
-          args = map (parseVal json "") relArgs
+parseRow :: (?r::Refine) => Relation -> JSON.Object -> [Expr]
+parseRow Relation{..} json = map (parseVal json "") relArgs
+--    where -- extract "_serial"
+--          i = parseInt $ json HM.! (pack serialcol)
+--          -- extract fields
+--          args = map (parseVal json "") relArgs
 
 parseVal :: (?r::Refine) => JSON.Object -> String -> Field -> Expr
 parseVal json prefix Field{..} = 

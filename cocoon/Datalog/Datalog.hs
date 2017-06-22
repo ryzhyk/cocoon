@@ -18,11 +18,10 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards, OverloadedStrings #-}
 
-module Datalog.Datalog( DatalogEngine(..)
-                      , Relation(..)
+module Datalog.Datalog( Relation(..)
                       , Rule(..)
                       , RuleId
-                      , GroundRule(..)
+                      , Fact(..)
                       , Session(..)) where
 
 import Data.Int
@@ -51,19 +50,21 @@ instance PP Rule where
 instance Show Rule where
     show = render . pp
 
-data GroundRule = GroundRule { gruleRel  :: String
-                             , gruleArgs :: [Expr]
-                             , gruleId   :: RuleId}
+data Fact = Fact { factRel  :: String
+                 , factArgs :: [Expr]}
+
+instance PP Fact where
+    pp (Fact rel as) = pp $ EStruct rel as
+
+instance Show Fact where
+    show = render . pp
 
 type RuleId = Int64
 
 data Session = Session {
-    addRule             :: Rule             -> IO (),
-    addGroundRule       :: GroundRule       -> IO (),
-    removeGroundRule    :: String -> RuleId -> IO (),
-    checkRelationSAT    :: String           -> IO Bool,
-    enumRelation        :: String           -> IO [Assignment],
-    closeSession        ::                     IO ()
+    addFact          :: Fact   -> IO (),
+    removeFact       :: Fact   -> IO (),
+    checkRelationSAT :: String -> IO Bool,
+    enumRelation     :: String -> IO [Fact],
+    closeSession     ::           IO ()
 }
-
-data DatalogEngine = DatalogEngine {newSession :: [Struct] -> [Function] -> [Relation] -> IO Session}

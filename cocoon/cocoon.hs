@@ -149,7 +149,8 @@ main = do
              combined <- readValidate fname workdir
              putStrLn "Starting controller"
              let logfile = workdir </> addExtension basename "log"
-             controllerStart basename logfile (confCtlPort config) combined
+                 dfpath  = workdir </> addExtension basename "df"
+             controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI (confCtlPort config)
          ActionNone -> error "action not specified"
  

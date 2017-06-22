@@ -182,12 +182,12 @@ typ q mf (EVar n)          = maybe (varType $ fromJust $ find ((==n) . name) $ s
                                    (snd . fromJust . find ((==n) . fst) . funcArgs)
                                    mf
 typ q _  (EField c _ f)    = varType $ fromJust $ find ((==f) . name) $ concatMap consArgs cs
-                             where Struct _ cs = getStruct q c
+                             where Struct _ cs = getConsStruct q c
 typ _ _  (EBool _)         = TBool
 typ _ _  (EBit w _)        = TBit w
 typ _ _  (EInt _)          = TInt
 typ _ _  (EString _)       = TString
-typ q _  (EStruct c _)     = TStruct $ structName $ getStruct q c
+typ q _  (EStruct c _)     = TStruct $ structName $ getConsStruct q c
 typ _ _  (EIsInstance _ _) = TBool
 typ q mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                            | elem op [Plus, Minus, Mod] = typ q mf e1
@@ -204,8 +204,11 @@ data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtExprs   :: [Expr]
                          }
 
-getStruct :: SMTQuery -> String -> Struct
-getStruct q c = fromJust $ find (isJust . find ((==c) . name) . structCons) $ smtStructs q
+lookupConsStruct :: SMTQuery -> String -> Maybe Struct
+lookupConsStruct q c = find (isJust . find ((==c) . name) . structCons) $ smtStructs q
+
+getConsStruct :: SMTQuery -> String -> Struct
+getConsStruct q c = fromJust $ lookupConsStruct q c
 
 getConstructor :: SMTQuery -> String -> Constructor
 getConstructor q c = head $ concatMap (filter ((==c) . name) . structCons) $ smtStructs q
