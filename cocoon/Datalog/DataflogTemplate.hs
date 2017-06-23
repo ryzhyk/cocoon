@@ -7,13 +7,12 @@ import Text.PrettyPrint
 
 import PP
 
-dataflogTemplate :: Doc -> Doc -> Doc
-dataflogTemplate decls rules = [r|extern crate timely;
+dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc
+dataflogTemplate decls facts sets rules handlers = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
 extern crate num;
-use std::ops::*;
 
 use num::bigint::BigUint;
 use abomonation::Abomonation;
@@ -27,6 +26,12 @@ use serde::ser::*;
 use serde::de::*;
 use std::str::FromStr;
 use serde::de::Error;
+use std::collections::HashSet;
+use std::io::{stdin, stdout};
+use std::cell::RefCell;
+use std::cell::Ref;
+use std::rc::Rc;
+use std::hash::Hash;
 
 use timely::progress::nested::product::Product;
 use timely::dataflow::*;
@@ -158,7 +163,32 @@ forward_binop!(impl Div for uint, div);
 forward_binop!(impl Rem for uint, rem);|]
     $$
     decls
+    $$
+    facts
     $$ [r|
+
+#[derive(Serialize, Deserialize, Debug)]
+enum Request {
+    add(Fact),
+    del(Fact),
+    chk(String),
+    enm(String)
+}
+
+#[derive(Serialize, Deserialize)]
+enum Response<T> {
+    err(String),
+    ok(T)
+}
+
+fn upd<T>(s: &Rc<RefCell<HashSet<T>>>, x:&T, w: isize) 
+where T: Eq + Hash + Clone {
+    if w == 1 {
+        s.borrow_mut().insert(x.clone());
+    } else {
+        s.borrow_mut().remove(x);
+    }
+}
 
 fn main() {
 
@@ -166,16 +196,81 @@ fn main() {
     timely::execute_from_args(std::env::args(), |worker| {
 |]
     $$
+    (nest' $ nest' sets)
+    $$
     (nest' $ nest' rules)
-    $$ [r|        //path.insert(Edge::Edge{f: 1, t: 2});
-        //path.insert(Edge::Edge{f: 2, t: 3});
-        //let e = *path.epoch();
-        //println!("path time: {}", e);
-        //path.advance_to(e+1);
-        //path.flush();
+    $$ [r|
+        loop {
+                let mut epoch = 0;
+                let req = match serde_json::from_reader(stdin()) {
+                                Ok(r)  => r,
+                                Err(e) => std::process::exit(-1)
+                            };
 
-        //while probe.less_than(path.time()) {
-        //    worker.step();
-        //};
+                macro_rules! insert {
+                    ($rel:ident, $probe:ident, $args:expr) => {{
+                        $rel.insert($args);
+                        epoch = epoch+1;
+                        $rel.advance_to(epoch);
+                        $rel.flush();
+                        while $probe.less_than($rel.time()) {
+                            worker.step();
+                        };
+                        let resp: Response<()> = Response::ok(());
+                        serde_json::to_writer(stdout(), &resp);
+                    }}
+                }
+
+                macro_rules! remove {
+                    ($rel:ident, $probe:ident, $args:expr) => {{
+                        $rel.remove($args);
+                        epoch = epoch+1;
+                        $rel.advance_to(epoch);
+                        $rel.flush();
+                        while $probe.less_than($rel.time()) {
+                            worker.step();
+                        };
+                        let resp: Response<()> = Response::ok(());
+                        serde_json::to_writer(stdout(), &resp);
+                    }}
+                }
+
+                macro_rules! check {
+                    ($rname:expr, $rel:expr, $set:expr) => {{
+                        let resp: Response<bool> = match $rel.as_ref() { 
+                            $rname => Response::ok(!$set.borrow().is_empty()),
+                            n      => Response::err(format!("unknown relation: {}", n))
+                        };
+                        serde_json::to_writer(stdout(), &resp);
+                    }}
+                }
+
+                macro_rules! enm {
+                    ($rname:expr, $rel:expr, $set:expr) => {{
+                        match $rel.as_ref() {
+                            $rname => {
+                                let resp = Response::ok((*$set).clone());
+                                serde_json::to_writer(stdout(), &resp);
+                            },
+                            n => {
+                                let resp: Response<()> = Response::err(format!("unknown relation: {}", n));
+                                serde_json::to_writer(stdout(), &resp);
+                            }
+                        };
+                    }}
+                }
+
+                match req {
+|]
+    $$
+    (nest' $ nest' $ nest' $ nest' $ nest' handlers)
+    $$ [r|
+                    _ => {
+                        let resp: Response<()> = Response::err(format!("unknown request: {:?}", req));
+                        serde_json::to_writer(stdout(), &resp);
+                    }
+                };
+        };
+
     }).unwrap();
 }|]

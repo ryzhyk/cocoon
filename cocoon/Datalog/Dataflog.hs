@@ -82,7 +82,34 @@ mkRust structs funs rels rules =
     let ?rels = rels in
     let decls = vcat $ map mkStruct structs
         logic = mkRules rules
-    in dataflogTemplate decls logic
+        facts = mkFacts rels
+        sets  = mkSets rels
+        handlers = mkHandlers rels
+    in dataflogTemplate decls facts sets logic handlers
+
+
+mkFacts :: [Relation] -> Doc
+mkFacts rels = 
+    "#[derive(Serialize, Deserialize, Debug)]" $$
+    "enum Fact {" $$
+    (nest' $ vcat $ punctuate comma $ map (\rel -> pp (name rel) <> (parens $ commaSep $ map (mkType . varType) $ relArgs rel)) rels)
+    $$ "}"
+
+mkSets :: [Relation] -> Doc
+mkSets = vcat .
+    map (\rel -> let n = pp $ name rel
+                     args = commaSep $ map (mkType . varType) $ relArgs rel in
+                 ("let mut _r" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = Rc::new(RefCell::new(HashSet::new()));") $$
+                 ("let mut _w" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = _r" <> n <> ".clone();"))
+
+mkHandlers :: [Relation] -> Doc
+mkHandlers = vcat .
+    map (\rel -> let n = pp $ name rel 
+                     as = commaCat $ mapIdx (\_ i -> "a" <> pp i) $ relArgs rel in
+                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
+                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
+                 ("Request::chk(rel) => check!(\"" <> n <>"\", rel, _r" <> n <> "),") $$
+                 ("Request::enm(rel) => enm!(\"" <> n <> "\", rel, _r" <> n <> "),"))
 
 mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
@@ -93,7 +120,7 @@ mkRules rules =
     where
     rels = ?rels
     retvars = concatMap (\rl -> ["mut" <+> (pp $ hname rl), pp $ name rl]) rels
-    retvals = concatMap (\rl -> [(pp $ hname rl), (pp $ name rl) <> ".probe()"]) rels
+    retvals = concatMap (\rl -> [(pp $ hname rl), (pp $ name rl) <> ".inspect(move |x| upd(&_w" <> (pp $ name rl) <> ", &(x.0), x.2)).probe()"]) rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
     -- graph with relations as nodes and edges labeled with rules (labels are not unique)
     relgraph = G.insEdges (concatMap (\rule -> let r1 = relidx (ruleHeadRel rule) in

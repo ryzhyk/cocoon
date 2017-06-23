@@ -106,10 +106,10 @@ data Request = ReqAdd    Fact
              | ReqEnum   String
 
 requestToJSON :: (?q::SMTQuery) => Request -> J.Value
-requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add" (factToJSON f)
-requestToJSON (ReqRemove f) = J.Object $ H.singleton "del" (factToJSON f)
-requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk" (J.String $ pack r)
-requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm" (J.String $ pack r)
+requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add" $ J.Array $ V.singleton $ factToJSON f
+requestToJSON (ReqRemove f) = J.Object $ H.singleton "del" $ J.Array $ V.singleton $ factToJSON f
+requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk" $ J.Array $ V.singleton $ J.String $ pack r
+requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm" $ J.Array $ V.singleton $ J.String $ pack r
 
 respUnwrap :: J.Value -> IO J.Value
 respUnwrap v = case v of
