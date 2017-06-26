@@ -149,6 +149,7 @@ exprFromSMT :: SMT.Expr -> Expr
 exprFromSMT (SMT.EBool b)      = eBool b
 exprFromSMT (SMT.EBit w i)     = eBit w i
 exprFromSMT (SMT.EInt i)       = eInt i
+exprFromSMT (SMT.EString s)    = eString s
 exprFromSMT (SMT.EStruct n fs) = eStruct n $ map exprFromSMT fs
 exprFromSMT e                  = error $ "SMT.exprFromSMT " ++ show e
 

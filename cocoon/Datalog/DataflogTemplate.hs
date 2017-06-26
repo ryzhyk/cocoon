@@ -7,8 +7,8 @@ import Text.PrettyPrint
 
 import PP
 
-dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts sets rules handlers = [r|extern crate timely;
+dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
+dataflogTemplate decls facts relations sets rules handlers = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -27,11 +27,12 @@ use serde::de::*;
 use std::str::FromStr;
 use serde::de::Error;
 use std::collections::HashSet;
-use std::io::{stdin, stdout};
+use std::io::{stdin, stdout, Write};
 use std::cell::RefCell;
 use std::cell::Ref;
 use std::rc::Rc;
 use std::hash::Hash;
+use serde_json as json;
 
 use timely::progress::nested::product::Product;
 use timely::dataflow::*;
@@ -165,14 +166,16 @@ forward_binop!(impl Rem for uint, rem);|]
     decls
     $$
     facts
+    $$
+    relations
     $$ [r|
 
 #[derive(Serialize, Deserialize, Debug)]
 enum Request {
     add(Fact),
     del(Fact),
-    chk(String),
-    enm(String)
+    chk(Relation),
+    enm(Relation)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -200,11 +203,20 @@ fn main() {
     $$
     (nest' $ nest' rules)
     $$ [r|
-        loop {
-                let mut epoch = 0;
-                let req = match serde_json::from_reader(stdin()) {
-                                Ok(r)  => r,
-                                Err(e) => std::process::exit(-1)
+        let mut epoch = 0;
+        let stream = json::Deserializer::from_reader(stdin()).into_iter::<Request>();
+
+        for val in stream {
+                //print!("epoch: {}\n", epoch);
+                let req = match val {
+                                Ok(r)  => {
+                                    //print!("r: {:?}\n", r);
+                                    r
+                                },
+                                Err(e) => {
+                                    print!("{}\n", e);
+                                    std::process::exit(-1);
+                                }
                             };
 
                 macro_rules! insert {
@@ -217,7 +229,8 @@ fn main() {
                             worker.step();
                         };
                         let resp: Response<()> = Response::ok(());
-                        serde_json::to_writer(stdout(), &resp);
+                        serde_json::to_writer(stdout(), &resp).unwrap();
+                        stdout().flush().unwrap();
                     }}
                 }
 
@@ -231,32 +244,24 @@ fn main() {
                             worker.step();
                         };
                         let resp: Response<()> = Response::ok(());
-                        serde_json::to_writer(stdout(), &resp);
+                        serde_json::to_writer(stdout(), &resp).unwrap();
+                        stdout().flush().unwrap();
                     }}
                 }
 
                 macro_rules! check {
-                    ($rname:expr, $rel:expr, $set:expr) => {{
-                        let resp: Response<bool> = match $rel.as_ref() { 
-                            $rname => Response::ok(!$set.borrow().is_empty()),
-                            n      => Response::err(format!("unknown relation: {}", n))
-                        };
-                        serde_json::to_writer(stdout(), &resp);
+                    ($set:expr) => {{
+                        let resp = Response::ok(!$set.borrow().is_empty());
+                        serde_json::to_writer(stdout(), &resp).unwrap();
+                        stdout().flush().unwrap();
                     }}
                 }
 
                 macro_rules! enm {
-                    ($rname:expr, $rel:expr, $set:expr) => {{
-                        match $rel.as_ref() {
-                            $rname => {
-                                let resp = Response::ok((*$set).clone());
-                                serde_json::to_writer(stdout(), &resp);
-                            },
-                            n => {
-                                let resp: Response<()> = Response::err(format!("unknown relation: {}", n));
-                                serde_json::to_writer(stdout(), &resp);
-                            }
-                        };
+                    ($set:expr) => {{
+                        let resp = Response::ok((*$set).clone());
+                        serde_json::to_writer(stdout(), &resp).unwrap();
+                        stdout().flush().unwrap();
                     }}
                 }
 
@@ -267,10 +272,57 @@ fn main() {
     $$ [r|
                     _ => {
                         let resp: Response<()> = Response::err(format!("unknown request: {:?}", req));
-                        serde_json::to_writer(stdout(), &resp);
+                        serde_json::to_writer(stdout(), &resp).unwrap();
                     }
                 };
         };
 
     }).unwrap();
 }|]
+
+cargoTemplate :: String -> Doc
+cargoTemplate specname  = [r|[package]
+name = "|]
+    <> pp specname <> [r|"
+version = "0.1.0"
+
+[dependencies.graph_map]
+git="https://github.com/frankmcsherry/graph-map.git"
+
+[dependencies.timely]
+git="https://github.com/frankmcsherry/timely-dataflow"
+
+[dependencies.differential-dataflow]
+git="https://github.com/frankmcsherry/differential-dataflow.git"
+
+
+[dev-dependencies]
+getopts="0.2.14"
+rand="0.3.13"
+byteorder="0.4.2"
+itertools="^0.6"
+
+[dependencies]
+abomonation="0.4.4"
+timely_sort="0.1.6"
+timely_communication="0.1.5"
+fnv="1.0.2"
+num = "0.1"
+serde = "1.0"
+serde_derive = "1.0"
+serde_json = "1.0.2"
+
+[features]
+default = []
+logging = ["timely/logging"]
+
+[profile.release]
+opt-level = 3
+debug = true
+rpath = false
+lto = false
+debug-assertions = false
+
+[[bin]]
+name = "|] <> pp specname <> [r|"
+path = "./|] <> pp specname <> [r|.rs"|]

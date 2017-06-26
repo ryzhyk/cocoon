@@ -27,6 +27,7 @@ import Control.Monad
 
 import qualified Datalog.Dataflog as DL
 import qualified Datalog as DL
+import qualified Datalog.DataflogTemplate as DL
 import Parse
 import Validate
 import SQL
@@ -141,15 +142,18 @@ main = do
                  rels' = concatMap ((\(r,rs) -> map fst $ r:(concat rs)) . snd) rels
                  rules = concatMap ((\(r,rs) -> concatMap snd $ r:(concat rs)) . snd) rels
                  rust = DL.mkRust structs funcs rels' rules
+                 cargo = DL.cargoTemplate basename
                  rsfile = workdir </> addExtension basename "rs"
+                 cargofile = workdir </> "Cargo.toml"
              mapM_ (putStrLn . show) rules
              writeFile rsfile $ render rust
+             writeFile cargofile $ render cargo
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
              combined <- readValidate fname workdir
              putStrLn "Starting controller"
              let logfile = workdir </> addExtension basename "log"
-                 dfpath  = workdir </> addExtension basename "df"
+                 dfpath  = workdir </> "target" </> "debug" </> basename
              controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI (confCtlPort config)
          ActionNone -> error "action not specified"

@@ -80,9 +80,10 @@ controllerLoop lock ref logfile prod cons = do
         (mhlog, state) <- readIORef ref
         hlog <- case mhlog of 
                      Nothing -> do h <- openFile logfile WriteMode
-                                   hSetBuffering h NoBuffering
                                    hDuplicateTo h stdout
                                    hDuplicateTo h stderr
+                                   hSetBuffering stdout NoBuffering
+                                   hSetBuffering stderr NoBuffering
                                    return h
                      Just h  -> return h
         writeIORef ref (Just hlog, state)

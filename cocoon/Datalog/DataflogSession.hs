@@ -28,8 +28,8 @@ import Control.Monad.Except
 import System.IO
 import System.Process
 import Data.Attoparsec.ByteString
-import Data.ByteString.Lazy (hPut)
-import Data.ByteString (hGetSome)
+import qualified Data.ByteString.Lazy as BSL
+import qualified Data.ByteString as BSS
 import Data.Text (pack, unpack)
 import Data.Maybe
 import Data.List
@@ -80,17 +80,23 @@ valFromJSON t           v               = err $ "Cannot decode JSON value " ++ s
 
 
 factToJSON :: (?q::SMTQuery) => Fact -> J.Value
-factToJSON Fact{..} = J.Object $ H.singleton (pack factRel) $ J.Array $ V.fromList $ map valToJSON factArgs
+factToJSON Fact{..} = 
+    case factArgs of
+         [a] -> J.Object $ H.singleton (pack factRel) $ valToJSON a
+         _   -> J.Object $ H.singleton (pack factRel) $ J.Array $ V.fromList $ map valToJSON factArgs
 
 factFromJSON :: DFSession -> String -> J.Value -> IO Fact
 factFromJSON DFSession{..} rname val = do
     let Relation{..} = fromJust $ find ((== rname) . name) dfRels
     let ?q = dfQ
-    case val of
-         J.Array vals -> do when (V.length vals /= length relArgs) $ err $ "Tuple " ++ show val ++ " has incorrect number of arguments"
-                            args <- mapM (\(a,v) -> valFromJSON (varType a) v) $ zip relArgs (V.toList vals)
-                            return $ Fact rname args
-         _            -> err $ "Invalid tuple: " ++ show val
+    case relArgs of
+         [a] -> do arg <- valFromJSON (varType a) val
+                   return $ Fact rname [arg]
+         _   -> case val of
+                     J.Array vals -> do when (V.length vals /= length relArgs) $ err $ "Tuple " ++ show val ++ " has incorrect number of arguments"
+                                        args <- mapM (\(a,v) -> valFromJSON (varType a) v) $ zip relArgs (V.toList vals)
+                                        return $ Fact rname args
+                     _            -> err $ "Invalid tuple: " ++ show val
     
 
 data DFSession = DFSession { dfQ     :: SMTQuery
@@ -106,10 +112,10 @@ data Request = ReqAdd    Fact
              | ReqEnum   String
 
 requestToJSON :: (?q::SMTQuery) => Request -> J.Value
-requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add" $ J.Array $ V.singleton $ factToJSON f
-requestToJSON (ReqRemove f) = J.Object $ H.singleton "del" $ J.Array $ V.singleton $ factToJSON f
-requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk" $ J.Array $ V.singleton $ J.String $ pack r
-requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm" $ J.Array $ V.singleton $ J.String $ pack r
+requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add" $ factToJSON f
+requestToJSON (ReqRemove f) = J.Object $ H.singleton "del" $ factToJSON f
+requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk" $ J.String $ pack r
+requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm" $ J.String $ pack r
 
 respUnwrap :: J.Value -> IO J.Value
 respUnwrap v = case v of
@@ -147,14 +153,27 @@ checkph DFSession{..} = do
     maybe (return ()) (fail . ("Dataflog process terminated unexpectedly; exit code: " ++) . show) mexit
 
 req :: (J.ToJSON a) => DFSession -> a -> IO J.Value
-req DFSession{..} v = do
-    hPut dfHTo $ J.encode v
+req df@DFSession{..} v = do
+    checkph df
+    let json = J.encode v
+    BSL.hPutStr stderr $ "> "
+    BSL.hPutStr stderr $ json
+    BSL.hPutStr stderr $ "\n"
+    BSL.hPut dfHTo json
     hFlush dfHTo
-    res <- parseWith (hGetSome dfHFrom 4096) J.json ""
+    BSS.hPutStr stderr "< "
+    res <- parseWith (hGetSome' dfHFrom 4096) J.json ""
+    BSS.hPutStr stderr "\n"
     case res of
          Done _ r   -> return r
          Fail _ _ e -> error $ "Failed to parse response from the Dataflog process: " ++ e
          Partial _  -> error "Incomplete response received from the Dataflog process"
+
+hGetSome' :: Handle -> Int -> IO BSS.ByteString
+hGetSome' h i = do
+    s <- BSS.hGetSome h i
+    BSS.hPutStr stderr s
+    return s
 
 dfAddFact :: DFSession -> Fact -> IO ()
 dfAddFact df fact = do

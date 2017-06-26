@@ -83,9 +83,10 @@ mkRust structs funs rels rules =
     let decls = vcat $ map mkStruct structs
         logic = mkRules rules
         facts = mkFacts rels
+        relations = mkRels rels
         sets  = mkSets rels
         handlers = mkHandlers rels
-    in dataflogTemplate decls facts sets logic handlers
+    in dataflogTemplate decls facts relations sets logic handlers
 
 
 mkFacts :: [Relation] -> Doc
@@ -93,6 +94,13 @@ mkFacts rels =
     "#[derive(Serialize, Deserialize, Debug)]" $$
     "enum Fact {" $$
     (nest' $ vcat $ punctuate comma $ map (\rel -> pp (name rel) <> (parens $ commaSep $ map (mkType . varType) $ relArgs rel)) rels)
+    $$ "}"
+
+mkRels :: [Relation] -> Doc
+mkRels rels = 
+    "#[derive(Serialize, Deserialize, Debug)]" $$
+    "enum Relation {" $$
+    (nest' $ vcat $ punctuate comma $ map (pp . name) rels)
     $$ "}"
 
 mkSets :: [Relation] -> Doc
@@ -108,8 +116,8 @@ mkHandlers = vcat .
                      as = commaCat $ mapIdx (\_ i -> "a" <> pp i) $ relArgs rel in
                  ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
                  ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
-                 ("Request::chk(rel) => check!(\"" <> n <>"\", rel, _r" <> n <> "),") $$
-                 ("Request::enm(rel) => enm!(\"" <> n <> "\", rel, _r" <> n <> "),"))
+                 ("Request::chk(Relation::" <> n <> ") => check!(_r" <> n <> "),") $$
+                 ("Request::enm(Relation::" <> n <> ") => enm!(_r" <> n <> "),"))
 
 mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
