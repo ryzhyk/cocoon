@@ -128,8 +128,9 @@ main = do
         (dir, file) = splitFileName fname
         (basename,_) = splitExtension file
         workdir = dir </> basename
+        histfile = workdir </> addExtension basename "history"
     case confAction config of
-         ActionCLI -> controllerCLI (confCtlPort config)
+         ActionCLI -> controllerCLI histfile (confCtlPort config)
          ActionSQL -> do 
              combined <- readValidate fname workdir
              let schema = mkSchema basename combined
@@ -155,7 +156,7 @@ main = do
              let logfile = workdir </> addExtension basename "log"
                  dfpath  = workdir </> "target" </> "debug" </> basename
              controllerStart basename dfpath logfile (confCtlPort config) combined
-             controllerCLI (confCtlPort config)
+             controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  
 readValidate :: FilePath -> FilePath -> IO Refine

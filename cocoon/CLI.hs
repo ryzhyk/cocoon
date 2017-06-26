@@ -24,8 +24,8 @@ import System.Console.Haskeline
 import Control.Monad.Trans
 
 
-controllerCLI :: Int -> IO ()
-controllerCLI port = runInputT defaultSettings loop
+controllerCLI :: FilePath -> Int -> IO ()
+controllerCLI hist port = runInputT defaultSettings{historyFile = Just hist} loop
     where loop :: InputT IO ()
           loop = do
               minput <- getInputLine "> "
