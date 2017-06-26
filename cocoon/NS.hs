@@ -134,6 +134,7 @@ ctxMVars :: Refine -> ECtx -> ([MField], [MField])
 ctxMVars r ctx = 
     case ctx of
          CtxRefine            -> (map f2mf $ refineState r, [])
+         CtxCLI               -> (plvars, prvars)
          CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
          CtxRoleGuard rl      -> ([], [(roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl)])
          CtxPktGuard rl       -> ([], [ (pktVar, Just $ tUser packetTypeName)

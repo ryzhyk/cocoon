@@ -48,6 +48,7 @@ module Syntax( pktVar
              , exprIsRelPred
              , ECtx(..)
              , ctxParent, ctxAncestors
+             , ctxIsCLI, ctxInCLI
              , ctxIsRelPred, ctxInRelPred
              , ctxIsRuleL, ctxInRuleL
              , ctxIsMatchPat, ctxInMatchPat, ctxInMatchPat'
@@ -620,6 +621,7 @@ exprSequence [e]    = e
 exprSequence (e:es) = eSeq e (exprSequence es)
 
 data ECtx = CtxRefine
+          | CtxCLI
           | CtxRole      {ctxRole::Role}
           | CtxRoleGuard {ctxRole::Role}
           | CtxPktGuard  {ctxRole::Role}
@@ -671,6 +673,7 @@ data ECtx = CtxRefine
 
 ctxParent :: ECtx -> ECtx
 ctxParent (CtxRole _)         = CtxRefine     
+ctxParent CtxCLI              = CtxRefine
 ctxParent (CtxRoleGuard _)    = CtxRefine     
 ctxParent (CtxPktGuard _)     = CtxRefine     
 ctxParent (CtxAssume _)       = CtxRefine
@@ -684,6 +687,13 @@ ctxParent ctx                 = ctxPar ctx
 ctxAncestors :: ECtx -> [ECtx]
 ctxAncestors CtxRefine = [CtxRefine]
 ctxAncestors ctx       = ctx : (ctxAncestors $ ctxParent ctx)
+
+ctxIsCLI :: ECtx -> Bool
+ctxIsCLI CtxCLI = True
+ctxIsCLI _      = False
+
+ctxInCLI :: ECtx -> Bool
+ctxInCLI ctx = any ctxIsCLI $ ctxAncestors ctx
 
 ctxIsRelPred :: ECtx -> Bool
 ctxIsRelPred CtxRelPred{} = True

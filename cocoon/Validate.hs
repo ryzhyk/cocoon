@@ -430,10 +430,10 @@ exprValidate1 r ctx (ERelPred p rel as) = do ctxCheckRelPred p r ctx
                                                      $ "Number of arguments does not match relation declaration"
 exprValidate1 r ctx (EPut p rel _)      = do ctxCheckSideEffects p r ctx
                                              Relation{..} <- checkRelation p r ctx rel
-                                             assertR r relMutable p $ "Cannot modify immutable relation"
+                                             assertR r (relMutable || ctxInCLI ctx) p $ "Cannot modify immutable relation"
 exprValidate1 r ctx (EDelete p rel _)   = do ctxCheckSideEffects p r ctx
                                              Relation{..} <- checkRelation p r ctx rel
-                                             assertR r relMutable p $ "Cannot modify immutable relation"
+                                             assertR r (relMutable || ctxInCLI ctx) p $ "Cannot modify immutable relation"
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 
@@ -501,6 +501,7 @@ ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects p r ctx =
     case ctx of 
          CtxRole _         -> return ()
+         CtxCLI            -> return ()
          CtxFunc f _       -> when (funcPure f) complain
          CtxBuiltin _ _ _  -> complain
          CtxApply _ _ _    -> complain

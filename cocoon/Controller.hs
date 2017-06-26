@@ -119,7 +119,7 @@ execCommand _                    _       = error "invalid command"
 
 execExpr :: Expr -> Action
 execExpr e s@ControllerConnected{..} =
-    case exprValidate ctlRefine CtxRefine e of
+    case exprValidate ctlRefine CtxCLI e of
          Left er -> error er
          Right _ -> do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
                        return (s, intercalate ",\n" $ map show val)
