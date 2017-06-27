@@ -86,8 +86,17 @@ mkRust structs funs rels rules =
         relations = mkRels rels
         sets  = mkSets rels
         handlers = mkHandlers rels
-    in dataflogTemplate decls facts relations sets logic handlers
+        advance = mkAdvance rels
+    in dataflogTemplate decls facts relations sets logic advance handlers
 
+mkAdvance :: [Relation] -> Doc
+mkAdvance rels = 
+    "macro_rules! advance {" $$
+    "    () => {{" $$
+    (nest' $ nest' $ vcat $ map (\rel -> "_" <> pp (name rel) <> ".advance_to(epoch);") rels) $$
+    (nest' $ nest' $ vcat $ map (\rel -> "_" <> pp (name rel) <> ".flush();") rels) $$
+    "    }}"$$
+    "}"
 
 mkFacts :: [Relation] -> Doc
 mkFacts rels = 
@@ -114,8 +123,8 @@ mkHandlers :: [Relation] -> Doc
 mkHandlers = vcat .
     map (\rel -> let n = pp $ name rel 
                      as = commaCat $ mapIdx (\_ i -> "a" <> pp i) $ relArgs rel in
-                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
-                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove!(_" <> n <> ", " <> n <> ", (" <> as <> ")),") $$
+                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert!(_" <> n <> ", (" <> as <> ")),") $$
+                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove!(_" <> n <> ", (" <> as <> ")),") $$
                  ("Request::chk(Relation::" <> n <> ") => check!(_r" <> n <> "),") $$
                  ("Request::enm(Relation::" <> n <> ") => enm!(_r" <> n <> "),"))
 
@@ -123,12 +132,14 @@ mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
         ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
-        (tuple retvals) $$
+        (nest' $ vcat probes) $$
+        (nest' $ tuple retvals) $$
         "});"
     where
     rels = ?rels
-    retvars = concatMap (\rl -> ["mut" <+> (pp $ hname rl), pp $ name rl]) rels
-    retvals = concatMap (\rl -> [(pp $ hname rl), (pp $ name rl) <> ".inspect(move |x| upd(&_w" <> (pp $ name rl) <> ", &(x.0), x.2)).probe()"]) rels
+    retvars = map (\rl -> "mut" <+> (pp $ hname rl)) rels
+    probes = map (\rl -> (pp $ name rl) <> ".inspect(move |x| upd(&_w" <> (pp $ name rl) <> ", &(x.0), x.2)).probe_with(&mut probe1)" <> semi) rels
+    retvals = map (\rl -> (pp $ hname rl)) rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
     -- graph with relations as nodes and edges labeled with rules (labels are not unique)
     relgraph = G.insEdges (concatMap (\rule -> let r1 = relidx (ruleHeadRel rule) in

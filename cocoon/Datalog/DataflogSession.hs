@@ -30,7 +30,7 @@ import System.Process
 import Data.Attoparsec.ByteString
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString as BSS
-import Data.Text (pack, unpack)
+import Data.Text (Text, pack, unpack)
 import Data.Maybe
 import Data.List
 
@@ -42,15 +42,24 @@ import Name
 err :: String -> IO a
 err = error --throwError . strMsg
 
+mkTuple :: [J.Value] -> J.Value
+mkTuple []  = J.Null
+mkTuple [a] = a
+mkTuple as  = J.Array $ V.fromList as
+
+mkObject :: [(Text, J.Value)] -> J.Value
+mkObject []  = J.Null
+mkObject [(_,a)] = a
+mkObject as  = J.Object $ H.fromList as
+
 valToJSON :: (?q::SMTQuery) => Expr -> J.Value
 valToJSON (EBool b)              = J.Bool b
 valToJSON (EBit w i) | w <= 64   = J.Number $ scientific i 0
                      | otherwise = J.String $ pack $ show i
 valToJSON (EInt i)               = J.String $ pack $ show i
 valToJSON (EString s)            = J.String $ pack s
-valToJSON (EStruct c as)         = J.Object $ H.singleton (pack c) 
-                                   $ J.Object $ H.fromList $ map (\(f,a) -> (pack $ name f, valToJSON a)) $ zip fs as
-    where Struct _ fs = getConsStruct ?q c
+valToJSON (EStruct c as)         = J.Object $ H.singleton (pack c) $ mkObject $ map (\(f,a) -> (pack $ name f, valToJSON a)) $ zip fs as
+    where Constructor _ fs = getConstructor ?q c
 valToJSON e                      = error $ "DataflogSession.valToJSON " ++ show e
 
 valFromJSON :: (?q::SMTQuery) => Type -> J.Value -> IO Expr
@@ -65,25 +74,28 @@ valFromJSON (TBit w)    (J.String s)    = case reads $ unpack s of
 valFromJSON (TBit w)    (J.Number n)    = case floatingOrInteger n of
                                                Left (_::Double) -> err $ "not an integral value " ++ show n
                                                Right i          -> return $ EBit w i
-valFromJSON (TStruct s) (J.Object o)    = 
-    case H.toList o of
-         [(c, J.Object v)] -> case lookupConsStruct ?q (unpack c) of
-                                   Nothing -> err $ "Invalid constructor " ++ unpack c 
-                                   Just s' | name s' /= s -> err $ "Constructor " ++ unpack c ++ " does not match expected type " ++ s
-                                           | otherwise    -> do let Constructor _ as = getConstructor ?q $ unpack c
-                                                                fs <- mapM (\a -> case H.lookup (pack $ name a) v of
-                                                                                       Nothing -> err $ "Field " ++ name a ++ " is missing in JSON"
-                                                                                       Just v' -> valFromJSON (varType a) v') as
-                                                                return $ EStruct (unpack c) fs
-         _        -> err $ "Invalid struct " ++ show o
+valFromJSON (TStruct s) jv              = do
+    (c, x) <- case jv of
+                   J.Object o  -> return $ head $ H.toList o
+                   J.String cn -> return (cn, J.Null)
+                   _           -> err $ "Invalid struct " ++ show jv
+    case lookupConsStruct ?q (unpack c) of
+         Nothing -> err $ "Invalid constructor " ++ unpack c 
+         Just s' | name s' /= s -> err $ "Constructor " ++ unpack c ++ " does not match expected type " ++ s
+                 | otherwise    -> do let Constructor _ as = getConstructor ?q $ unpack c
+                                      fs <- case as of
+                                                 []  -> return []
+                                                 [a] -> (liftM return) $ valFromJSON (varType a) x
+                                                 _   -> do let J.Object v = x
+                                                           mapM (\a -> case H.lookup (pack $ name a) v of
+                                                                            Nothing -> err $ "Field " ++ name a ++ " is missing in JSON"
+                                                                            Just v' -> valFromJSON (varType a) v') as
+                                      return $ EStruct (unpack c) fs
 valFromJSON t           v               = err $ "Cannot decode JSON value " ++ show v ++ " as " ++ show t
 
 
 factToJSON :: (?q::SMTQuery) => Fact -> J.Value
-factToJSON Fact{..} = 
-    case factArgs of
-         [a] -> J.Object $ H.singleton (pack factRel) $ valToJSON a
-         _   -> J.Object $ H.singleton (pack factRel) $ J.Array $ V.fromList $ map valToJSON factArgs
+factToJSON Fact{..} = J.Object $ H.singleton (pack factRel) $ mkTuple $ map valToJSON factArgs
 
 factFromJSON :: DFSession -> String -> J.Value -> IO Fact
 factFromJSON DFSession{..} rname val = do
@@ -160,6 +172,7 @@ req df@DFSession{..} v = do
     BSL.hPutStr stderr $ json
     BSL.hPutStr stderr $ "\n"
     BSL.hPut dfHTo json
+    BSL.hPut dfHTo "\n"
     hFlush dfHTo
     BSS.hPutStr stderr "< "
     res <- parseWith (hGetSome' dfHFrom 4096) J.json ""

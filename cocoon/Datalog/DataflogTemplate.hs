@@ -7,8 +7,8 @@ import Text.PrettyPrint
 
 import PP
 
-dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts relations sets rules handlers = [r|extern crate timely;
+dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
+dataflogTemplate decls facts relations sets rules advance handlers = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -197,6 +197,8 @@ fn main() {
 
     // start up timely computation
     timely::execute_from_args(std::env::args(), |worker| {
+        let mut probe = probe::Handle::new();
+        let mut probe1 = probe.clone();
 |]
     $$
     (nest' $ nest' sets)
@@ -207,68 +209,68 @@ fn main() {
         let stream = json::Deserializer::from_reader(stdin()).into_iter::<Request>();
 
         for val in stream {
-                //print!("epoch: {}\n", epoch);
-                let req = match val {
-                                Ok(r)  => {
-                                    //print!("r: {:?}\n", r);
-                                    r
-                                },
-                                Err(e) => {
-                                    print!("{}\n", e);
-                                    std::process::exit(-1);
-                                }
-                            };
+            //print!("epoch: {}\n", epoch);
+            let req = match val {
+                            Ok(r)  => {
+                                //print!("r: {:?}\n", r);
+                                r
+                            },
+                            Err(e) => {
+                                print!("{}\n", e);
+                                std::process::exit(-1);
+                            }
+                        };|]
+    $$
+    (nest' $ nest' $ nest' advance)
+    $$ [r|
+            macro_rules! insert {
+                ($rel:ident, $args:expr) => {{
+                    $rel.insert($args);
+                    epoch = epoch+1;
+                    advance!();
+                    while probe.less_than($rel.time()) {
+                        worker.step();
+                    };
+                    let resp: Response<()> = Response::ok(());
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                }}
+            }
 
-                macro_rules! insert {
-                    ($rel:ident, $probe:ident, $args:expr) => {{
-                        $rel.insert($args);
-                        epoch = epoch+1;
-                        $rel.advance_to(epoch);
-                        $rel.flush();
-                        while $probe.less_than($rel.time()) {
-                            worker.step();
-                        };
-                        let resp: Response<()> = Response::ok(());
-                        serde_json::to_writer(stdout(), &resp).unwrap();
-                        stdout().flush().unwrap();
-                    }}
-                }
+            macro_rules! remove {
+                ($rel:ident, $args:expr) => {{
+                    $rel.remove($args);
+                    epoch = epoch+1;
+                    advance!();
+                    while probe.less_than($rel.time()) {
+                        worker.step();
+                    };
+                    let resp: Response<()> = Response::ok(());
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                }}
+            }
 
-                macro_rules! remove {
-                    ($rel:ident, $probe:ident, $args:expr) => {{
-                        $rel.remove($args);
-                        epoch = epoch+1;
-                        $rel.advance_to(epoch);
-                        $rel.flush();
-                        while $probe.less_than($rel.time()) {
-                            worker.step();
-                        };
-                        let resp: Response<()> = Response::ok(());
-                        serde_json::to_writer(stdout(), &resp).unwrap();
-                        stdout().flush().unwrap();
-                    }}
-                }
+            macro_rules! check {
+                ($set:expr) => {{
+                    let resp = Response::ok(!$set.borrow().is_empty());
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                }}
+            }
 
-                macro_rules! check {
-                    ($set:expr) => {{
-                        let resp = Response::ok(!$set.borrow().is_empty());
-                        serde_json::to_writer(stdout(), &resp).unwrap();
-                        stdout().flush().unwrap();
-                    }}
-                }
+            macro_rules! enm {
+                ($set:expr) => {{
+                    let resp = Response::ok((*$set).clone());
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                }}
+            }
 
-                macro_rules! enm {
-                    ($set:expr) => {{
-                        let resp = Response::ok((*$set).clone());
-                        serde_json::to_writer(stdout(), &resp).unwrap();
-                        stdout().flush().unwrap();
-                    }}
-                }
-
-                match req {
+            match req {
 |]
     $$
-    (nest' $ nest' $ nest' $ nest' $ nest' handlers)
+    (nest' $ nest' $ nest' $ nest' handlers)
     $$ [r|
                     _ => {
                         let resp: Response<()> = Response::err(format!("unknown request: {:?}", req));
