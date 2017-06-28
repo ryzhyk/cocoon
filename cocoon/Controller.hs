@@ -128,8 +128,17 @@ execExpr :: Expr -> Action
 execExpr e s@ControllerConnected{..} =
     case exprValidate ctlRefine CtxCLI e of
          Left er -> error er
-         Right _ -> do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
-                       return (s, intercalate ",\n" $ map show val)
+         Right _ -> if ctlXaction
+                       then do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
+                               return (s, intercalate ",\n" $ map show val)
+                       else do DL.start ctlDL
+                               (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
+                               (do _ <- _commit s
+                                   return ()
+                                `catch` \ex -> do 
+                                    DL.rollback ctlDL
+                                    throw (ex::SomeException))
+                               return (s, intercalate ",\n" $ map show val)
 execExpr _ _ = error "execExpr called in disconnected state"
                     
 
@@ -194,12 +203,19 @@ rollback ControllerDisconnected{} = throw $ AssertionFailed "no active connectio
 
 commit :: Action
 commit s@ControllerConnected{..} | ctlXaction = do
-    DL.commit ctlDL
-    return $ (s{ctlXaction = False}, "ok")
+    _ <- _commit s
+    return (s{ctlXaction = False}, "ok")
                                  | otherwise = error "No transaction in progress"
 commit ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
-
+_commit :: ControllerState -> IO ([DL.Fact], [DL.Fact])
+_commit s = do
+    let ?s = s
+    validateConstraints
+    delta <- DL.commit $ ctlDL s
+    let (inserts, deletes) = partition snd delta
+    -- TODO: write delta to DB
+    return (map fst inserts, map fst deletes)
 
 startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession dfpath = do
