@@ -56,6 +56,7 @@ data ControllerState = ControllerDisconnected { ctlDBName       :: String
                                               , ctlDL           :: DL.Session
                                               , ctlConstraints  :: [(Relation, [DL.Relation])]
                                               , ctlDB           :: PG.Connection
+                                              , ctlXaction      :: Bool
                                               }
 
 type DaemonState = (Maybe Handle, ControllerState)
@@ -113,6 +114,12 @@ execCommand ["connect"]          s       = connect s
 execCommand ("connect":_)        _       = error "connect does not take arguments" 
 execCommand ["disconnect"]       s       = disconnect s
 execCommand ("disconnect":_)     _       = error "disconnect does not take arguments"
+execCommand ["start"]            s       = start s
+execCommand ("start":_)          _       = error "start does not take arguments"
+execCommand ["rollback"]         s       = rollback s
+execCommand ("rollback":_)       _       = error "rollback does not take arguments"
+execCommand ["commit"]           s       = commit s
+execCommand ("commit":_)         _       = error "commit does not take arguments"
 execCommand _ ControllerDisconnected{}   = error "command not available in disconnected state"
 execCommand ("show":as)          s       = showcmd as s
 execCommand _                    _       = error "invalid command"
@@ -150,7 +157,7 @@ connect ControllerDisconnected{..} = do
     db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
     (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
         (dl, constr) <- startDLSession ctlDFPath
-        (do let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine dl constr db
+        (do let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine dl constr db False
             populateDB
             return (?s, "Connected"))
          `catch` \e -> do
@@ -165,16 +172,40 @@ connect ControllerConnected{} = throw $ AssertionFailed "already connected"
 -- Performs correct cleanup
 disconnect :: Action
 disconnect ControllerConnected{..} = do
-    closeDLSession ctlDL
-    PG.close ctlDB
+    (when ctlXaction $ DL.rollback ctlDL) `catch` \e -> error $ "Rollback failed: " ++ show (e :: SomeException)
+    (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
+    PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
     return $ (ControllerDisconnected ctlDBName ctlDFPath ctlRefine , "Disconnected")
 disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+
+start :: Action
+start s@ControllerConnected{..} | not ctlXaction = do
+    DL.start ctlDL
+    return $ (s{ctlXaction = True}, "ok")
+                                | otherwise = error "Transaction already in progress"
+start ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+
+rollback :: Action
+rollback s@ControllerConnected{..} | ctlXaction = do
+    DL.rollback ctlDL
+    return $ (s{ctlXaction = False}, "ok")
+                                   | otherwise = error "No transaction in progress"
+rollback ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+
+commit :: Action
+commit s@ControllerConnected{..} | ctlXaction = do
+    DL.commit ctlDL
+    return $ (s{ctlXaction = False}, "ok")
+                                 | otherwise = error "No transaction in progress"
+commit ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+
+
 
 startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession dfpath = do
     let (structs, funcs, rels) = DL.refine2DL ?r
     let (allrels, _) = unzip $ concatMap ( (\(mrel,crels) -> mrel:(concat crels)) . snd) rels
-    dl@DL.Session{..} <- DL.newSession dfpath structs funcs allrels
+    dl <- DL.newSession dfpath structs funcs allrels
     return (dl, map (mapSnd (map (fst . last) . snd)) rels)
 
 closeDLSession :: DL.Session -> IO ()

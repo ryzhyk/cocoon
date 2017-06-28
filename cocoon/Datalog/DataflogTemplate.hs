@@ -7,8 +7,8 @@ import Text.PrettyPrint
 
 import PP
 
-dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts relations sets rules advance handlers = [r|extern crate timely;
+dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
+dataflogTemplate decls facts relations sets rules advance cleanup undo handlers = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -27,11 +27,13 @@ use serde::de::*;
 use std::str::FromStr;
 use serde::de::Error;
 use std::collections::HashSet;
+use std::collections::HashMap;
 use std::io::{stdin, stdout, Write};
 use std::cell::RefCell;
 use std::cell::Ref;
 use std::rc::Rc;
 use std::hash::Hash;
+use std::fmt::Debug;
 use serde_json as json;
 
 use timely::progress::nested::product::Product;
@@ -172,23 +174,43 @@ forward_binop!(impl Rem for uint, rem);|]
 
 #[derive(Serialize, Deserialize, Debug)]
 enum Request {
+    start,
+    rollback,
+    commit,
     add(Fact),
     del(Fact),
     chk(Relation),
     enm(Relation)
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 enum Response<T> {
     err(String),
     ok(T)
 }
 
+fn xupd<T>(s: &Rc<RefCell<HashSet<T>>>, ds: &Rc<RefCell<HashMap<T, i8>>>, x:&T, w: isize) 
+where T: Eq + Hash + Clone + Debug {
+    if w > 0 {
+        let new = s.borrow_mut().insert(x.clone());
+        if new {
+            let f = |e: &mut i8| if *e == -1 {*e = 0;} else if *e == 0 {*e = 1};
+            f(ds.borrow_mut().entry(x.clone()).or_insert(0));
+        };
+    } else if w < 0 {
+        let present = s.borrow_mut().remove(x);
+        if present {
+            let f = |e: &mut i8| if *e == 1 {*e = 0;} else if *e == 0 {*e = -1;};
+            f(ds.borrow_mut().entry(x.clone()).or_insert(0));
+        };
+    }
+}
+
 fn upd<T>(s: &Rc<RefCell<HashSet<T>>>, x:&T, w: isize) 
-where T: Eq + Hash + Clone {
-    if w == 1 {
+where T: Eq + Hash + Clone + Debug {
+    if w > 0 {
         s.borrow_mut().insert(x.clone());
-    } else {
+    } else if w < 0 {
         s.borrow_mut().remove(x);
     }
 }
@@ -199,6 +221,8 @@ fn main() {
     timely::execute_from_args(std::env::args(), |worker| {
         let mut probe = probe::Handle::new();
         let mut probe1 = probe.clone();
+
+        let mut xaction : bool = false;
 |]
     $$
     (nest' $ nest' sets)
@@ -224,13 +248,22 @@ fn main() {
     (nest' $ nest' $ nest' advance)
     $$ [r|
             macro_rules! insert {
-                ($rel:ident, $args:expr) => {{
-                    $rel.insert($args);
-                    epoch = epoch+1;
-                    advance!();
-                    while probe.less_than($rel.time()) {
-                        worker.step();
+                ($rel:ident, $set:ident, $args:expr) => {{
+                    let v = $args;
+                    if !$set.borrow().contains(&v) {
+                        $rel.insert(v);
+                        epoch = epoch+1;
+                        advance!();
+                        while probe.less_than($rel.time()) {
+                            worker.step();
+                        };
                     };
+                }}
+            }
+
+            macro_rules! insert_resp {
+                ($rel:ident, $set:ident, $args:expr) => {{
+                    insert!($rel, $set, $args);
                     let resp: Response<()> = Response::ok(());
                     serde_json::to_writer(stdout(), &resp).unwrap();
                     stdout().flush().unwrap();
@@ -238,13 +271,22 @@ fn main() {
             }
 
             macro_rules! remove {
-                ($rel:ident, $args:expr) => {{
-                    $rel.remove($args);
-                    epoch = epoch+1;
-                    advance!();
-                    while probe.less_than($rel.time()) {
-                        worker.step();
+                ($rel:ident, $set:ident, $args:expr) => {{
+                    let v = $args;
+                    if $set.borrow().contains(&v) {
+                        $rel.remove(v);
+                        epoch = epoch+1;
+                        advance!();
+                        while probe.less_than($rel.time()) {
+                            worker.step();
+                        };
                     };
+                }}
+            }
+
+            macro_rules! remove_resp {
+                ($rel:ident, $set:ident, $args:expr) => {{
+                    remove!($rel, $set, $args);
                     let resp: Response<()> = Response::ok(());
                     serde_json::to_writer(stdout(), &resp).unwrap();
                     stdout().flush().unwrap();
@@ -265,10 +307,47 @@ fn main() {
                     serde_json::to_writer(stdout(), &resp).unwrap();
                     stdout().flush().unwrap();
                 }}
-            }
-
+            }|]
+    $$ 
+    (nest' $ nest' $ nest' cleanup)
+    $$
+    (nest' $ nest' $ nest' undo)
+    $$ [r|
             match req {
-|]
+                Request::start                       => {
+                    let resp = if xaction {
+                                   Response::err(format!("transaction already in progress"))
+                               } else {
+                                   delta_cleanup!();
+                                   xaction = true;
+                                   Response::ok(())
+                               };
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                },
+                Request::rollback                    => {
+                    let resp = if !xaction {
+                                   Response::err(format!("no transaction in progress"))
+                               } else {
+                                   delta_undo!();
+                                   delta_cleanup!();
+                                   xaction = false;
+                                   Response::ok(())
+                               };
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                },
+                Request::commit                      => {
+                    let resp = if !xaction {
+                                   Response::err(format!("no transaction in progress"))
+                               } else {
+                                   delta_cleanup!();
+                                   xaction = false;
+                                   Response::ok(())
+                               };
+                    serde_json::to_writer(stdout(), &resp).unwrap();
+                    stdout().flush().unwrap();
+                },|]
     $$
     (nest' $ nest' $ nest' $ nest' handlers)
     $$ [r|

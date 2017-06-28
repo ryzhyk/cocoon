@@ -118,16 +118,22 @@ data DFSession = DFSession { dfQ     :: SMTQuery
                            , dfHP    :: ProcessHandle
                            }
 
-data Request = ReqAdd    Fact
+data Request = ReqStart
+             | ReqRollback
+             | ReqCommit
+             | ReqAdd    Fact
              | ReqRemove Fact
              | ReqCheck  String
              | ReqEnum   String
 
 requestToJSON :: (?q::SMTQuery) => Request -> J.Value
-requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add" $ factToJSON f
-requestToJSON (ReqRemove f) = J.Object $ H.singleton "del" $ factToJSON f
-requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk" $ J.String $ pack r
-requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm" $ J.String $ pack r
+requestToJSON ReqStart      = J.Object $ H.singleton "start"    $ J.Null
+requestToJSON ReqRollback   = J.Object $ H.singleton "rollback" $ J.Null
+requestToJSON ReqCommit     = J.Object $ H.singleton "commit"   $ J.Null
+requestToJSON (ReqAdd f)    = J.Object $ H.singleton "add"      $ factToJSON f
+requestToJSON (ReqRemove f) = J.Object $ H.singleton "del"      $ factToJSON f
+requestToJSON (ReqCheck r)  = J.Object $ H.singleton "chk"      $ J.String $ pack r
+requestToJSON (ReqEnum r)   = J.Object $ H.singleton "enm"      $ J.String $ pack r
 
 respUnwrap :: J.Value -> IO J.Value
 respUnwrap v = case v of
@@ -152,7 +158,10 @@ newSession path structs funs rels = do
                        , dfHP    = ph
                        }
     checkph df
-    return $ Session { addFact          = dfAddFact          df
+    return $ Session { start            = dfStart            df
+                     , rollback         = dfRollback         df
+                     , commit           = dfCommit           df
+                     , addFact          = dfAddFact          df
                      , removeFact       = dfRemoveFact       df
                      , checkRelationSAT = dfCheckRelationSAT df
                      , enumRelation     = dfEnumRelation     df
@@ -229,3 +238,27 @@ dfCloseSession df = do
    terminateProcess $ dfHP df
    _ <- waitForProcess $ dfHP df
    return () 
+
+dfStart :: DFSession -> IO ()
+dfStart df = do
+    let ?q = dfQ df
+    let json = requestToJSON ReqStart
+    resp <- req df json
+    _ <- respUnwrap resp
+    return ()
+
+dfRollback :: DFSession -> IO ()
+dfRollback df = do
+    let ?q = dfQ df
+    let json = requestToJSON ReqRollback
+    resp <- req df json
+    _ <- respUnwrap resp
+    return ()
+
+dfCommit :: DFSession -> IO ()
+dfCommit df = do
+    let ?q = dfQ df
+    let json = requestToJSON ReqCommit
+    resp <- req df json
+    _ <- respUnwrap resp
+    return ()

@@ -52,7 +52,7 @@ refine2DL r =
 
 rel2DL :: (?r::Refine) => Relation -> ((DL.Relation, [DL.Rule]), [ [(DL.Relation, [DL.Rule])] ])
 rel2DL rel = ((rel', rules), constrs)
-    where rel' = DL.Relation (name rel) $ map (\arg -> SMT.Var (name arg) (typ2SMT arg)) $ relArgs rel
+    where rel' = DL.Relation (name rel) (map (\arg -> SMT.Var (name arg) (typ2SMT arg)) $ relArgs rel) (relIsView rel)
           rules = maybe []
                         (mapIdx (\rl@Rule{..} i -> let replacePH :: ECtx -> ENode -> State Int Expr
                                                        replacePH ctx (EPHolder _) | ctxInRuleL ctx || ctxInRelPred ctx = do

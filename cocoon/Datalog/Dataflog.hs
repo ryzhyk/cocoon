@@ -87,7 +87,34 @@ mkRust structs funs rels rules =
         sets  = mkSets rels
         handlers = mkHandlers rels
         advance = mkAdvance rels
-    in dataflogTemplate decls facts relations sets logic advance handlers
+        cleanup = mkCleanup rels
+        undo = mkUndo rels
+    in dataflogTemplate decls facts relations sets logic advance cleanup undo handlers
+
+mkCleanup :: [Relation] -> Doc
+mkCleanup rels =
+    "macro_rules! delta_cleanup {" $$
+    "    () => {{" $$
+    (nest' $ nest' $ vcat $ map (\rel -> "__rDelta" <> (pp $ name rel) <> ".borrow_mut().clear();") $ filter (not . relIsView) rels) $$
+    "    }}" $$
+    "}"
+
+mkUndo :: [Relation] -> Doc
+mkUndo rels = 
+    "macro_rules! delta_undo {" $$
+    "    () => {{" $$
+    (nest' $ nest' $ vcat $ map (\rel -> 
+            let n = pp $ name rel in
+            "let mut d = __rDelta" <> n <> ".borrow().clone();" $$
+            "for (k,v) in d.drain() {" $$
+            "    if v == 1 {" $$
+            "        remove!(_" <> n <> ", _r" <> n <> ", k);" $$
+            "    } else if v == -1 {" $$
+            "        insert!(_" <> n <> ", _r" <> n <> ", k);" $$
+            "    };" $$
+            "};") $ filter (not . relIsView) rels) $$
+    "   }}" $$
+    "}"
 
 mkAdvance :: [Relation] -> Doc
 mkAdvance rels = 
@@ -113,18 +140,26 @@ mkRels rels =
     $$ "}"
 
 mkSets :: [Relation] -> Doc
-mkSets = vcat .
-    map (\rel -> let n = pp $ name rel
-                     args = commaSep $ map (mkType . varType) $ relArgs rel in
-                 ("let mut _r" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = Rc::new(RefCell::new(HashSet::new()));") $$
-                 ("let mut _w" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = _r" <> n <> ".clone();"))
+mkSets rels = 
+    (vcat
+     $ map (\rel -> let n = pp $ name rel
+                        args = commaSep $ map (mkType . varType) $ relArgs rel in
+                    ("let mut _r" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = Rc::new(RefCell::new(HashSet::new()));") $$
+                    ("let mut _w" <> n <> ": Rc<RefCell<HashSet<(" <> args <> ")>>> = _r" <> n <> ".clone();")) rels)
+    $$
+    (vcat
+     $ map (\rel -> let n = pp $ name rel
+                        args = commaSep $ map (mkType . varType) $ relArgs rel in
+                    ("let mut __rDelta" <> n <> ": Rc<RefCell<HashMap<(" <> args <> "), i8>>> = Rc::new(RefCell::new(HashMap::new()));") $$
+                    ("let mut __wDelta" <> n <> ": Rc<RefCell<HashMap<(" <> args <> "), i8>>> = __rDelta" <> n <> ".clone();")) 
+     $ filter (not . relIsView) rels)
 
 mkHandlers :: [Relation] -> Doc
 mkHandlers = vcat .
     map (\rel -> let n = pp $ name rel 
                      as = commaCat $ mapIdx (\_ i -> "a" <> pp i) $ relArgs rel in
-                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert!(_" <> n <> ", (" <> as <> ")),") $$
-                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove!(_" <> n <> ", (" <> as <> ")),") $$
+                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert_resp!(_" <> n <> ", _r" <> n <> ", (" <> as <> ")),") $$
+                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove_resp!(_" <> n <> ", _r" <> n <> ", (" <> as <> ")),") $$
                  ("Request::chk(Relation::" <> n <> ") => check!(_r" <> n <> "),") $$
                  ("Request::enm(Relation::" <> n <> ") => enm!(_r" <> n <> "),"))
 
@@ -132,13 +167,20 @@ mkRules :: (?q::SMTQuery, ?rels::[Relation]) => [Rule] -> Doc
 mkRules rules = 
         ("let" <+> tuple retvars <+> "= worker.dataflow::<u64,_,_>(move |outer| {") $$
         (nest' $ vcat $ map mkSCC sccs) $$
+        (nest' $ vcat distinct) $$
         (nest' $ vcat probes) $$
         (nest' $ tuple retvals) $$
         "});"
     where
     rels = ?rels
     retvars = map (\rl -> "mut" <+> (pp $ hname rl)) rels
-    probes = map (\rl -> (pp $ name rl) <> ".inspect(move |x| upd(&_w" <> (pp $ name rl) <> ", &(x.0), x.2)).probe_with(&mut probe1)" <> semi) rels
+    distinct = map (\rl -> "let " <> pp (name rl) <> " = " <> pp (name rl) <> ".distinct();") rels
+    probes = map (\rl -> let n = pp $ name rl in
+                         if relIsView rl 
+                            then n <> ".inspect(move |x| upd(&_w" <> n <> ", &(x.0), x.2)).probe_with(&mut probe1)" <> semi
+                            else n <> ".inspect(move |x| xupd(&_w" <> n <> ", &__wDelta" <> n <> ", &(x.0), x.2)).probe_with(&mut probe1)" <> semi) 
+                 rels
+
     retvals = map (\rl -> (pp $ hname rl)) rels
     relidx rel = fromJust $ findIndex ((== rel) . name) rels
     -- graph with relations as nodes and edges labeled with rules (labels are not unique)

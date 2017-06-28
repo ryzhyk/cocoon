@@ -31,8 +31,9 @@ import Name
 import PP
 import SMT.SMTSolver
 
-data Relation = Relation { relName :: String 
-                         , relArgs :: [Var]
+data Relation = Relation { relName   :: String 
+                         , relArgs   :: [Var]
+                         , relIsView :: Bool
                          }
 
 instance WithName Relation where
@@ -62,6 +63,9 @@ instance Show Fact where
 type RuleId = Int64
 
 data Session = Session {
+    start            ::           IO (),
+    rollback         ::           IO (),
+    commit           ::           IO (),
     addFact          :: Fact   -> IO (),
     removeFact       :: Fact   -> IO (),
     checkRelationSAT :: String -> IO Bool,
