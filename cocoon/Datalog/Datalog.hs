@@ -65,7 +65,7 @@ type RuleId = Int64
 data Session = Session {
     start            ::           IO (),
     rollback         ::           IO (),
-    commit           ::           IO (),
+    commit           ::           IO [(Fact, Bool)],
     addFact          :: Fact   -> IO (),
     removeFact       :: Fact   -> IO (),
     checkRelationSAT :: String -> IO Bool,

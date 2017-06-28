@@ -16,7 +16,7 @@ limitations under the License.
 
 -- Datalog implementation on top of the differential Dataflow library:
 
-{-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings, ScopedTypeVariables #-}
+{-# LANGUAGE LambdaCase, ImplicitParams, RecordWildCards, OverloadedStrings, ScopedTypeVariables #-}
 
 module Datalog.DataflogSession (newSession) where
 
@@ -49,7 +49,7 @@ mkTuple as  = J.Array $ V.fromList as
 
 mkObject :: [(Text, J.Value)] -> J.Value
 mkObject []  = J.Null
-mkObject [(_,a)] = a
+--mkObject [(_,a)] = J.Array $ V.singleton a
 mkObject as  = J.Object $ H.fromList as
 
 valToJSON :: (?q::SMTQuery) => Expr -> J.Value
@@ -85,7 +85,7 @@ valFromJSON (TStruct s) jv              = do
                  | otherwise    -> do let Constructor _ as = getConstructor ?q $ unpack c
                                       fs <- case as of
                                                  []  -> return []
-                                                 [a] -> (liftM return) $ valFromJSON (varType a) x
+                                                 --[a] -> (liftM return) $ valFromJSON (varType a) x
                                                  _   -> do let J.Object v = x
                                                            mapM (\a -> case H.lookup (pack $ name a) v of
                                                                             Nothing -> err $ "Field " ++ name a ++ " is missing in JSON"
@@ -97,8 +97,14 @@ valFromJSON t           v               = err $ "Cannot decode JSON value " ++ s
 factToJSON :: (?q::SMTQuery) => Fact -> J.Value
 factToJSON Fact{..} = J.Object $ H.singleton (pack factRel) $ mkTuple $ map valToJSON factArgs
 
-factFromJSON :: DFSession -> String -> J.Value -> IO Fact
-factFromJSON DFSession{..} rname val = do
+factFromJSON :: (?q::SMTQuery) => DFSession -> J.Value -> IO Fact
+factFromJSON df f@(J.Object vs) = case H.toList vs of
+                                       [(rname, v)] -> rowFromJSON df (unpack rname) v
+                                       _            -> err $ "Invalid JSON fact: " ++ show f
+factFromJSON _  f = err $ "Invalid JSON fact: " ++ show f
+
+rowFromJSON :: DFSession -> String -> J.Value -> IO Fact
+rowFromJSON DFSession{..} rname val = do
     let Relation{..} = fromJust $ find ((== rname) . name) dfRels
     let ?q = dfQ
     case relArgs of
@@ -109,6 +115,7 @@ factFromJSON DFSession{..} rname val = do
                                         args <- mapM (\(a,v) -> valFromJSON (varType a) v) $ zip relArgs (V.toList vals)
                                         return $ Fact rname args
                      _            -> err $ "Invalid tuple: " ++ show val
+
     
 
 data DFSession = DFSession { dfQ     :: SMTQuery
@@ -230,8 +237,8 @@ dfEnumRelation df rel = do
     resp <- req df json
     res <- respUnwrap resp
     case res of
-         J.Array facts -> mapM (factFromJSON df rel) $ V.toList facts
-         _             -> err $ "Dataflog returned invalid value: " ++ show res
+         J.Array facts -> mapM (rowFromJSON df rel) $ V.toList facts
+         _             -> err $ "Dataflog enum returned invalid value: " ++ show res
 
 dfCloseSession :: DFSession -> IO ()
 dfCloseSession df = do
@@ -255,10 +262,21 @@ dfRollback df = do
     _ <- respUnwrap resp
     return ()
 
-dfCommit :: DFSession -> IO ()
+dfCommit :: DFSession -> IO [(Fact, Bool)]
 dfCommit df = do
     let ?q = dfQ df
     let json = requestToJSON ReqCommit
     resp <- req df json
-    _ <- respUnwrap resp
-    return ()
+    facts <- respUnwrap resp
+    case facts of 
+         J.Array fs -> mapM (\case 
+                              J.Array a -> case V.toList a of
+                                                [f, J.Number s] -> do f' <- factFromJSON df f
+                                                                      s' <- case (floatingOrInteger s) :: Either Double Integer of
+                                                                                 Right 1    -> return True
+                                                                                 Right (-1) -> return False
+                                                                                 _          -> err $ "Invalid polarity " ++ show s ++ " in tuple " ++ show f
+                                                                      return (f', s')
+                                                _               -> err $ "Dataflog commit returned invalid tuple: " ++ show a
+                              x         -> err $ "Dataflog commit returned invalid tuple: " ++ show x) $ V.toList fs
+         _          -> err $ "Dataflog commit returned invalid value: " ++ show facts

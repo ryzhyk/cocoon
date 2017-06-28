@@ -7,8 +7,8 @@ import Text.PrettyPrint
 
 import PP
 
-dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts relations sets rules advance cleanup undo handlers = [r|extern crate timely;
+dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
+dataflogTemplate decls facts relations sets rules advance delta cleanup undo handlers = [r|extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -308,6 +308,8 @@ fn main() {
                     stdout().flush().unwrap();
                 }}
             }|]
+    $$
+    (nest' $ nest' $ nest' delta)
     $$ 
     (nest' $ nest' $ nest' cleanup)
     $$
@@ -341,9 +343,11 @@ fn main() {
                     let resp = if !xaction {
                                    Response::err(format!("no transaction in progress"))
                                } else {
+                                   let mut delta = HashSet::new();
+                                   delta!(delta);
                                    delta_cleanup!();
                                    xaction = false;
-                                   Response::ok(())
+                                   Response::ok(delta)
                                };
                     serde_json::to_writer(stdout(), &resp).unwrap();
                     stdout().flush().unwrap();

@@ -87,9 +87,25 @@ mkRust structs funs rels rules =
         sets  = mkSets rels
         handlers = mkHandlers rels
         advance = mkAdvance rels
+        delta = mkDelta rels
         cleanup = mkCleanup rels
         undo = mkUndo rels
-    in dataflogTemplate decls facts relations sets logic advance cleanup undo handlers
+    in dataflogTemplate decls facts relations sets logic advance delta cleanup undo handlers
+
+mkDelta :: [Relation] -> Doc
+mkDelta rels =
+    "macro_rules! delta {" $$
+    "    ($delta: expr) => {{" $$
+    (nest' $ nest' $ vcat 
+     $ map (\rel -> let n = pp $ name rel 
+                        nas = length $ relArgs rel in
+                    "let d = __rDelta" <> n <> ".borrow();" $$
+                    "for (" <> reftuple [map (("a" <>) . pp) [1..nas]] <> ",v) in d.iter().filter(|&(_, v)| *v != 0) {" $$
+                    "    $delta.insert((Fact::" <> n <> "(" <> (commaSep $ map (("a" <>) . (<>".clone()") . pp) [1..nas]) <> "),v.clone()));" $$
+                    "};")
+      $ filter (not . relIsView) rels) $$
+    "    }}" $$
+    "}"
 
 mkCleanup :: [Relation] -> Doc
 mkCleanup rels =
@@ -127,7 +143,7 @@ mkAdvance rels =
 
 mkFacts :: [Relation] -> Doc
 mkFacts rels = 
-    "#[derive(Serialize, Deserialize, Debug)]" $$
+    "#[derive(Eq, Hash, PartialEq, Serialize, Deserialize, Debug)]" $$
     "enum Fact {" $$
     (nest' $ vcat $ punctuate comma $ map (\rel -> pp (name rel) <> (parens $ commaSep $ map (mkType . varType) $ relArgs rel)) rels)
     $$ "}"
