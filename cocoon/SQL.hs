@@ -412,7 +412,9 @@ deleteFrom pg rname args = do
         eval (E (EField _ s f)) = let E (EStruct _ c as) = eval s in
                                   as !! (fromJust $ findIndex ((== f) . name) $ consArgs $ getConstructor ?r c)
         eval e                  = error $ "SQL.deleteFrom " ++ show e
-    let pkey = constrFields $ fromJust $ find isPrimaryKey relConstraints
+    let pkey = case find isPrimaryKey relConstraints of
+                    Nothing   -> map (eVar . name) relArgs
+                    Just cons -> constrFields cons
     let names = concatMap (map (render . colName) . field2cols rel) pkey
     let vals  = concatMap (map (render . mkVal . enode) . field2cols rel . eval) pkey
     let q = "delete from " ++ rname ++ " where " ++ (intercalate " and " $ map (\(n,v) -> n ++ " = " ++ v) $ zip names vals )

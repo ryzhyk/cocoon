@@ -177,9 +177,10 @@ assume LogicalPort(p, _, PortRouter{rport}, _, _) and LogicalRouterPort(rport, _
 
 // This table is populated by ovn-northd, rather than by the CMS plugin as is most of this database
 table LogicalPort_up( port: port_id_t
-                     , up  : bool
-                     , foreign key (port) references LogicalPort(name)
-                     , unique (port))
+                    , up  : bool
+                    , primary key (port)
+                    , foreign key (port) references LogicalPort(name)
+                    , unique (port))
 
 // Addresses owned by the logical port.  Each element in the set must take one 
 // of the following forms:
@@ -209,8 +210,8 @@ typedef port_addr_t = PortAddressUnknown
                     | PortAddressMACIP6 {mac: mac_addr_t, ip6: ip6_addr_t}
 
 table LogicalPort_address( port: port_id_t
-                          , addr: port_addr_t
-                          , foreign key (port) references LogicalPort(name))
+                         , addr: port_addr_t
+                         , foreign key (port) references LogicalPort(name))
 
 view LogicalPort_mac( port: port_id_t, mac: mac_addr_t)
 LogicalPort_mac(p, mac) :- LogicalPort_address(p, PortAddressMACIP4{mac, _})

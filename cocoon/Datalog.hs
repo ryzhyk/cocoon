@@ -76,8 +76,8 @@ rel2DL rel = ((rel', rules), constrs)
           constrs = mapIdx (constr2DL rel) $ relConstraints rel
 
 constr2DL :: (?r::Refine) => Relation -> Constraint -> Int -> [(DL.Relation, [DL.Rule])]
-constr2DL rel (PrimaryKey _ fs) _            = pkeyIndex rel fs ++ uniqueConstr rel fs
-constr2DL rel (Unique _ fs)     _            = uniqueConstr rel fs
+constr2DL rel (PrimaryKey _ fs) i            = pkeyIndex rel fs ++ uniqueConstr i rel fs
+constr2DL rel (Unique _ fs)     i            = uniqueConstr i rel fs
 constr2DL rel (Check _ e)       i            = [fst $ rel2DL rel']
     where relname = name rel ++ "_check_" ++ show i
           as = relArgs rel
@@ -106,12 +106,12 @@ pkeyIndex rel fs = [fst $ rel2DL rel']
                           $ Just [Rule nopos fs [eRelPred (name rel) (map (eVar . name) as)]]
 
 
-uniqueConstr :: (?r::Refine) => Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
-uniqueConstr rel fs = [fst $ rel2DL rel']
+uniqueConstr :: (?r::Refine) => Int -> Relation -> [Expr] -> [(DL.Relation, [DL.Rule])]
+uniqueConstr i rel fs = [fst $ rel2DL rel']
     where -- R_unique_(x1,x2) <- R(x1), R(x2), x1!=x2, x1.f == x2.f
           as1 = map (\f -> f{fieldName = fieldName f ++ "1"}) $ relArgs rel
           as2 = map (\f -> f{fieldName = fieldName f ++ "2"}) $ relArgs rel
-          relname = name rel ++ "_unique_" ++ (replace "." "_" $ intercalate "_" $ map show fs)
+          relname = name rel ++ "_unique_" ++ show i ++ "_" ++ (replace "." "_" $ intercalate "_" $ map show fs)
           neq = disj $ map (\(f1, f2) -> eNot $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
           rename suff = exprVarRename (++suff)
           eq  = conj $ map (\f -> eBinOp Eq (rename "1" f) (rename "2" f)

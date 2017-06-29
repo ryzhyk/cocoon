@@ -158,7 +158,7 @@ funcValidate r f@Function{..} = do
          Just def -> exprValidate r (CtxFunc f CtxRefine) def
 
 -- Relations are validated in two passes: the first pass validates
--- fields; the seconds pass validates constraints and rules.  This 
+-- fields; the second pass validates constraints and rules.  This 
 -- two-phase process is needed, as foreign key constraints refer to 
 -- fields of other relations
 relValidate :: (MonadError String me) => Refine -> Relation -> me ()
