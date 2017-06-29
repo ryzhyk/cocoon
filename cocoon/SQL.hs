@@ -55,7 +55,7 @@ sqlMaxIntWidth = 63
 
 tag = "tag$"
 matchvar = "match$"
-serialcol = "_serial"
+--serialcol = "_serial"
 
 commaSep = hsep . punctuate comma . filter (not . isEmpty)
 vcommaSep = vcat . punctuate comma . filter (not . isEmpty)
@@ -141,12 +141,13 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
                          (vcat $ map sel3 cons)
     where
     -- Primary table
-    cols = (pp serialcol <+> "bigserial") :
+    cols = {-(pp serialcol <+> "bigserial") :-}
            map mkColumn relArgs
     cons = mapIdx (mkConstraint rel) $ filter isPrimaryKey relConstraints
     -- Delta table
     -- Primary-delta synchronization triggers
 
+{-
 mkNotify :: String -> Doc
 mkNotify rel = pp $ 
     "create function upd_" ++ rel ++ "() returns trigger as $$\n"                ++
@@ -163,7 +164,7 @@ mkNotify rel = pp $
     "create trigger trg_" ++ rel ++ " after insert or delete or update on " ++ rel ++ "\n" ++
     "    for each row execute procedure upd_" ++ rel ++ "();\n"
     where lrel = map toLower rel
- 
+-}
 
 --- r, m, Cons1{_,_,Cons2{x,_}} ===> m.f1.f2
 ctx2Field :: (?r::Refine) => Expr -> ECtx -> Expr
