@@ -8,7 +8,11 @@ import Text.PrettyPrint
 import PP
 
 dataflogTemplate :: Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc -> Doc
-dataflogTemplate decls facts relations sets rules advance delta cleanup undo handlers = [r|extern crate timely;
+dataflogTemplate decls facts relations sets rules advance delta cleanup undo handlers = [r|#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(non_shorthand_field_patterns)]
+#![allow(unused_variables)]
+extern crate timely;
 #[macro_use]
 extern crate abomonation;
 extern crate differential_dataflow;
@@ -30,7 +34,6 @@ use std::collections::HashSet;
 use std::collections::HashMap;
 use std::io::{stdin, stdout, Write};
 use std::cell::RefCell;
-use std::cell::Ref;
 use std::rc::Rc;
 use std::hash::Hash;
 use std::fmt::Debug;
@@ -92,14 +95,14 @@ impl<'a, G: Scope, D: Default+Data+Hashable> Drop for Variable<'a, G, D> where G
 }
 
 #[derive(Eq, PartialOrd, PartialEq, Ord, Debug, Clone, Hash)]
-struct uint{x:BigUint}
+struct Uint{x:BigUint}
 
-impl Default for uint {
-    fn default() -> uint {uint{x: BigUint::default()}}
+impl Default for Uint {
+    fn default() -> Uint {Uint{x: BigUint::default()}}
 }
-unsafe_abomonate!(uint);
+unsafe_abomonate!(Uint);
 
-impl Serialize for uint {
+impl Serialize for Uint {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
     {
@@ -107,42 +110,42 @@ impl Serialize for uint {
     }
 }
 
-impl<'de> Deserialize<'de> for uint {
-    fn deserialize<D>(deserializer: D) -> Result<uint, D::Error>
+impl<'de> Deserialize<'de> for Uint {
+    fn deserialize<D>(deserializer: D) -> Result<Uint, D::Error>
         where D: Deserializer<'de>
     {
         match String::deserialize(deserializer) {
             Ok(s) => match BigUint::from_str(&s) {
-                        Ok(i)  => Ok(uint{x:i}),
-                        Err(e) => Err(D::Error::custom(format!("invalid integer value: {}", s)))
+                        Ok(i)  => Ok(Uint{x:i}),
+                        Err(_) => Err(D::Error::custom(format!("invalid integer value: {}", s)))
                      },
             Err(e) => Err(e)
         }
     }
 }
 
-impl uint {
+impl Uint {
     #[inline]
-    pub fn parse_bytes(buf: &[u8], radix: u32) -> uint {
-        uint{x: BigUint::parse_bytes(buf, radix).unwrap()}
+    pub fn parse_bytes(buf: &[u8], radix: u32) -> Uint {
+        Uint{x: BigUint::parse_bytes(buf, radix).unwrap()}
     }
 }
 
-impl Shr<usize> for uint {
-    type Output = uint;
+impl Shr<usize> for Uint {
+    type Output = Uint;
 
     #[inline]
-    fn shr(self, rhs: usize) -> uint {
-        uint{x: self.x.shr(rhs)}
+    fn shr(self, rhs: usize) -> Uint {
+        Uint{x: self.x.shr(rhs)}
     }
 }
 
-impl Shl<usize> for uint {
-    type Output = uint;
+impl Shl<usize> for Uint {
+    type Output = Uint;
 
     #[inline]
-    fn shl(self, rhs: usize) -> uint {
-        uint{x: self.x.shl(rhs)}
+    fn shl(self, rhs: usize) -> Uint {
+        Uint{x: self.x.shl(rhs)}
     }
 }
 
@@ -154,16 +157,16 @@ macro_rules! forward_binop {
             #[inline]
             fn $method(self, other: $res) -> $res {
                 // forward to val-ref
-                uint{x: $imp::$method(self.x, other.x)}
+                Uint{x: $imp::$method(self.x, other.x)}
             }
         }
     }
 }
 
-forward_binop!(impl Add for uint, add);
-forward_binop!(impl Sub for uint, sub);
-forward_binop!(impl Div for uint, div);
-forward_binop!(impl Rem for uint, rem);|]
+forward_binop!(impl Add for Uint, add);
+forward_binop!(impl Sub for Uint, sub);
+forward_binop!(impl Div for Uint, div);
+forward_binop!(impl Rem for Uint, rem);|]
     $$
     decls
     $$
@@ -219,7 +222,7 @@ fn main() {
 
     // start up timely computation
     timely::execute_from_args(std::env::args(), |worker| {
-        let mut probe = probe::Handle::new();
+        let probe = probe::Handle::new();
         let mut probe1 = probe.clone();
 
         let mut xaction : bool = false;
@@ -354,14 +357,15 @@ fn main() {
                 },|]
     $$
     (nest' $ nest' $ nest' $ nest' handlers)
-    $$ [r|
+{-    $$ [r|
                     _ => {
                         let resp: Response<()> = Response::err(format!("unknown request: {:?}", req));
                         serde_json::to_writer(stdout(), &resp).unwrap();
                     }
-                };
+                };-}
+    $$ [r|
+            };
         };
-
     }).unwrap();
 }|]
 

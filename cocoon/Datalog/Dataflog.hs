@@ -60,8 +60,8 @@ reftuple___ xs  = parens $ commaCat $ map ("ref" <+>) xs
 lambda :: Doc -> Doc -> Doc
 lambda as e = "|" <> as <> "|" <+> e
 
-lambdam :: Doc -> Doc -> Doc
-lambdam as e = "|_x_| match _x_ {" <> as <+> "=>" <+> e <> ", _ => unreachable!()}"
+lambdam :: Bool -> Doc -> Doc -> Doc
+lambdam exhaustive as e = "|_x_| match _x_ {" <> as <+> "=>" <+> e <> (if' exhaustive empty ", _ => unreachable!()") <> "}"
 
 ruleHeadRel :: Rule -> String
 ruleHeadRel rl = n
@@ -173,9 +173,10 @@ mkSets rels =
 mkHandlers :: [Relation] -> Doc
 mkHandlers = vcat .
     map (\rel -> let n = pp $ name rel 
-                     as = commaCat $ mapIdx (\_ i -> "a" <> pp i) $ relArgs rel in
-                 ("Request::add(Fact::" <> n <> "(" <> as <> ")) => insert_resp!(_" <> n <> ", _r" <> n <> ", (" <> as <> ")),") $$
-                 ("Request::del(Fact::" <> n <> "(" <> as <> ")) => remove_resp!(_" <> n <> ", _r" <> n <> ", (" <> as <> ")),") $$
+                     as = mapIdx (\_ i -> "a" <> pp i) $ relArgs rel 
+                     as' = tuple as in
+                 ("Request::add(Fact::" <> n <> "(" <> commaCat as <> ")) => insert_resp!(_" <> n <> ", _r" <> n <> ", " <> as' <> "),") $$
+                 ("Request::del(Fact::" <> n <> "(" <> commaCat as <> ")) => remove_resp!(_" <> n <> ", _r" <> n <> ", " <> as' <> "),") $$
                  ("Request::chk(Relation::" <> n <> ") => check!(_r" <> n <> "),") $$
                  ("Request::enm(Relation::" <> n <> ") => enm!(_r" <> n <> "),"))
 
@@ -248,13 +249,13 @@ mkRelDecl rel = "let (mut" <+> n' <> comma <+> n <> ") = outer.new_collection::<
 
 mkType :: Type -> Doc
 mkType TBool                = "bool"
-mkType TInt                 = "uint"
+mkType TInt                 = "Uint"
 mkType TString              = "String"
 mkType (TBit w) | w <= 8    = "u8"
                 | w <= 16   = "u16"
                 | w <= 32   = "u32"
                 | w <= 64   = "u64"
-                | otherwise = "uint"
+                | otherwise = "Uint"
 mkType (TStruct s)          = pp s
 mkType TArray{}             = error "not implemented: Dataflog.mkType TArray"
 
@@ -393,15 +394,15 @@ mkRuleP rule@Rule{..} jvars vars pref preds conds =
     pref' = if' (pref == empty)
                 -- <rname>.filter(<filters>).map(|<args>|(<jvars'>, <vars'>))
                 (pp rname <> (_filters
-                              $$ ("." <> "map" <> (parens $ lambdam _args (tuple $ _jvars' ++ [_vars']) )))) 
+                              $$ ("." <> "map" <> (parens $ lambdam (null filters) _args (tuple $ _jvars' ++ [_vars']) )))) 
                 (if' sign
                      -- <pref>.join_map(<rname>.filter(<filters>).map(|<args>|(<jvars>, <care'>)), |(<jvars>, <vars>, <care'>)|(<jvars'>, <vars'>))
                      (pref $$ ("." <> "join_map" <> (parens $
-                               "&" <> (parens $ (pp rname <> _filters <> "." <> "map" <> (parens $ lambdam _args (tuple [_jvars,_care'])))) <> comma <+>
+                               "&" <> (parens $ (pp rname <> _filters <> "." <> "map" <> (parens $ lambdam (null filters) _args (tuple [_jvars,_care'])))) <> comma <+>
                                ("|" <> commaSep [reftuple [map pp jvars], reftuple [map pp vars], reftuple [map pp care']] <> "|" <+> (tuple $ _jvars'' ++ [_vars''])))))
                      -- <pref>.antijoin(<rname>.filter(<filters>).map(|<args>|<jvars>)).map(|(<jvars>, <vars>)|(<jvars'>, <vars'>))
                      (pref $$ ("." <> "antijoin" <> 
-                               (parens $ "&" <> (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambdam _args _jvars))) $$
+                               (parens $ "&" <> (parens $ pp rname <> _filters <> "." <> "map" <> (parens $ lambdam (null filters) _args _jvars))) $$
                                ("." <> "map" <> (parens $ lambda (tuple [_jvars, _vars]) (tuple $ _jvars' ++ [_vars']))))))
 
 mkFilter :: (?q::SMTQuery) => Expr -> Expr -> Doc
@@ -432,7 +433,7 @@ mkExpr _     (EBool True)         = "true"
 mkExpr _     (EBool False)        = "false"
 mkExpr p     (EBit w i) | w<=64   = pp i
                         | otherwise = mkExpr p $ EInt i
-mkExpr _     (EInt i)             = "uint::parse_bytes" <> 
+mkExpr _     (EInt i)             = "Uint::parse_bytes" <> 
                                     (parens $ "b\"" <> pp i <> "\"" <> comma <+> "10") <> ".unwrap()"
 mkExpr _     (EString s)          = pp $ "\"" ++ s ++ "\""
 mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <> 
