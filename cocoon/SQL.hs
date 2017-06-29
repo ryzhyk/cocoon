@@ -136,8 +136,8 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
                          $$
                          ");"
                          $$
-                         mkNotify relName
-                         $$
+                         {-mkNotify relName
+                         $$-}
                          (vcat $ map sel3 cons)
     where
     -- Primary table
