@@ -211,11 +211,15 @@ commit ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 _commit :: ControllerState -> IO ([DL.Fact], [DL.Fact])
 _commit s = do
     let ?s = s
+    let ?r = ctlRefine s
     validateConstraints
     delta <- DL.commit $ ctlDL s
-    let (inserts, deletes) = partition snd delta
-    -- TODO: write delta to DB
-    return (map fst inserts, map fst deletes)
+    let (inserts', deletes') = partition snd delta
+    let inserts = map fst inserts'
+    let deletes = map fst deletes'
+    mapM_ (\DL.Fact{..} -> SQL.deleteFrom (ctlDB s) factRel $ map SMT.exprFromSMT factArgs) deletes
+    mapM_ (\DL.Fact{..} -> SQL.insertInto (ctlDB s) factRel $ map SMT.exprFromSMT factArgs) inserts
+    return (inserts, deletes)
 
 startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession dfpath = do
@@ -235,7 +239,7 @@ populateDB = do
 validateConstraints :: (?s::ControllerState) => IO ()
 validateConstraints = do
     violations <- checkConstraints 
-    let e = concatMap (("Integrity violation: " ++) . show) violations
+    let e = intercalate "\n" $ map (("Integrity violation: " ++) . show) violations
     unless (null e) $ throw $ AssertionFailed e
 
 checkConstraints :: (?s::ControllerState) => IO [Violation]

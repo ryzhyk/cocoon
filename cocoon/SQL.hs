@@ -20,7 +20,9 @@ limitations under the License.
 
 module SQL ( sqlMaxIntWidth
            , mkSchema
-           , readTable) where
+           , readTable
+           , insertInto
+           , deleteFrom) where
 
 import Data.List
 import Data.List.Utils
@@ -33,7 +35,6 @@ import Text.PrettyPrint
 import Control.Monad.State
 import Data.Scientific
 import Data.Text(pack, unpack)
-import Data.Int
 import qualified Database.PostgreSQL.Simple as PG
 import qualified Data.Aeson as JSON
 import qualified Data.HashMap.Strict as HM
@@ -86,8 +87,8 @@ mkSchema :: String -> Refine -> Doc
 mkSchema dbname r@Refine{..} = let ?r = r in
                                vcat $ intersperse ("") $ createdb : 
                                                             (map mkTypeDef tdefs) ++ 
-                                                            (map mkRel rels) ++
-                                                            (map mkFun funs)
+                                                            (map mkRel rels) {-++
+                                                            (map mkFun funs)-}
                                                             
     where rels = filter (not . relIsView) $ refineRelsSorted r
           createdb = "drop database if exists" <+> pp dbname <> semi
@@ -95,7 +96,7 @@ mkSchema dbname r@Refine{..} = let ?r = r in
                      "create database" <+> pp dbname <> semi
                      $$
                      "\\c" <+> pp dbname
-          funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
+          -- funs = map (getFunc r) $ nub $ concatMap (relFuncsRec r) refineRels 
           types = nub $ concatMap (relTypes r) rels
           types' = nub $ map (typ' r) $ typeSort r types
           tdefs = mapMaybe (\t -> case t of
@@ -142,7 +143,7 @@ mkRel rel@Relation{..} = (vcat $ map sel1 cons) $$
     -- Primary table
     cols = (pp serialcol <+> "bigserial") :
            map mkColumn relArgs
-    cons = mapIdx (mkConstraint rel) relConstraints
+    cons = mapIdx (mkConstraint rel) $ filter isPrimaryKey relConstraints
     -- Delta table
     -- Primary-delta synchronization triggers
 
@@ -173,7 +174,6 @@ ctx2Field pref (CtxRelPred (ERelPred _ rname _) _ i) = let rel' = getRelation ?r
 ctx2Field pref (CtxStruct (EStruct _ c _) pctx i)    = let cons = getConstructor ?r c in
                                                        eField (ctx2Field pref pctx) $ name $ consArgs cons !! i
 ctx2Field pref ctx                                   = error $ "SQL.ctx2Field " ++ show pref ++ " " ++ show ctx
-
 
 pattern2Constr :: (?r::Refine) => Expr -> Type -> Expr -> Expr
 pattern2Constr pref t (E EStruct{..}) = conj 
@@ -332,19 +332,22 @@ tagType cs = tBit $ bitWidth $ length cs - 1
 tagVal :: [Constructor] -> String -> Expr
 tagVal cs c = eBit (typeWidth $ tagType cs) $ fromIntegral $ fromJust $ findIndex ((== c) . name) cs
 
-defVal :: Type -> Expr
-defVal (TStruct _ cs) = defVal $ tagType cs
-defVal (TBool _)      = eFalse
-defVal (TString _)    = eString ""
-defVal (TBit _ w)     = eBit w 0
-defVal t              = error $ "SQL.defVal " ++ show t
+defVal :: (?r::Refine) => Type -> Expr
+defVal t = defVal' $ typ' ?r t
+
+defVal' :: (?r::Refine) => Type -> Expr
+defVal' (TStruct _ cs) = defVal $ tagType cs
+defVal' (TBool _)      = eFalse
+defVal' (TString _)    = eString ""
+defVal' (TBit _ w)     = eBit w 0
+defVal' t              = error $ "SQL.defVal " ++ show t
 
 mkVal :: (PP a) => ExprNode a -> Doc
 mkVal (EBool _ True)  = "true"
 mkVal (EBool _ False) = "false"
-mkVal (EString _ str) = pp $ show str
+mkVal (EString _ str) = pp $ "'" ++ str ++ "'"
 mkVal (EBit _ w v) | w < 64    = pp v
-                   | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) [0..w-1]) ++ "'"
+                   | otherwise = pp $ "B'" ++ (map ((\b -> if' b '1' '0') . testBit v) (reverse [0..w-1])) ++ "'"
 mkVal e               = error $ "SQL.mkVal " ++ (render $ pp e)
 
 mkConstraint :: (?r::Refine) => Relation -> Constraint -> Int -> (Doc, Doc, Doc)
@@ -379,7 +382,7 @@ mkConstraint rel (Check _ cond) i              = (mkFun func, "check" <> parens 
           call     = pp fname <> (parens $ commaSep callargs)
 
 
-mkSqlCol :: (Expr, Type, Bool) -> Doc
+mkSqlCol :: (?r::Refine) => (Expr, Type, Bool) -> Doc
 mkSqlCol (e, _, False) = colName e
 mkSqlCol (e, t, True)  = "coalesce" <> (parens $ colName e <> comma <+> (mkVal $ enode $ defVal t))
 
@@ -391,6 +394,32 @@ readTable pg rel@Relation{..} = do
     PG.fold_ pg (fromString q) [] (\rows (x::[JSON.Value]) -> do rows' <- mapM (\(JSON.Object val) -> do putStrLn $ show val
                                                                                                          return $ (parseRow rel val)) x
                                                                  return $ rows ++ rows' )
+
+insertInto :: (?r::Refine) => PG.Connection -> String -> [Expr] -> IO ()
+insertInto pg rname args = do
+    let rel@Relation{..} = getRelation ?r rname
+    let names = concatMap (map (render . colName) . field2cols rel . eVar . name) relArgs
+    let vals  = concatMap (map (render . mkVal . enode) . field2cols rel) args
+    let q = "insert into " ++ rname ++ " (" ++ (intercalate ", " names) ++ ") values (" ++ (intercalate ", " vals) ++  ")"
+    putStrLn $ "SQL: " ++ q
+    _ <- PG.execute_ pg $ fromString q 
+    return ()
+
+deleteFrom :: (?r::Refine) => PG.Connection -> String -> [Expr] -> IO ()
+deleteFrom pg rname args = do
+    let rel@Relation{..} = getRelation ?r rname
+    let eval (E (EVar _ n))     = args !! (fromJust $ findIndex ((== n) . name) relArgs)
+        eval (E (EField _ s f)) = let E (EStruct _ c as) = eval s in
+                                  as !! (fromJust $ findIndex ((== f) . name) $ consArgs $ getConstructor ?r c)
+        eval e                  = error $ "SQL.deleteFrom " ++ show e
+    let pkey = constrFields $ fromJust $ find isPrimaryKey relConstraints
+    let names = concatMap (map (render . colName) . field2cols rel) pkey
+    let vals  = concatMap (map (render . mkVal . enode) . field2cols rel . eval) pkey
+    let q = "delete from " ++ rname ++ " where " ++ (intercalate " and " $ map (\(n,v) -> n ++ " = " ++ v) $ zip names vals )
+    putStrLn $ "SQL: " ++ q
+    _ <- PG.execute_ pg $ fromString q 
+    return ()
+
 
 parseInt :: (Integral a) => JSON.Value -> a
 parseInt (JSON.Number n) = fromInteger $ coefficient n
