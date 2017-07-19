@@ -16,14 +16,16 @@ limitations under the License.
 
 -- Intemediate representation for dataplane languages like OpenFlow and P4
 
-{-# LANGUAGE ImplicitParams #-}
+{-# LANGUAGE ImplicitParams, OverloadedStrings #-}
 
-module IR () where
+module IR where
  
 import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
+import Text.PrettyPrint
 
-import qualified Syntax as C
+import Ops
+import PP
 
 type NodeId  = G.Node
 type VarName = String
@@ -31,11 +33,25 @@ type RelName = String
 type ColName = String
 
 data Type = TBool
-          | TBit Int Integer
+          | TBit Int
+          deriving (Eq)
 
-data Var = Var VarName NodeId Type
+instance PP Type where 
+    pp TBool    = "bool"
+    pp (TBit w) = "bit<" <> pp w <> ">"
 
-data Relation = Relation RelName [Var]
+instance Show Type where
+    show = render . pp
+
+data Var = Var VarName NodeId Type deriving (Eq)
+
+instance PP Var where
+    pp (Var n nid t) = pp n <> "@" <> pp nid <> ":" <+> pp t
+
+instance Show Var where
+    show = render . pp
+
+-- data Relation = Relation RelName [Var]
 
 data Expr = EPktField String
           | EVar      VarName
@@ -45,24 +61,83 @@ data Expr = EPktField String
           | EBit      Int Integer
           | EBinOp    BOp Expr Expr
           | EUnOp     UOp Expr
+          deriving (Eq)
+
+instance PP Expr where
+    pp (EPktField f)     = "pkt." <> pp f
+    pp (EVar v)          = pp v
+    pp (ECol col)        = "." <> pp col
+    pp (ESlice e h l)    = pp e <> "[" <> pp h <> ":" <> pp l <> "]"
+    pp (EBool True)      = "true" 
+    pp (EBool False)     = "false" 
+    pp (EBit w v)        = pp w <> "'d" <> pp v
+    pp (EBinOp op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
+    pp (EUnOp op e)      = parens $ pp op <> pp e
+
+conj :: [Expr] -> Expr
+conj = conj' . filter (/= EBool True)
+
+conj' :: [Expr] -> Expr
+conj' []     = EBool True
+conj' [e]    = e
+conj' (e:es) = EBinOp And e (conj' es)
+
+disj :: [Expr] -> Expr
+disj = disj' . filter (/= EBool False)
+
+disj' :: [Expr] -> Expr
+disj' []     = EBool False
+disj' [e]    = e
+disj' (e:es) = EBinOp Or e (disj' es)
 
 data Action = ASet     Expr Expr
             | APut     String [Expr]
             | ADelete  String Expr
             {-| ABuiltin String [Expr] -}
 
+instance PP Action where
+    pp (ASet e1 e2)  = pp e1 <+> ":=" <+> pp e2
+    pp (APut t vs)   = pp t <> ".put" <> (parens $ hsep $ punctuate comma $ map pp vs)
+    pp (ADelete t c) = pp t <> ".delete" <> (parens $ pp c)
+
+instance Show Action where
+    show = render . pp
+
 -- Next action descriptor
 data Next = Goto NodeId
           | Send Expr
           | Drop
 
+instance PP Next where
+    pp (Goto nid) = "goto" <+> pp nid
+    pp (Send p)   = "send" <+> pp p
+    pp Drop       = "drop"
+
+instance Show Next where
+    show = render . pp
+
 -- Basic block
-newtype BB = BB [Action] Next
+data BB = BB [Action] Next
+
+instance PP BB where
+    pp (BB as nxt) = vcat $ (map ((<> ";") . pp) as) ++ [pp nxt]
+
+instance Show BB where 
+    show = render . pp
 
 data Node = Fork   RelName Expr BB
           | Lookup RelName Expr BB BB
           | Cond   [(Expr, BB)]
           | Par    [BB]
+
+instance PP Node where 
+    pp (Fork t c b)       = ("fork(" <> pp t <> "|" <+> pp c <> ")") $$ (nest' $ pp b)
+    pp (Lookup t c th el) = ("lookup(" <> pp t <> "|" <+> pp c <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Cond cs)          = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
+    pp (Par bs)           = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
+   
+instance Show Node where
+    show = render . pp 
 
 -- DAG
 type CFG = G.Gr Node ()

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE ImplicitParams, LambdaCase #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, LambdaCase #-}
 
 module Expr ( exprMapM
             , exprMap
@@ -43,10 +43,12 @@ module Expr ( exprMapM
             , isLRel
             , exprSplitLHS
             , exprSplitVDecl
+            , exprInline
             , expr2Statement
             , ctxExpectsStat
             , ctxMustReturn
             , exprIsStatement
+            , exprVarSubst
             , exprVarRename
             --, exprScalars
             --, exprDeps
@@ -334,6 +336,48 @@ isLVar r ctx v = isJust $ find ((==v) . name) $ fst $ ctxVars r ctx
 isLRel :: Refine -> ECtx -> String -> Bool
 isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx
 
+-- Inline method bodies
+exprInline :: Refine -> ECtx -> Expr -> Expr
+exprInline r ctx e = exprFoldCtx (exprInline' r) ctx e'
+    where e' = evalState (exprFoldM (exprPrecomputeArgs r) e) 0
+
+-- compute arguments ahead of function invocations
+exprPrecomputeArgs :: Refine -> ENode -> State Int Expr
+exprPrecomputeArgs r (EApply _ f as) = do
+    let Function{..} = getFunc r f
+    let simple :: Expr -> Bool
+        simple (E EVar{})         = True
+        simple (E EBool{})        = True
+        simple (E EBit{})         = True
+        simple (E EInt{})         = True
+        simple (E EString{})      = True
+        simple (E (ETyped _ e _)) = simple e
+        simple _                  = False
+    (ps, as') <- liftM unzip
+                 $ mapIdxM (\a i -> if simple a
+                                       then return (Nothing, a)
+                                       else do let t = typ $ funcArgs !! i
+                                               arg <- allocArg
+                                               let vdecl = eSet (eTyped (eVarDecl arg) t) a
+                                               return (Just vdecl, eVarDecl arg)) as
+    return $ exprSequence $ (catMaybes ps) ++ [eApply f as']
+exprPrecomputeArgs _ e = return $ E e
+
+allocArg :: State Int String
+allocArg = do modify (1+)
+              liftM (("a#"++) . show) get
+
+exprInline' :: Refine -> ECtx -> ENode -> Expr
+exprInline' r ctx e@(EApply _ f as) | isJust funcDef = exprVarSubst subst body
+                                    | otherwise      = E e
+    where func@Function{..} = getFunc r f
+          body = exprInline r (CtxFunc func ctx) $ fromJust funcDef
+          -- rename local vars; substitute arguments
+          subst v = case findIndex ((==v) . name) funcArgs of
+                         Just i  -> as !! i
+                         Nothing -> eVar $ f ++ ":" ++ v
+exprInline' _ _   e                                  = E e
+
 -- every variable must be declared in a separate statement, e.g.,
 -- (x, var y) = ...  ===> var y: Type; (x,y) = ...
 --exprNormalizeVarDecls :: Refine -> ECtx -> Expr -> Expr
@@ -508,6 +552,12 @@ exprIsStatement (ETyped _ (E (EVarDecl{})) _) = True
 exprIsStatement (EPut _ _ _)                  = True
 exprIsStatement (EDelete _ _ _)               = True
 exprIsStatement _                             = False
+
+
+exprVarSubst :: (String -> Expr) -> Expr -> Expr
+exprVarSubst f e = exprFold g e
+    where g (EVar _ v) = f v
+          g e'         = E e'
 
 exprVarRename :: (String -> String) -> Expr -> Expr
 exprVarRename f e = exprFold g e

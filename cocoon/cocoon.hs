@@ -34,6 +34,7 @@ import SQL
 import Controller
 import CLI
 import Syntax
+import Compile2IR
 
 data TOption = CCN String
              | Action String
