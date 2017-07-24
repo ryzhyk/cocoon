@@ -46,7 +46,8 @@ executable cocoon
                        raw-strings-qq >= 1.1, 
                        unordered-containers >= 0.2, 
                        vector >= 0.12, 
-                       attoparsec >= 0.13
+                       attoparsec >= 0.13,
+                       graphviz >= 2999.19
   -- hs-source-dirs:      
   default-language:    Haskell2010
   ghc-options:         -Wall -fno-warn-missing-signatures

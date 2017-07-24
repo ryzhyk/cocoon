@@ -22,7 +22,9 @@ module IR where
  
 import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
+import qualified Data.GraphViz        as G
 import Text.PrettyPrint
+import Data.Text.Lazy(Text)
 
 import Ops
 import PP
@@ -139,13 +141,25 @@ instance PP Node where
 instance Show Node where
     show = render . pp 
 
--- DAG
-type CFG = G.Gr Node ()
+instance G.Labellable Node where
+    toLabelValue = G.toLabelValue . show
 
-data Pipeline = Pipeline Vars CFG NodeId
+data Edge = Edge
+
+instance G.Labellable Edge where
+    toLabelValue _ = G.toLabelValue $ (""::String)
+
+-- DAG
+type CFG = G.Gr Node Edge
+
+data Pipeline = Pipeline {plVars :: Vars, plCFG :: CFG, plEntryNode :: NodeId}
 
 type Vars = M.Map VarName (NodeId, Type)
 
+cfgToDot :: CFG -> Text
+cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
+
+    
 -- Node metadata relates pipeline nodes to 
 -- original program locations
 --data NodeMeta = NodeMeta C.ECtx C.Expr

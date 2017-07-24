@@ -13,13 +13,16 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards, LambdaCase #-}
 
 module Refine( funcGraph
              , refineStructs
              , refineIsMulticast
              , refineIsDeterministic
-             , refineRelsSorted) where
+             , refineRelsSorted
+             , refinePortRels
+             , refineSwitchRels
+             , refinePortRoles) where
 
 import Data.List
 import Data.Maybe
@@ -59,3 +62,17 @@ refineIsDeterministic mra rc rlname = any (exprIsDeterministic rc . roleBody . g
 
 refineRelsSorted :: Refine -> [Relation]
 refineRelsSorted r = map (getRelation r) $ reverse $ G.topsort' $ relGraph r
+
+refinePortRels :: Refine -> [Relation]
+refinePortRels r = filter ((\case
+                             Just RelPort{..} -> True
+                             _                -> False) . relAnnotation) $ refineRels r
+
+refineSwitchRels :: Refine -> [Relation]
+refineSwitchRels r = filter ((\case
+                             Just RelSwitch{..} -> True
+                             _                  -> False) . relAnnotation) $ refineRels r 
+
+refinePortRoles :: Refine -> [(Role, Role, Relation)]
+refinePortRoles r = map (\rel@Relation{relAnnotation = Just (RelPort _ (inp, outp)), ..} -> (getRole r inp, getRole r outp, rel))
+                    $ refinePortRels r

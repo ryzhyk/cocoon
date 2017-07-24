@@ -55,7 +55,7 @@ setEntryNode nd = modify $ \(I.Pipeline vs cfg _) -> I.Pipeline vs cfg nd
 updateNode :: I.NodeId -> I.Node -> [I.NodeId] -> CompileState ()
 updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from) = G.context cfg nid
                                                                 cfg' = (to, nid, n, from) G.& (G.delNode nid cfg)
-                                                                cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, ()) _cfg) cfg' suc
+                                                                cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
                                                             in I.Pipeline vs cfg'' end
 
 compilePort :: Refine -> Role -> I.Pipeline

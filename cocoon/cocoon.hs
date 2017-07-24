@@ -24,6 +24,7 @@ import System.Directory
 import System.Console.GetOpt
 import Control.Exception
 import Control.Monad
+import Data.Text.Lazy (unpack)
 
 import qualified Datalog.Dataflog as DL
 import qualified Datalog as DL
@@ -34,7 +35,10 @@ import SQL
 import Controller
 import CLI
 import Syntax
-import Compile2IR
+import Name
+import Refine
+import qualified IR         as IR
+import qualified Compile2IR as IR
 
 data TOption = CCN String
              | Action String
@@ -156,6 +160,10 @@ main = do
              putStrLn "Starting controller"
              let logfile = workdir </> addExtension basename "log"
                  dfpath  = workdir </> "target" </> "debug" </> basename
+             mapM_ (\(rl, _, _) -> do let dotname = workdir </> addExtension (name rl) "dot"
+                                      putStrLn dotname
+                                      writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.compilePort combined rl) 
+                   $ refinePortRoles combined
              controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
