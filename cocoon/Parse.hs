@@ -72,8 +72,6 @@ reservedNames = ["_",
                  "send",
                  "state",
                  "string",
-                 "switch",
-                 "switch_port",
                  "table",
                  "true",
                  "typedef",
@@ -213,9 +211,11 @@ proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
 relannot = withPos $
-           ((try $ lookAhead $ reservedOp "#" *> (reserved "switch" <|> reserved "switch_port")) *> reservedOp "#") *>
-           ((RelSwitch nopos <$ reserved "switch")
-        <|> (RelPort   nopos <$ reserved "switch_port" <*> ((,) <$> (symbol "(" *> roleIdent) <*> (comma *> roleIdent <* symbol ")"))))
+           ((try $ lookAhead $ reservedOp "#" *> symbol "switch_port") *> reservedOp "#" *>
+            (RelPort   nopos <$ symbol "switch_port" <*> ((,) <$> (symbol "(" *> roleIdent) <*> (comma *> roleIdent <* symbol ")"))))
+         <|> 
+           ((try $ lookAhead $ reservedOp "#" *> symbol "switch") *> reservedOp "#" *>
+            (RelSwitch nopos <$ symbol "switch"))
 
 relation = do annot <- optionMaybe relannot
               withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
@@ -233,7 +233,7 @@ relation = do annot <- optionMaybe relannot
                                          when (rn /= n) $ fail $ "Only rules for relation \"" ++ n ++ "\" can be defined here"
                                          rargs <- parens $ commaSep rexpr
                                          reservedOp ":-"
-                                         rhs <- commaSep $ erelpred <|> rexpr
+                                         rhs <- commaSep $ (withPos erelpred) <|> rexpr
                                          return $ Rule nopos rargs rhs
                            return $ Relation nopos False n as cs annot $ Just rs
 
