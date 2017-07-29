@@ -36,6 +36,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Graph.Inductive as G
 import {-# SOURCE #-} Builtins
+import Debug.Trace
 
 import Util
 import Expr
@@ -128,10 +129,10 @@ exprNodeType' _ _   (EFork _ _ _ _ _)      = Just tSink
 exprNodeType' _ _   (EFor  _ _ _ _ _)      = Just $ tTuple []
 exprNodeType' _ _   (EWith _ _ _ _ b _)    = b
 exprNodeType' _ _   (EAny  _ _ _ _ b _)    = b
-exprNodeType' r ctx (EPHolder _)           = case ctxInDelete ctx of 
-                                                  Nothing                              -> ctxExpectType r ctx
+exprNodeType' r ctx (EPHolder _)           = ctxExpectType r ctx
+exprNodeType' r ctx (EAnon _)              = case ctxInDelete ctx of 
                                                   Just (CtxDelete (EDelete _ rel _) _) -> Just $ relRecordType $ getRelation r rel
-                                                  _                                    -> error $ "exprNodeType _: invalid context"
+                                                  _                                    -> error $ "exprNodeType ?: invalid context"
 exprNodeType' _ _   (ETyped _ _ t)         = Just t
 exprNodeType' _ _   (ERelPred _ _ _)       = Just tBool
 exprNodeType' _ _   (EPut _ _ _)           = Just $ tTuple []

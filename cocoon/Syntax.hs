@@ -44,7 +44,7 @@ module Syntax( pktVar
              , enode
              , eVar, ePacket, eApply, eBuiltin, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
              , eSlice, eMatch, eVarDecl, eSeq, ePar, eITE, eDrop, eSet, eSend, eBinOp, eUnOp, eNot, eFork, eFor
-             , eWith, eAny, ePHolder, eTyped, eRelPred, ePut, eDelete
+             , eWith, eAny, ePHolder, eAnon, eTyped, eRelPred, ePut, eDelete
              , exprIsRelPred
              , ECtx(..)
              , ctxParent, ctxAncestors
@@ -447,6 +447,7 @@ data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EWith     {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EAny      {exprPos :: Pos, exprFrkVar :: String, exprTable :: String, exprCond :: e, exprWithBody :: e, exprDef :: Maybe e}
                 | EPHolder  {exprPos :: Pos}
+                | EAnon     {exprPos :: Pos}
                 | ETyped    {exprPos :: Pos, exprExpr :: e, exprTSpec :: Type}
                 | ERelPred  {exprPos :: Pos, exprRel :: String, exprArgs :: [e]}
                 | EPut      {exprPos :: Pos, exprTable :: String, exprVal :: e}
@@ -481,6 +482,7 @@ instance Eq e => Eq (ExprNode e) where
     (==) (EWith _ v1 t1 c1 b1 d1) (EWith _ v2 t2 c2 b2 d2)   = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
     (==) (EAny _ v1 t1 c1 b1 d1)  (EAny _ v2 t2 c2 b2 d2)    = v1 == v2 && t1 == t2 && c1 == c2 && b1 == b2 && d1 == d2
     (==) (EPHolder _)             (EPHolder _)               = True
+    (==) (EAnon _)                (EAnon _)                  = True
     (==) (ETyped _ e1 t1)         (ETyped _ e2 t2)           = e1 == e2 && t1 == t2
     (==) (ERelPred _ r1 as1)      (ERelPred _ r2 as2)        = r1 == r2 && as1 == as2
     (==) (EPut _ r1 v1)           (EPut _ r2 v2)             = r1 == r2 && v1 == v2
@@ -531,6 +533,7 @@ instance PP e => PP (ExprNode e) where
                              $$ (nest' $ pp b)
                              $$ (maybe empty (\e -> "default" <+> pp e)  d)
     pp (EPHolder _)        = "_"
+    pp (EAnon _)           = "?"
     pp (ETyped _ e t)      = parens $ pp e <> ":" <+> pp t
     pp (ERelPred _ rel as) = pp rel <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EPut _ rel v)      = pp rel <> "." <> "put" <> (parens $ pp v)
@@ -590,6 +593,7 @@ eFor  v t c b       = E $ EFor      nopos v t c b
 eWith v t c b d     = E $ EWith     nopos v t c b d
 eAny v t c b d      = E $ EAny      nopos v t c b d
 ePHolder            = E $ EPHolder  nopos
+eAnon               = E $ EAnon     nopos
 eTyped e t          = E $ ETyped    nopos e t
 eRelPred rel as     = E $ ERelPred  nopos rel as
 ePut rel v          = E $ EPut      nopos rel v

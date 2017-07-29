@@ -24,6 +24,7 @@ import Control.Monad.State
 import Text.PrettyPrint
 import qualified Data.Map as M
 import qualified Data.Graph.Inductive as G 
+import Debug.Trace
 
 import Util 
 import PP
@@ -34,6 +35,7 @@ import Relation
 import Expr
 import Name
 import Type
+import Validate
 import qualified IR as I
 
 type CompileState a = State I.Pipeline a
@@ -45,7 +47,7 @@ addVar n t nd = modify $ \(I.Pipeline vs cfg nd') -> I.Pipeline (M.insert n (nd,
 allocNode ::  CompileState I.NodeId
 allocNode = do
     I.Pipeline vs cfg nd <- get
-    let nid = (snd $ G.nodeRange cfg) + 1
+    let nid = if' (G.order cfg == 0) 0 ((snd $ G.nodeRange cfg) + 1)
     put $ I.Pipeline vs (G.insNode (nid, I.Par []) cfg) nd
     return nid
 
@@ -65,7 +67,11 @@ compilePort' :: (?r::Refine) => Role -> CompileState ()
 compilePort' role@Role{..} = do 
     entrynd <- allocNode
     setEntryNode entrynd
-    let e = evalState (expr2Statement ?r (CtxRole role) $ exprInline ?r (CtxRole role) roleBody) 0
+    let inlined = exprInline ?r (CtxRole role) roleBody
+    let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxRole role) inlined) 0
+    case exprValidate ?r (CtxRole role) e of
+         Left er  -> error $ "Compile2IR.compilePort': failed to validate transformed expression: " ++ er
+         Right _  -> return ()
     let rel = getRelation ?r roleTable
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
     let c = I.EBinOp Eq (I.ECol "portnum") (I.EPktField "portnum")
@@ -105,6 +111,8 @@ compileExprAt vars ctx entrynd exitnd (E e@(EITE _ c t me)) = do
 compileExprAt vars _   entrynd _      (E (EDrop _)) = do
     updateNode entrynd (I.Par [I.BB [] I.Drop]) []
     return vars
+
+compileExprAt vars _   entrynd exitnd (E (ESet _ (E EPHolder{}) _)) = ignore vars entrynd exitnd
 
 compileExprAt vars ctx entrynd exitnd (E e@(ESet _ e1 e2)) = do
     let e1' = mkExpr vars (CtxSetL e ctx) e1
@@ -169,7 +177,28 @@ compileExprAt vars ctx entrynd exitnd (E e@(EMatch _ m cs)) = do
     updateNode entrynd (I.Cond $ map (\(c,entry) -> (c, I.BB [] $ I.Goto entry)) cs') $ map snd cs'
     return vars
 
-compileExprAt _   _   _        _ e = error $ "Compile2IR: compileExprAt " ++ show e
+-- expressions without LHS can be ignored, as they should not have
+-- side effects (after running them through expr2Statement)
+compileExprAt vars _   entrynd exitnd (E ETuple{})   = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EVar{})     = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EPacket{})  = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EField{})   = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EBool{})    = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EBit{})     = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EStruct{})  = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E ESlice{})   = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EBinOp{})   = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EUnOp{})    = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E ETyped{})   = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EPHolder{}) = ignore vars entrynd exitnd
+compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitnd
+compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
+
+
+ignore :: VMap -> I.NodeId -> Maybe I.NodeId -> CompileState VMap
+ignore vars entrynd exitnd = do
+    updateNode entrynd (I.Par [I.BB [] $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
+    return vars
 
 declVar :: (?r::Refine) => VMap -> String -> Type -> I.NodeId -> CompileState (VMap, [(I.VarName, I.Type)])
 declVar vars vname vtype nd = do
@@ -204,7 +233,7 @@ expandPattern :: (?r::Refine) => ECtx -> Expr -> [Maybe I.Expr]
 expandPattern ctx e = exprTreeFlatten $ exprFoldCtx expandPattern' ctx e
 
 expandPattern' :: (?r::Refine) => ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
-expandPattern' ctx (EVarDecl _ v)   = fields "" (typ $ getVar ?r ctx v) (\_ n -> Just $ I.EVar $ (v .+ n))
+expandPattern' ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\_ n -> Just $ I.EVar $ (v .+ n))
 expandPattern' ctx (EPHolder _)     = fields "" (exprType ?r ctx ePHolder) (\_ _ -> Nothing)
 expandPattern' _   (EStruct _ c fs) = ETNode $ tag ++ fls
     where TStruct _ cs = fromJust $ tdefType $ consType ?r c
@@ -240,14 +269,17 @@ instance PP a => Show (ExprTree a) where
     show = render . pp
 
 mkExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> [I.Expr]
-mkExpr vars ctx e = exprTreeFlatten $ exprFoldCtx (mkExpr' vars) ctx e
+mkExpr vars ctx e = {-trace ("mkExpr " ++ show e ++ " in\n" ++ show ctx) $ -} exprTreeFlatten $ exprFoldCtx (mkExpr' vars) ctx e
 
 mkExpr' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree I.Expr) -> ExprTree I.Expr
-mkExpr' vars ctx (EVar _ v)                          = fields "" (typ $ getVar ?r ctx v) (\_ n -> I.EVar $ ((vars M.! v) .+ n))
+mkExpr' vars ctx (EVar _ v)                          = trace ("\n\n\n\n***************EVar " ++ show v ++ " in " ++ show ctx) $ fields "" (typ $ getVar ?r ctx v) (\_ n -> I.EVar $ ((vars M.! v) .+ n))
 mkExpr' _    _   (EPacket _)                         = fields "" (fromJust $ tdefType $ getType ?r packetTypeName) (\_ n -> I.EPktField n)
 mkExpr' _    _   (EField _ (ETNode fs) f)            = fromJust $ lookup f fs
 mkExpr' _    _   (EBool _ b)                         = ETLeaf $ I.EBool b
 mkExpr' _    _   (EBit _ w v)                        = ETLeaf $ I.EBit w v
+mkExpr' _    ctx (EInt _ v)                        = case typ' ?r $ exprType ?r ctx (eInt v) of    
+                                                          TBit _ w -> ETLeaf $ I.EBit w v
+                                                          _        -> error $ "Compile2IR.mkExpr' " ++ show v ++ " not a bitvector type"
 mkExpr' _    _   (EStruct _ c fs)                    = ETNode $ tag ++ fls
     where TStruct _ cs = fromJust $ tdefType $ consType ?r c
           Constructor{..} = getConstructor ?r c
@@ -259,8 +291,15 @@ mkExpr' _    _   (EStruct _ c fs)                    = ETNode $ tag ++ fls
 mkExpr' _   _   (ETuple _ fs)                       = ETNode $ mapIdx (\f i -> (show i, f)) fs 
 mkExpr' _   _   (ESlice _ (ETLeaf e) h l)           = ETLeaf $ I.ESlice e h l
 mkExpr' _   _   (EBinOp _ op (ETLeaf e1) (ETLeaf e2)) = ETLeaf $ I.EBinOp op e1 e2
+mkExpr' _   _   (EBinOp _ Eq t1 t2)                 = ETLeaf $ I.conj
+                                                      $ map (\(e1, e2) -> I.EBinOp Eq e1 e2)
+                                                      $ zip (exprTreeFlatten t1) (exprTreeFlatten t2)
+mkExpr' _   _   (EBinOp _ Neq t1 t2)                = ETLeaf $ I.disj
+                                                      $ map (\(e1, e2) -> I.EBinOp Neq e1 e2)
+                                                      $ zip (exprTreeFlatten t1) (exprTreeFlatten t2)
 mkExpr' _   _   (EUnOp _ op (ETLeaf e))             = ETLeaf $ I.EUnOp op e
 mkExpr' _   _   (ETyped _ e _)                      = e
+mkExpr' _   ctx EAnon{}                             = fields "" (exprType ?r ctx eAnon) $ \_ n -> I.ECol n
 mkExpr' _   _   e                                   = error $ "Compile2IR.mkExpr' " ++ show e
 
 (.+) :: String -> String -> String

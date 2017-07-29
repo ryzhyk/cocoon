@@ -22,6 +22,7 @@ module Validate ( validate
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
+import Debug.Trace
 
 import Syntax
 import NS
@@ -113,13 +114,14 @@ validate1 r@Refine{..} = do
     -- each role occurs at most once as a port
     --uniq' (\_ -> (pos r)) id (++ " is mentioned twice as a port") $ concatMap (concatMap (\(i,o) -> [i,o]) . nodePorts) refineNodes
     mapM_ (relValidate r)    refineRels
+    mapM_ (funcValidate1 r)  refineFuncs
     mapM_ (relValidate2 r)   refineRels
     maybe (return ()) 
           (\cyc -> errR r (pos $ getRelation r $ snd $ head cyc) 
                      $ "Dependency cycle among relations: " ++ (intercalate ", " $ map (name . snd) cyc))
           $ (grCycle $ relGraph r)
     mapM_ (stateValidate r)  refineState
-    mapM_ (funcValidate r)   refineFuncs
+    mapM_ (funcValidate2 r)  refineFuncs
     mapM_ (roleValidate r)   refineRoles
     mapM_ (assumeValidate r) refineAssumes
     mapM_ (relValidate3 r)   refineRels
@@ -148,14 +150,19 @@ consValidate r Constructor{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) consArgs
     mapM_ (typeValidate r . fieldType) $ consArgs
 
-funcValidate :: (MonadError String me) => Refine -> Function -> me ()
-funcValidate r f@Function{..} = do
+funcValidate1 :: (MonadError String me) => Refine -> Function -> me ()
+funcValidate1 r Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
+
+funcValidate2 :: (MonadError String me) => Refine -> Function -> me ()
+funcValidate2 r f@Function{..} = do
     case funcDef of
          Nothing  -> return ()
          Just def -> exprValidate r (CtxFunc f CtxRefine) def
+
+
 
 -- Relations are validated in two passes: the first pass validates
 -- fields; the second pass validates constraints and rules.  This 
@@ -350,8 +357,7 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
 -}
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-exprValidate r ctx e = --trace ("exprValidate " ++ show ctx ++ " " ++ show e) $ 
-                       do exprTraverseCtxM (exprValidate1 r) ctx e
+exprValidate r ctx e = do exprTraverseCtxM (exprValidate1 r) ctx e
                           exprTraverseTypeME r (exprValidate2 r) ctx e
 
 exprTraverseTypeME :: (MonadError String me) => Refine -> (ECtx -> ExprNode Type -> me ()) -> ECtx -> Expr -> me ()
@@ -376,7 +382,7 @@ exprValidate1 r ctx e@(EBuiltin p f _)  = do fun <- checkBuiltin p f
                                              (bfuncValidate fun) r ctx $ E e
 exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                              assertR r (length as == length (funcArgs fun)) p
-                                                     $ "Number of arguments does not match function declaration"
+                                                     "Number of arguments does not match function declaration"
                                              when (not $ funcPure fun) $ do 
                                                   ctxCheckSideEffects p r ctx
                                                   -- make sure the procedure respects constraints on global variables and relations visibility
@@ -390,15 +396,15 @@ exprValidate1 _ _   (EString _ _)       = return ()
 exprValidate1 _ _   (EBit _ _ _)        = return ()
 exprValidate1 r _   (EStruct p c as)    = do cons <- checkConstructor p r c
                                              assertR r (length as == length (consArgs cons)) p
-                                                     $ "Number of arguments does not match constructor declaration"
+                                                     "Number of arguments does not match constructor declaration"
 exprValidate1 _ _   (ETuple _ _)        = return ()
 exprValidate1 _ _   (ESlice _ _ _ _)    = return ()
 exprValidate1 _ _   (EMatch _ _ _)      = return ()
 exprValidate1 r ctx (EVarDecl p v) | ctxInSetL ctx || ctxInMatchPat ctx = 
                                              checkNoVar p r ctx v
-                                   | otherwise = do assertR r (ctxIsTyped ctx) p $ "Variable declared without a type"
+                                   | otherwise = do assertR r (ctxIsTyped ctx) p "Variable declared without a type"
                                                     assertR r (ctxIsSeq1 $ ctxParent ctx) p 
-                                                            $ "Variable declaration is not allowed in this context"
+                                                            "Variable declaration is not allowed in this context"
 exprValidate1 _ _   (ESeq _ _ _)        = return ()
 exprValidate1 r ctx (EPar p _ _)        = ctxCheckSideEffects p r ctx
 exprValidate1 _ _   (EITE _ _ _ _)      = return ()
@@ -423,17 +429,18 @@ exprValidate1 r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
                                              _ <- checkNoVar p r ctx v
                                              return ()
 exprValidate1 _ _   (EPHolder _)        = return ()
+exprValidate1 r ctx (EAnon p)           = assertR r (isJust $ ctxInDelete ctx) p "\"?\" only allowed in lambda-expressions"
 exprValidate1 _ _   (ETyped _ _ _)      = return ()
 exprValidate1 r ctx (ERelPred p rel as) = do ctxCheckRelPred p r ctx
                                              rel' <- checkRelation p r ctx rel
                                              assertR r (length as == length (relArgs rel')) p
-                                                     $ "Number of arguments does not match relation declaration"
+                                                     "Number of arguments does not match relation declaration"
 exprValidate1 r ctx (EPut p rel _)      = do ctxCheckSideEffects p r ctx
                                              Relation{..} <- checkRelation p r ctx rel
-                                             assertR r (relMutable || ctxInCLI ctx) p $ "Cannot modify immutable relation"
+                                             assertR r (relMutable || ctxInCLI ctx) p "Cannot modify immutable relation"
 exprValidate1 r ctx (EDelete p rel _)   = do ctxCheckSideEffects p r ctx
                                              Relation{..} <- checkRelation p r ctx rel
-                                             assertR r (relMutable || ctxInCLI ctx) p $ "Cannot modify immutable relation"
+                                             assertR r (relMutable || ctxInCLI ctx) p "Cannot modify immutable relation"
 
 checkNoVar :: (MonadError String me) => Pos -> Refine -> ECtx -> String -> me ()
 checkNoVar p r ctx v = assertR r (isNothing $ lookupVar r ctx v) p 

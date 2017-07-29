@@ -497,10 +497,12 @@ assign = Infix $ (\l r  -> E $ ESet (fst $ pos l, snd $ pos r) l r) <$ reservedO
 lambda =  buildExpressionParser etable lamterm
       <?> "lambda"
 
-lamterm  =  epholder
+lamterm  =  eanon
         <|> (withPos $ eTuple <$> (parens $ commaSep lambda))
         <|> braces lambda
         <|> term'
+
+eanon = withPos $ eAnon <$ reserved "?"
 
 {- F-expression (variable of field name) -}
 fexpr =  buildExpressionParser fetable fterm

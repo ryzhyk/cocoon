@@ -100,7 +100,7 @@ evalExpr'' :: (?r::Refine, ?dl::DL.Session) => ECtx -> ENode -> EvalState MExpr
 evalExpr'' ctx e = do
     case e of
         EVar _ v        -> (liftM (M.! v)) eget
-        EPHolder _      -> (liftM (M.! "_")) eget
+        EAnon _         -> (liftM (M.! "?")) eget
         EApply _ f as   -> do let fun = getFunc ?r f
                               kmap' <- liftM M.fromList 
                                        $ liftM (zip (map name $ funcArgs fun)) 
@@ -213,7 +213,7 @@ evalExpr'' ctx e = do
         EDelete _ rel c     -> do facts <- lift $ DL.enumRelation ?dl rel
                                   facts' <- filterM (\f -> do let row = fact2Row f
                                                               kmap <- eget
-                                                              emodify $ M.insert "_" $ expr2MExpr row
+                                                              emodify $ M.insert "?" $ expr2MExpr row
                                                               E c' <- evalExprS (CtxDelete e ctx) c
                                                               res <- case c' of
                                                                           EBool _ b -> return b

@@ -5,16 +5,16 @@
    Q: Does parent port enabled status apply to child ports?
  */
 
-typedef port_id_t  = string
+typedef port_id_t  = uuid_t
 typedef mac_addr_t = bit<48>
 typedef ip4_addr_t = bit<32>
 typedef ip6_addr_t = bit<128>
 typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
                    | IPAddr6 {addr6 : ip6_addr_t}
 
-function ethUnicastAddr(addr: mac_addr_t): bool
-function ethMulticastAddr(addr: mac_addr_t): bool
-function ethBroadcastAddr(addr: mac_addr_t): bool
+function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
+function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
+function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
 typedef Packet = eth_pkt_t
 
@@ -35,13 +35,14 @@ typedef l3_pkt_t = L3PktIP4   { ip4 : ip4_pkt_t
                  | L3PktARP   { arp : arp_pkt_t}
                  | L3PktOther { ethertype : bit<16>}
 
-typedef ip4_pkt_t = IP4Pkt { dscp : bit<6>
-                           , ecn  : bit<2>
-                           , ttl  : bit<8>
-                           , frag : bit<13>
-                           , mf   : bool
-                           , src  : ip4_addr_t
-                           , dst  : ip4_addr_t}
+typedef ip4_pkt_t = IP4Pkt { dscp  : bit<6>
+                           , ecn   : bit<2>
+                           , ttl   : bit<8>
+                           , frag  : bit<13>
+                           , mf    : bool
+                           , proto : bit<8>
+                           , src   : ip4_addr_t
+                           , dst   : ip4_addr_t}
 
 typedef ip6_pkt_t = IP6Pkt { dscp  : bit<6>
                            , ecn   : bit<2>
@@ -49,6 +50,7 @@ typedef ip6_pkt_t = IP6Pkt { dscp  : bit<6>
                            , frag  : bit<13>
                            , mf    : bool
                            , label : bit<20>
+                           , proto : bit<8>
                            , src   : ip6_addr_t
                            , dst   : ip6_addr_t}
 
@@ -83,17 +85,17 @@ typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
 typedef uuid_t = bit<128>
 typedef vlan_id_t = bit<12>
 
-table LocalNetwork( name: string
+table LocalNetwork( name: uuid_t
                    , primary key (name))
 
 #switch
 table LogicalSwitch( uuid : uuid_t
-                    , name : string
-                    , primary key (uuid))
+                   //, name : string
+                   , primary key (uuid))
 
 typedef port_type_t = PortRegular  
                     | PortRouter   { rport: port_id_t}
-                    | PortLocalnet { network_name: string}
+                    | PortLocalnet { network_name: uuid_t}
 //                    | PortVTEP     { vtep_physical_switch: string
 //                                   , vtep_LogicalSwitch: uuid_t}
 
@@ -116,7 +118,7 @@ function isLocalnetPort(t: port_type_t): bool =
     }
 
 typedef nested_port_t = NestedPortNone
-                      | NestedPort {parent: string, tag: vlan_id_t}
+                      | NestedPort {parent: port_id_t, tag: vlan_id_t}
 
 function is_nested(nested: nested_port_t): bool = 
     match (nested) {
@@ -275,8 +277,16 @@ typedef netmask_t = NetMask4 {mask4: ip4_netmask_t}
 typedef ip4_netmask_t = IP4NetMask {ip: ip4_addr_t, mask: bit<6>}
 typedef ip6_netmask_t = IP6NetMask {ip: ip6_addr_t, mask: bit<10>}
 
+typedef ip_addr_masked_t = AddrMasked4{mask4: ip4_addr_masked_t}
+                         | AddrMasked6{mask6: ip6_addr_masked_t}
+
+typedef ip4_addr_masked_t = IP4Masked{ip: ip4_addr_t, mask: ip4_addr_t}
+typedef ip6_addr_masked_t = IP6Masked{ip: ip6_addr_t, mask: ip6_addr_t}
+
 typedef router_port_peer_t = PeerSwitch
                            | PeerRouter {peer_port: port_id_t}
+
+typedef port_masked_t = PortMasked{port: bit<16>, mask: bit<16>}
 
 table LogicalRouterPort( name    : port_id_t
                        , router  : uuid_t
@@ -318,10 +328,63 @@ typedef acl_action_t = ActionAllow
                      | ActionDrop
                      | ActionReject // Not implemented--currently treated as drop
 
+table ACLFrom ( srcAddr : ip_addr_masked_t
+              , srcPort : port_masked_t
+              , dstAddr : ip_addr_masked_t
+              , dstPort : port_masked_t
+              , proto   : bit<8>
+              , action  : acl_action_t)
+
 function aclFrom ( switch_id : uuid_t
                  , port      : port_id_t
-                 , packet    : Packet) : acl_action_t 
+                 , packet    : Packet) : acl_action_t =
+    match (packet.l3) {
+        L3PktIP4{ip4, l4} -> the (rule in ACLFrom | ip4.proto == rule.proto and 
+                                                    port_match(l4_src_port(l4), rule.srcPort) and 
+                                                    port_match(l4_dst_port(l4), rule.dstPort) and 
+                                                    ip4_match(ip4.src, rule.srcAddr) and
+                                                    ip4_match(ip4.dst, rule.dstAddr)) {
+                                 rule.action
+                             },
+        L3PktIP6{ip6, l4} -> the (rule in ACLFrom | ip6.proto == rule.proto and
+                                                    port_match(l4_src_port(l4), rule.srcPort) and 
+                                                    port_match(l4_dst_port(l4), rule.dstPort) and 
+                                                    ip6_match(ip6.src, rule.srcAddr) and
+                                                    ip6_match(ip6.dst, rule.dstAddr)) {
+                                 rule.action
+                             },
+        _                 -> ActionAllow
+    }
 
+function ip4_match(addr: ip4_addr_t, mask: ip_addr_masked_t): bool =
+    match (mask) {
+        AddrMasked4{mask4} -> mask4.ip == addr, //(mask4.ip ^ addr) & (mask4.mask == 32'd0),
+        _                  -> false
+    }
+
+function ip6_match(addr: ip6_addr_t, mask: ip_addr_masked_t): bool =
+    match (mask) {
+        AddrMasked6{mask6} -> mask6.ip == addr, //(mask6.ip ^ addr) & (mask6.mask == 128'd0),
+        _                  -> false
+    }
+ 
+function l4_src_port(l4: l4_pkt_t): bit<16> = 
+    match (l4) { 
+        L4PktTCP{tcp} -> tcp.src,
+        L4PktUDP{udp} -> udp.src,
+        _             -> 16'd0
+    }
+
+function l4_dst_port(l4: l4_pkt_t): bit<16> = 
+    match (l4) { 
+        L4PktTCP{tcp} -> tcp.dst,
+        L4PktUDP{udp} -> udp.dst,
+        _             -> 16'd0
+    }
+
+function port_match(port: bit<16>, mask: port_masked_t): bool = mask.port == port
+    //(mask.port ^ port) & mask.mask == 16'd0
+    
 //              , foreign key (switch_id) references LogicalSwitch(uuid)
 //              , foreign key (port)      references LogicalPort(name))
 
@@ -366,8 +429,8 @@ function ct_commit_from(s: ct_state_t, p: Packet): ct_state_t
 function ct_commit_to(s: ct_state_t, p: Packet): ct_state_t
 
 state table CTState ( port: port_id_t
-                     , ctst: ct_state_t
-                     , primary key (port))
+                    , ctst: ct_state_t
+                    , primary key (port))
 
 #switch_port(LogicalPortIn, LogicalPortOut)
 view LogicalSwitchPort( name      : port_id_t
@@ -406,30 +469,30 @@ role LogicalPortIn[port in LogicalSwitchPort] =
 
     // send to connection tracker
     //let cts = ct_track_from(CTState.where(_.port==sport).single().ctst, pkt);
-    var cts: ct_flow_state_t;
+/*    var cts: ct_flow_state_t;
     the (x in CTState | x.port==sport.name) {
         (x.ctst, cts) = ct_track_from(x.ctst, pkt);
-        CTState.delete(_.port == sport.name);
+        CTState.delete(?.port == sport.name);
         CTState.put(x)
     } default {
         (var st, cts) = ct_track_from(ct_state_new(), pkt);
         CTState.put(CTState{sport.name, st})
     };
-
+*/
     // invalid - drop
-    if (cts == CTInvalid) drop;
+//    if (cts == CTInvalid) drop;
     // established | committed -- pass through
-    if (cts != CTEstablished and cts != CTRelated) {
+//    if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
         var action = aclFrom(port.switch, sport.name, pkt);
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> the (x in CTState | x.port == sport.name) {
-                                       x.ctst = ct_commit_from(x.ctst, pkt)
-                                  },
+//            ActionAllowRelated -> the (x in CTState | x.port == sport.name) {
+//                                       x.ctst = ct_commit_from(x.ctst, pkt)
+//                                  },
             _                  -> drop
-        }
-    };
+        };
+//    };
     if (ethMulticastAddr(pkt.dst) or ethBroadcastAddr(pkt.dst)) {
         // multicast | broadcast -- send to all ports
         fork (dport in LogicalPort | dport.switch == port.switch and dport.name != port.name)
@@ -453,7 +516,7 @@ role LogicalPortIn[port in LogicalSwitchPort] =
 
 procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // send to connection tracker
-    var cts : ct_flow_state_t;
+/*    var cts : ct_flow_state_t;
     the (s in CTState | s.port == port.name) {
         (s.ctst, cts) = ct_track_to(s.ctst, pkt);
         CTState.put(s)
@@ -463,16 +526,17 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     };
     // invalid - drop
     if (cts == CTInvalid) drop;
+*/
     // established | committed -- pass through
-    if (cts != CTEstablished and cts != CTRelated) {
+//    if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
         var action = aclTo(port.switch, port.name, fromport, pkt);
         match (action) {
             ActionAllow        -> (),
-            ActionAllowRelated -> the (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
+//            ActionAllowRelated -> the (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
             _                  -> drop
-        }
-    };
+        };
+//    };
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address
