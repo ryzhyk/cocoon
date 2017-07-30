@@ -66,6 +66,7 @@ import Text.PrettyPrint
 import Data.Maybe
 import Data.List
 import Debug.Trace
+import Data.String.Utils
 
 import Util
 import Pos
@@ -673,7 +674,71 @@ data ECtx = CtxRefine
           | CtxRelPred   {ctxParExpr::ENode, ctxPar::ECtx, ctxIdx::Int}
           | CtxPut       {ctxParExpr::ENode, ctxPar::ECtx}
           | CtxDelete    {ctxParExpr::ENode, ctxPar::ECtx}
-          deriving(Show)
+
+instance PP ECtx where
+    pp CtxRefine        = "CtxRefine"
+    pp ctx = (pp $ ctxParent ctx) $$ ctx'
+        where
+        relname = pp $ name $ ctxRel ctx
+        rolename = pp $ name $ ctxRole ctx
+        epar = short $ ctxParExpr ctx
+        rule = short $ ppRule (name $ ctxRel ctx) $ ctxRule ctx
+        mlen = 100
+        short :: (PP a) => a -> Doc
+        short = pp . (\x -> if' (length x < mlen) x (take (mlen - 3) x ++ "...")) . replace "\n" " " . render . pp
+        ctx' = case ctx of
+                    CtxCLI            -> "CtxCLI       "
+                    CtxRole{..}       -> "CtxRole      " <+> rolename
+                    CtxRoleGuard{..}  -> "CtxRoleGuard " <+> rolename
+                    CtxPktGuard{..}   -> "CtxPktGuard  " <+> rolename
+                    CtxAssume{..}     -> "CtxAssume    " <+> short ctxAssume
+                    CtxRelKey{..}     -> "CtxRelKey    " <+> relname
+                    CtxRelForeign{..} -> "CtxRelForeign" <+> relname <+> short ctxConstr
+                    CtxCheck{..}      -> "CtxCheck     " <+> relname
+                    CtxRuleL{..}      -> "CtxRuleL     " <+> relname <+> rule <+> pp ctxIdx
+                    CtxRuleR{..}      -> "CtxRuleR     " <+> relname <+> rule
+                    CtxFunc{..}       -> "CtxFunc      " <+> relname <+> (pp $ name ctxFunc)
+                    CtxApply{..}      -> "CtxApply     " <+> epar <+> pp ctxIdx
+                    CtxBuiltin{..}    -> "CtxBuiltin   " <+> epar <+> pp ctxIdx
+                    CtxField{..}      -> "CtxField     " <+> epar
+                    CtxLocation{..}   -> "CtxLocation  " <+> epar
+                    CtxStruct{..}     -> "CtxStruct    " <+> epar <+> pp ctxIdx
+                    CtxTuple{..}      -> "CtxTuple     " <+> epar <+> pp ctxIdx
+                    CtxSlice{..}      -> "CtxSlice     " <+> epar
+                    CtxMatchExpr{..}  -> "CtxMatchExpr " <+> epar
+                    CtxMatchPat{..}   -> "CtxMatchPat  " <+> epar <+> pp ctxIdx
+                    CtxMatchVal{..}   -> "CtxMatchVal  " <+> epar <+> pp ctxIdx
+                    CtxSeq1{..}       -> "CtxSeq1      " <+> epar
+                    CtxSeq2{..}       -> "CtxSeq2      " <+> epar
+                    CtxPar1{..}       -> "CtxPar1      " <+> epar
+                    CtxPar2{..}       -> "CtxPar2      " <+> epar
+                    CtxITEIf{..}      -> "CtxITEIf     " <+> epar
+                    CtxITEThen{..}    -> "CtxITEThen   " <+> epar
+                    CtxITEElse{..}    -> "CtxITEElse   " <+> epar
+                    CtxSetL{..}       -> "CtxSetL      " <+> epar
+                    CtxSetR{..}       -> "CtxSetR      " <+> epar
+                    CtxSend{..}       -> "CtxSend      " <+> epar
+                    CtxBinOpL{..}     -> "CtxBinOpL    " <+> epar
+                    CtxBinOpR{..}     -> "CtxBinOpR    " <+> epar
+                    CtxUnOp{..}       -> "CtxUnOp      " <+> epar
+                    CtxForCond{..}    -> "CtxForCond   " <+> epar
+                    CtxForBody{..}    -> "CtxForBody   " <+> epar
+                    CtxForkCond{..}   -> "CtxForkCond  " <+> epar
+                    CtxForkBody{..}   -> "CtxForkBody  " <+> epar
+                    CtxWithCond{..}   -> "CtxWithCond  " <+> epar
+                    CtxWithBody{..}   -> "CtxWithBody  " <+> epar
+                    CtxWithDef{..}    -> "CtxWithDef   " <+> epar
+                    CtxAnyCond{..}    -> "CtxAnyCond   " <+> epar
+                    CtxAnyBody{..}    -> "CtxAnyBody   " <+> epar
+                    CtxAnyDef{..}     -> "CtxAnyDef    " <+> epar
+                    CtxTyped{..}      -> "CtxTyped     " <+> epar
+                    CtxRelPred{..}    -> "CtxRelPred   " <+> epar <+> pp ctxIdx
+                    CtxPut{..}        -> "CtxPut       " <+> epar
+                    CtxDelete{..}     -> "CtxDelete    " <+> epar
+                    CtxRefine         -> error "pp CtxRefine"
+
+instance Show ECtx where
+    show = render . pp
 
 ctxParent :: ECtx -> ECtx
 ctxParent (CtxRole _)         = CtxRefine     
