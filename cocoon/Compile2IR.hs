@@ -228,7 +228,7 @@ mkMatchCond vars ctx m pat = (I.conj conds, acts)
                     $ zip (mkExpr vars ctx m) (expandPattern ctx pat)
 
 matchVars :: (?r::Refine) => ECtx -> Expr -> [(String, Type)]
-matchVars ctx e = map (\(v, ctx') -> (v, typ $ getVar ?r ctx' v)) $ exprVars ctx e
+matchVars ctx e = map (\(v, ctx') -> (v, exprType ?r ctx' $ eVarDecl v)) $ exprVarDecls ctx e
 
 expandPattern :: (?r::Refine) => ECtx -> Expr -> [Maybe I.Expr]
 expandPattern ctx e = exprTreeFlatten $ exprFoldCtx expandPattern' ctx e

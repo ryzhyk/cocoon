@@ -561,10 +561,10 @@ procedure lportSendOut(port: LogicalPort): sink =
         the (lport in LogicalSwitchPort | lport.name == port.name) {
             send LogicalPortOut[lport]
         }
-    } else {
+    } else {drop} /*else {
         the (rp in LogicalRouterPort | rp.name==port.ptype.rport)
             send RouterPortIn[rp]
-    }
+    }*/
 
 role LogicalPortOut[port in LogicalSwitchPort] = drop
 
