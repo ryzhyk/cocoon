@@ -39,6 +39,7 @@ import Name
 import Refine
 import qualified IR         as IR
 import qualified Compile2IR as IR
+import qualified IROptimize as IR
 
 data TOption = CCN String
              | Action String
@@ -161,8 +162,12 @@ main = do
              let logfile = workdir </> addExtension basename "log"
                  dfpath  = workdir </> "target" </> "debug" </> basename
              mapM_ (\(rl, _, _) -> do let dotname = workdir </> addExtension (name rl) "dot"
+                                      let odotname = workdir </> addExtension (addExtension (name rl) "opt") "dot"
                                       putStrLn dotname
-                                      writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.compilePort combined rl) 
+                                      putStrLn odotname
+                                      let ir = IR.compilePort combined rl
+                                      writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG ir
+                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.optimize ir)
                    $ refinePortRoles combined
              controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI histfile (confCtlPort config)

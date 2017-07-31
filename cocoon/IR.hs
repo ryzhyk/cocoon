@@ -16,7 +16,7 @@ limitations under the License.
 
 -- Intemediate representation for dataplane languages like OpenFlow and P4
 
-{-# LANGUAGE ImplicitParams, OverloadedStrings #-}
+{-# LANGUAGE ImplicitParams, OverloadedStrings, RecordWildCards #-}
 
 module IR where
  
@@ -26,6 +26,7 @@ import qualified Data.GraphViz        as G
 import Text.PrettyPrint
 import Data.Text.Lazy(Text)
 
+import Util
 import Ops
 import PP
 
@@ -109,6 +110,7 @@ instance Show Action where
 data Next = Goto NodeId
           | Send Expr
           | Drop
+          deriving(Eq)
 
 instance PP Next where
     pp (Goto nid) = "goto" <+> pp nid
@@ -132,6 +134,12 @@ data Node = Fork   RelName {-Expr-} BB
           | Cond   [(Expr, BB)]
           | Par    [BB]
 
+mapBB :: (BB -> BB) -> Node -> Node
+mapBB f (Fork r bb)        = Fork r $ f bb
+mapBB f (Lookup r bb1 bb2) = Lookup r (f bb1) (f bb2)
+mapBB f (Cond cs)          = Cond $ map (mapSnd f) cs
+mapBB f (Par bs)           = Par $ map f bs
+
 instance PP Node where 
     pp (Fork t b)       = ("fork(" <> pp t <> ")") $$ (nest' $ pp b)
     pp (Lookup t th el) = ("lookup(" <> pp t <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
@@ -144,7 +152,7 @@ instance Show Node where
 instance G.Labellable Node where
     toLabelValue = G.toLabelValue . show
 
-data Edge = Edge
+data Edge = Edge deriving (Eq)
 
 instance G.Labellable Edge where
     toLabelValue _ = G.toLabelValue $ (""::String)
@@ -156,6 +164,9 @@ data Pipeline = Pipeline {plVars :: Vars, plCFG :: CFG, plEntryNode :: NodeId}
 
 type Vars = M.Map VarName (NodeId, Type)
 
+varsAtNode :: Pipeline -> G.Node -> [VarName]
+varsAtNode Pipeline{..} n = filter ((==n) . fst . (plVars M.!)) $ M.keys plVars
+
 cfgToDot :: CFG -> Text
 cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
 
@@ -165,11 +176,3 @@ cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
 --data NodeMeta = NodeMeta C.ECtx C.Expr
 --type Meta = M.Map NodeId NodeMeta
 
--- Optimizations: 
---     * eliminate unused variables (for example only a few vars
---       returned by a query are used)
---     * variable elimination by substitution
---     * merging tables to eliminate some variables
---     * merge cascade of conditions
---     * merge sequence of basic blocks
---     * merge cascades of parallel blocks
