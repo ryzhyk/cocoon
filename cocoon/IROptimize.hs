@@ -20,7 +20,6 @@ limitations under the License.
 module IROptimize(optimize) where
  
 import qualified Data.Graph.Inductive as G 
-import qualified Data.Map as M
 import Control.Monad.State
 import Data.List
 
@@ -41,18 +40,15 @@ pass pl = do
 -- Merge nodes that contain straight-line code with predecessors
 optStraightLine :: Pipeline -> State Bool Pipeline
 optStraightLine pl =
-    foldM (\pl_ n -> -- make sure we can move all variables to the predecessor
-                     if null (varsAtNode pl_ n) || length (G.pre (plCFG pl_) n) == 1
-                        then case G.lab (plCFG pl_) n of
-                                  Just (Par [b]) -> do put True     
-                                                       return $ merge pl_ n b
-                                  _              -> return pl_
-                        else return pl_) pl 
+    foldM (\pl_ n -> case G.lab (plCFG pl_) n of
+                          Just (Par [b]) -> do put True     
+                                               return $ merge pl_ n b
+                          _              -> return pl_) pl 
          $ filter (/= plEntryNode pl) 
          $ G.nodes (plCFG pl)
 
 merge :: Pipeline -> G.Node -> BB -> Pipeline
-merge pl@Pipeline{..} n (BB as nxt) = pl{plVars = vars', plCFG = cfg'}
+merge pl@Pipeline{..} n (BB as nxt) = pl{plCFG = cfg'}
     where (Just (pre, _, _, suc), cfg1) = G.match n plCFG
           -- merge n into each predecessor
           cfg' = foldl' (\cfg_ p -> let (Just (pre', _, l, suc'), cfg2) = G.match p cfg_
@@ -62,13 +58,11 @@ merge pl@Pipeline{..} n (BB as nxt) = pl{plVars = vars', plCFG = cfg'}
                                     in -- insert edges to successors of n
                                        foldl' (\cfg4 s -> G.insEdge (p, s, Edge) $ G.delLEdge (p, s, Edge) cfg4) cfg3 $ map snd suc)
                         cfg1 $ map snd pre
-          vars' = foldl' (\vars p -> M.map (\(vn,t) -> if vn == n then (p, t) else (vn,t)) vars)
-                         plVars $ map snd pre
 
 -- Optimizations: 
 --     * eliminate unused variables (for example only a few vars returned by a query are used)
 --     * variable elimination by substitution
 --     * merging tables to eliminate some variables
 --     * merge cascade of conditions
---     * merge sequence of basic blocks
+--     + merge sequence of basic blocks
 --     * merge cascades of parallel blocks

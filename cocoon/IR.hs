@@ -162,10 +162,7 @@ type CFG = G.Gr Node Edge
 
 data Pipeline = Pipeline {plVars :: Vars, plCFG :: CFG, plEntryNode :: NodeId}
 
-type Vars = M.Map VarName (NodeId, Type)
-
-varsAtNode :: Pipeline -> G.Node -> [VarName]
-varsAtNode Pipeline{..} n = filter ((==n) . fst . (plVars M.!)) $ M.keys plVars
+type Vars = M.Map VarName Type
 
 cfgToDot :: CFG -> Text
 cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg

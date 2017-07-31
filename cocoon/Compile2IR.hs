@@ -24,7 +24,7 @@ import Control.Monad.State
 import Text.PrettyPrint
 import qualified Data.Map as M
 import qualified Data.Graph.Inductive as G 
-import Debug.Trace
+--import Debug.Trace
 
 import Util 
 import PP
@@ -41,8 +41,8 @@ import qualified IR as I
 type CompileState a = State I.Pipeline a
 type VMap = M.Map String String
 
-addVar :: I.VarName -> I.Type -> I.NodeId -> CompileState ()
-addVar n t nd = modify $ \(I.Pipeline vs cfg nd') -> I.Pipeline (M.insert n (nd, t) vs) cfg nd'
+addVar :: I.VarName -> I.Type -> CompileState ()
+addVar n t = modify $ \(I.Pipeline vs cfg nd') -> I.Pipeline (M.insert n t vs) cfg nd'
 
 allocNode ::  CompileState I.NodeId
 allocNode = do
@@ -205,7 +205,7 @@ declVar :: (?r::Refine) => VMap -> String -> Type -> I.NodeId -> CompileState (V
 declVar vars vname vtype nd = do
     let vname' = vnameAt vname nd
     let vs = var2Scalars vname' vtype
-    mapM_ (\(n, t) -> addVar n t nd) vs
+    mapM_ (\(n, t) -> addVar n t) vs
     return (M.insert vname vname' vars, vs)
 
 vnameAt :: String -> I.NodeId -> I.VarName
