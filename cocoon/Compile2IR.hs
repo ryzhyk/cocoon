@@ -72,11 +72,12 @@ compilePort' role@Role{..} = do
     case exprValidate ?r (CtxRole role) e of
          Left er  -> error $ "Compile2IR.compilePort': failed to validate transformed expression: " ++ er
          Right _  -> return ()
+
     let rel = getRelation ?r roleTable
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
-    let c = I.EBinOp Eq (I.ECol "portnum") (I.EPktField "portnum")
-    (entryndb, _) <- compileExpr vars (CtxRole role) Nothing e
-    updateNode entrynd (I.Lookup (name rel) c (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+    --let c = I.EBinOp Eq (I.ECol "portnum") (I.EPktField "portnum")
+    (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
+    updateNode entrynd (I.Lookup (name rel) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     -- TODO: optimize 
 
 compileExpr :: (?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
@@ -126,26 +127,26 @@ compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x)))) 
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
+compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t _ b)) = do
     let rel = getRelation ?r t
         cols = relCols rel
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    let c' = mkScalarExpr vars' (CtxForCond e ctx) c
+    --let c' = mkScalarExpr vars' (CtxForCond e ctx) c
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b
-    updateNode entrynd (I.Fork t c' $ I.BB asns $ I.Goto entryndb) [entryndb]
+    updateNode entrynd (I.Fork t $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 
-compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
+compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t _ b md)) = do
     let rel = getRelation ?r t
         cols = relCols rel
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    let c' = mkScalarExpr vars' (CtxWithCond e ctx) c
+    --let c' = mkScalarExpr vars' (CtxWithCond e ctx) c
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case md of
          Just d -> do
              (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t c' (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t c' (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+             updateNode entrynd (I.Lookup t (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
+         Nothing -> updateNode entrynd (I.Lookup t (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     return vars
 
 compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
@@ -272,7 +273,7 @@ mkExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> [I.Expr]
 mkExpr vars ctx e = {-trace ("mkExpr " ++ show e ++ " in\n" ++ show ctx) $ -} exprTreeFlatten $ exprFoldCtx (mkExpr' vars) ctx e
 
 mkExpr' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree I.Expr) -> ExprTree I.Expr
-mkExpr' vars ctx (EVar _ v)                          = trace ("\n\n\n\n***************EVar " ++ show v ++ " in " ++ show ctx) $ fields "" (typ $ getVar ?r ctx v) (\_ n -> I.EVar $ ((vars M.! v) .+ n))
+mkExpr' vars ctx (EVar _ v)                          = {-trace ("\n\n\n\n***************EVar " ++ show v ++ " in\n" ++ show ctx ++ "\nvars: " ++ show vars) $-} fields "" (typ $ getVar ?r ctx v) (\_ n -> I.EVar $ ((vars M.! v) .+ n))
 mkExpr' _    _   (EPacket _)                         = fields "" (fromJust $ tdefType $ getType ?r packetTypeName) (\_ n -> I.EPktField n)
 mkExpr' _    _   (EField _ (ETNode fs) f)            = fromJust $ lookup f fs
 mkExpr' _    _   (EBool _ b)                         = ETLeaf $ I.EBool b

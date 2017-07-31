@@ -127,14 +127,14 @@ instance PP BB where
 instance Show BB where 
     show = render . pp
 
-data Node = Fork   RelName Expr BB
-          | Lookup RelName Expr BB BB
+data Node = Fork   RelName {-Expr-} BB
+          | Lookup RelName {-Expr-} BB BB
           | Cond   [(Expr, BB)]
           | Par    [BB]
 
 instance PP Node where 
-    pp (Fork t c b)       = ("fork(" <> pp t <> "|" <+> pp c <> ")") $$ (nest' $ pp b)
-    pp (Lookup t c th el) = ("lookup(" <> pp t <> "|" <+> pp c <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Fork t b)       = ("fork(" <> pp t <> ")") $$ (nest' $ pp b)
+    pp (Lookup t th el) = ("lookup(" <> pp t <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
     pp (Cond cs)          = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
     pp (Par bs)           = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
    
