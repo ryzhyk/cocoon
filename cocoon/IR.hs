@@ -74,7 +74,7 @@ instance PP Expr where
     pp (EBool False)     = "false" 
     pp (EBit w v)        = pp w <> "'d" <> pp v
     pp (EBinOp op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
-    pp (EUnOp op e)      = parens $ pp op <> pp e
+    pp (EUnOp op e)      = parens $ pp op <+> pp e
 
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)
@@ -135,9 +135,9 @@ data Node = Fork   RelName {-Expr-} BB
 instance PP Node where 
     pp (Fork t b)       = ("fork(" <> pp t <> ")") $$ (nest' $ pp b)
     pp (Lookup t th el) = ("lookup(" <> pp t <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
-    pp (Cond cs)          = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
-    pp (Par bs)           = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
-   
+    pp (Cond cs)        = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
+    pp (Par bs)         = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
+
 instance Show Node where
     show = render . pp 
 

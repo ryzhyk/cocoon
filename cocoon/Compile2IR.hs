@@ -106,7 +106,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EITE _ c t me)) = do
          Just el -> do 
                 (entrynde, _) <- compileExpr vars (CtxITEElse e ctx) exitnd el
                 updateNode entrynd (I.Cond [(c', I.BB [] $ I.Goto entryndt), (I.EBool True, I.BB [] $ I.Goto entrynde)]) [entryndt, entrynde]
-         Nothing -> updateNode entrynd (I.Cond [(c', I.BB [] $ I.Goto entryndt), (I.EBool True, I.BB [] I.Drop)]) [entryndt]
+         Nothing -> updateNode entrynd (I.Cond [(c', I.BB [] $ I.Goto entryndt), (I.EBool True, I.BB [] $ maybe I.Drop I.Goto exitnd)]) $ entryndt:(maybeToList exitnd)
     return vars
 
 compileExprAt vars _   entrynd _      (E (EDrop _)) = do
