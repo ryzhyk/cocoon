@@ -513,8 +513,8 @@ instance PP e => PP (ExprNode e) where
                                                        $ punctuate comma 
                                                        $ (map (\(c,v) -> pp c <> colon <+> pp v) cs))
     pp (EVarDecl _ v)      = "var" <+> pp v
-    pp (ESeq _ l r)        = (pp l <> semi) $$ pp r
-    pp (EPar _ l r)        = (pp l <> "|" ) $$ pp r
+    pp (ESeq _ l r)        = parens $ (pp l <> semi) $$ pp r
+    pp (EPar _ l r)        = parens $ (pp l <> "|" ) $$ pp r
     pp (EITE _ c t me)     = ("if" <+> pp c <+> lbrace)
                              $$
                              (nest' $ pp t)

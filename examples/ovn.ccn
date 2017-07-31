@@ -530,13 +530,14 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     // established | committed -- pass through
 //    if (cts != CTEstablished and cts != CTRelated) {
         // apply ACL
-        var action = aclTo(port.switch, port.name, fromport, pkt);
+/*        var action = aclTo(port.switch, port.name, fromport, pkt);
         match (action) {
             ActionAllow        -> (),
 //            ActionAllowRelated -> the (s in CTState | s.port == port.name) {s.ctst = ct_commit_to(s.ctst, pkt)},
             _                  -> drop
         };
 //    };
+*/
     // always deliver mcast and bcast packets
     if (ethUnicastAddr(pkt.dst)) {
         // port security enabled? - check valid eth.dst address

@@ -22,7 +22,7 @@ module Validate ( validate
 import Control.Monad.Except
 import Data.Maybe
 import Data.List
-import Debug.Trace
+-- import Debug.Trace
 
 import Syntax
 import NS
@@ -34,6 +34,7 @@ import Expr
 import Refine
 import Relation
 import SQL
+import Role
 import {-# SOURCE #-} Builtins
 
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
@@ -298,8 +299,15 @@ roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
                                 exprValidate r (CtxRole rl) roleBody
 
 roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
-roleValidateFinal r Role{..} = do
+roleValidateFinal r rl@Role{..} = do
     assert (exprIsDeterministic r roleBody) (pos roleBody) "Cannot synthesize non-deterministic behavior"
+    when (roleIsInPort r roleName) $ do
+        mapM_ (\rl' -> do assertR r (roleIsOutPort r rl') rolePos $ "Input port " ++ roleName ++ " sends to role " ++ rl' ++ ", which is not an output port"
+                          assertR r (portRoleSwitch r (getRole r rl') == portRoleSwitch r rl) rolePos $ "Input port " ++ roleName ++ " sends to output port " ++ rl' ++ ", which belongs to a different switch")
+             $ exprSendsToRoles r roleBody 
+    when (roleIsOutPort r roleName) $ do
+        mapM_ (\rl' -> do assertR r (roleIsInPort r $ name rl') rolePos $ "Output port " ++ roleName ++ " sends to role " ++ name rl' ++ ", which is not an input port")
+              $ exprSendsToRoles r roleBody 
     return ()
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
