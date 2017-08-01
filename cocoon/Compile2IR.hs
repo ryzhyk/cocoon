@@ -36,7 +36,8 @@ import Expr
 import Name
 import Type
 import Validate
-import qualified IR as I
+import qualified IR         as I
+import qualified IROptimize as I
 
 type CompileState a = State I.Pipeline a
 type VMap = M.Map String String
@@ -204,13 +205,19 @@ compileExprAt _    _   _       _      e              = error $ "Compile2IR: comp
 -- Compile boolean expression and determine its dependencies without changing compilation state
 exprDeps :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Pipeline -> [I.VarName]
 exprDeps vars ctx e pl = 
-    (nub $ concatMap nodeVars $ map snd $ G.labNodes $ G.nfilter (>= entry) $ I.plCFG pl')
+    (nub $ concatMap nodeVars $ map snd $ G.labNodes $ G.nfilter (>= entry) $ I.plCFG pl'')
      `intersect` (M.keys $ I.plVars pl)
     where (entry, pl') = runState (exprDeps' vars ctx e) pl
+          -- isolate subgraph that computes e only
+          cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
+          -- optimize to eliminate unused variables
+          pl'' = I.optimize $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
 
 exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do
-    let e' = eSeq (eTyped (eVarDecl "_#dummy") (TBool nopos)) (exprModifyResult (eSet (eVar "_#dummy")) e)
+    -- make sure I.optimize keep variables that effect the result of e
+    -- by inserting a fake drop depending on the value of e
+    let e' = exprModifyResult (\e_ -> eITE e_ eDrop Nothing) e
     entrynd <- allocNode
     exitnd <- allocNode
     _ <- compileExprAt vars ctx entrynd (Just exitnd) e'
