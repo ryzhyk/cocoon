@@ -24,7 +24,7 @@ import Control.Monad.State
 import Text.PrettyPrint
 import qualified Data.Map as M
 import qualified Data.Graph.Inductive as G 
---import Debug.Trace
+import Debug.Trace
 
 import Util 
 import PP
@@ -77,7 +77,7 @@ compilePort' role@Role{..} = do
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
     --let c = I.EBinOp Eq (I.ECol "portnum") (I.EPktField "portnum")
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
-    updateNode entrynd (I.Lookup (name rel) (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+    updateNode entrynd (I.Lookup (name rel) [] (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     -- TODO: optimize 
 
 compileExpr :: (?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
@@ -127,26 +127,32 @@ compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x)))) 
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t _ b)) = do
+compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
     let rel = getRelation ?r t
         cols = relCols rel
+    plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    --let c' = mkScalarExpr vars' (CtxForCond e ctx) c
+    --let c' = mkScalarExpr vars' (CtxForkCond e ctx) c
+    pl <- get
+    let cdeps = (exprDeps vars' (CtxForkCond e ctx) c pl) `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b
-    updateNode entrynd (I.Fork t $ I.BB asns $ I.Goto entryndb) [entryndb]
+    updateNode entrynd (I.Fork t cdeps $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 
-compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t _ b md)) = do
+compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
     let rel = getRelation ?r t
         cols = relCols rel
+    plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     --let c' = mkScalarExpr vars' (CtxWithCond e ctx) c
+    pl <- get
+    let cdeps = (exprDeps vars' (CtxWithCond e ctx) c pl) `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case md of
          Just d -> do
              (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+             updateNode entrynd (I.Lookup t cdeps (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
+         Nothing -> updateNode entrynd (I.Lookup t cdeps (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     return vars
 
 compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
@@ -171,7 +177,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EMatch _ m cs)) = do
                                                      return vars')
                                                    vars $ matchVars (CtxMatchPat e ctx i) c
                                     (entrya, _) <- compileExpr vars' (CtxMatchVal e ctx i) exitnd a
-                                    let (c', asns) = mkMatchCond vars (CtxMatchPat e ctx i) m c
+                                    let (c', asns) = mkMatchCond vars' (CtxMatchPat e ctx i) m c
                                     updateNode entrya_ (I.Par [I.BB asns $ I.Goto entrya]) [entrya]
                                     return (c', entrya_))
                    cs 
@@ -195,6 +201,25 @@ compileExprAt vars _   entrynd exitnd (E EPHolder{}) = ignore vars entrynd exitn
 compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitnd
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
+-- Compile boolean expression and determine its dependencies without changing compilation state
+exprDeps :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Pipeline -> [I.VarName]
+exprDeps vars ctx e pl = 
+    (nub $ concatMap nodeVars $ map snd $ G.labNodes $ G.nfilter (>= entry) $ I.plCFG pl')
+     `intersect` (M.keys $ I.plVars pl)
+    where (entry, pl') = runState (exprDeps' vars ctx e) pl
+
+exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
+exprDeps' vars ctx e = do
+    let e' = eSeq (eTyped (eVarDecl "_#dummy") (TBool nopos)) (exprModifyResult (eSet (eVar "_#dummy")) e)
+    entrynd <- allocNode
+    exitnd <- allocNode
+    _ <- compileExprAt vars ctx entrynd (Just exitnd) e'
+    return entrynd
+
+nodeVars :: I.Node -> [I.VarName]
+nodeVars (I.Cond cs)             = nub $ concatMap (\(e,b) -> I.exprVars e ++ I.bbVars b) cs
+nodeVars (I.Par bs)              = nub $ concatMap I.bbVars bs
+nodeVars n                       = error $ "Compile2IR.nodeVars " ++ show n
 
 ignore :: VMap -> I.NodeId -> Maybe I.NodeId -> CompileState VMap
 ignore vars entrynd exitnd = do
@@ -225,18 +250,18 @@ mkMatchCond vars ctx m pat = (I.conj conds, acts)
                                     Nothing          -> (cs, as)
                                     Just e2@I.EVar{} -> (cs, I.ASet e2 e1: as)
                                     Just e2          -> (I.EBinOp Eq e1 e2: cs, as)) ([], [])
-                    $ zip (mkExpr vars ctx m) (expandPattern ctx pat)
+                    $ zip (mkExpr vars ctx m) (expandPattern vars ctx pat)
 
 matchVars :: (?r::Refine) => ECtx -> Expr -> [(String, Type)]
 matchVars ctx e = map (\(v, ctx') -> (v, exprType ?r ctx' $ eVarDecl v)) $ exprVarDecls ctx e
 
-expandPattern :: (?r::Refine) => ECtx -> Expr -> [Maybe I.Expr]
-expandPattern ctx e = exprTreeFlatten $ exprFoldCtx expandPattern' ctx e
+expandPattern :: (?r::Refine) => VMap -> ECtx -> Expr -> [Maybe I.Expr]
+expandPattern vars ctx e = exprTreeFlatten $ exprFoldCtx (expandPattern' vars) ctx e
 
-expandPattern' :: (?r::Refine) => ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
-expandPattern' ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\_ n -> Just $ I.EVar $ (v .+ n))
-expandPattern' ctx (EPHolder _)     = fields "" (exprType ?r ctx ePHolder) (\_ _ -> Nothing)
-expandPattern' _   (EStruct _ c fs) = ETNode $ tag ++ fls
+expandPattern' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
+expandPattern' vars ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\_ n -> Just $ I.EVar $ ((vars M.! v) .+ n))
+expandPattern' _    ctx (EPHolder _)     = fields "" (exprType ?r ctx ePHolder) (\_ _ -> Nothing)
+expandPattern' _    _   (EStruct _ c fs) = ETNode $ tag ++ fls
     where TStruct _ cs = fromJust $ tdefType $ consType ?r c
           Constructor{..} = getConstructor ?r c
           tag = if' (needsTag cs) [("_tag", ETLeaf $ Just $ I.EBit (tagWidth cs) (tagVal cs c))] []
@@ -244,8 +269,8 @@ expandPattern' _   (EStruct _ c fs) = ETNode $ tag ++ fls
                                            Just i  -> fs !! i
                                            Nothing -> fields "" (typ f) (\_ _ -> Nothing)
                                       in (name f, tree)) $ structFields cs
-expandPattern' _   (ETuple _ fs)    = ETNode $ mapIdx (\f i -> (show i, f)) fs
-expandPattern' _   e                = error $ "Compile2IR.expandPattern' " ++ show e
+expandPattern' _    _   (ETuple _ fs)    = ETNode $ mapIdx (\f i -> (show i, f)) fs
+expandPattern' _    _   e                = error $ "Compile2IR.expandPattern' " ++ show e
 
 -- function calls
 -- version of expr2Statement that inlines function calls

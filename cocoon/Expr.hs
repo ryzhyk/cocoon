@@ -45,6 +45,7 @@ module Expr ( exprMapM
             , exprSplitVDecl
             , exprInline
             , expr2Statement
+            , exprModifyResult
             , ctxExpectsStat
             , ctxMustReturn
             , exprIsStatement

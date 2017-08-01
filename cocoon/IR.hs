@@ -25,6 +25,7 @@ import qualified Data.Graph.Inductive as G
 import qualified Data.GraphViz        as G
 import Text.PrettyPrint
 import Data.Text.Lazy(Text)
+import Data.List
 
 import Util
 import Ops
@@ -77,6 +78,21 @@ instance PP Expr where
     pp (EBinOp op e1 e2) = parens $ pp e1 <+> pp op <+> pp e2
     pp (EUnOp op e)      = parens $ pp op <+> pp e
 
+instance Show Expr where
+    show = render . pp
+
+exprVars :: Expr -> [VarName]
+exprVars e = nub $ exprVars' e
+
+exprVars' (EPktField _)     = []
+exprVars' (EVar v)          = [v]
+exprVars' (ECol _)          = []
+exprVars' (ESlice e _ _)    = exprVars' e
+exprVars' (EBool _)         = []
+exprVars' (EBit _ _)        = []
+exprVars' (EBinOp _ e1 e2)  = exprVars' e1 ++ exprVars' e2
+exprVars' (EUnOp _ e)       = exprVars' e
+
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)
 
@@ -106,6 +122,11 @@ instance PP Action where
 instance Show Action where
     show = render . pp
 
+actionVars :: Action -> [VarName]
+actionVars (ASet e1 e2)  = nub $ exprVars e1 ++ exprVars e2
+actionVars (APut _ vs)   = nub $ concatMap exprVars vs
+actionVars (ADelete _ e) = exprVars e
+
 -- Next action descriptor
 data Next = Goto NodeId
           | Send Expr
@@ -129,22 +150,31 @@ instance PP BB where
 instance Show BB where 
     show = render . pp
 
-data Node = Fork   RelName {-Expr-} BB
-          | Lookup RelName {-Expr-} BB BB
+bbVars :: BB -> [VarName]
+bbVars (BB as _) = nub $ concatMap actionVars as
+
+data Node = Fork   RelName [VarName] BB     -- list of vars fork condition depends on (prevents these var from being optimized away)
+          | Lookup RelName [VarName] BB BB
           | Cond   [(Expr, BB)]
           | Par    [BB]
 
 mapBB :: (BB -> BB) -> Node -> Node
-mapBB f (Fork r bb)        = Fork r $ f bb
-mapBB f (Lookup r bb1 bb2) = Lookup r (f bb1) (f bb2)
-mapBB f (Cond cs)          = Cond $ map (mapSnd f) cs
-mapBB f (Par bs)           = Par $ map f bs
+mapBB f (Fork r vs bb)        = Fork r vs $ f bb
+mapBB f (Lookup r vs bb1 bb2) = Lookup r vs (f bb1) (f bb2)
+mapBB f (Cond cs)             = Cond $ map (mapSnd f) cs
+mapBB f (Par bs)              = Par $ map f bs
+
+nodeVars :: Node -> [VarName]
+nodeVars (Fork _ vs b)       = nub $ vs ++ bbVars b
+nodeVars (Lookup _ vs b1 b2) = nub $ vs ++ bbVars b1 ++ bbVars b2
+nodeVars (Cond cs)           = nub $ concatMap (\(c,b) -> exprVars c ++ bbVars b) cs 
+nodeVars (Par bs)            = nub $ concatMap bbVars bs
 
 instance PP Node where 
-    pp (Fork t b)       = ("fork(" <> pp t <> ")") $$ (nest' $ pp b)
-    pp (Lookup t th el) = ("lookup(" <> pp t <> ")") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
-    pp (Cond cs)        = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
-    pp (Par bs)         = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
+    pp (Fork t vs b)       = ("fork(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp b)
+    pp (Lookup t vs th el) = ("lookup(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Cond cs)           = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
+    pp (Par bs)            = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
 
 instance Show Node where
     show = render . pp 
@@ -167,7 +197,6 @@ type Vars = M.Map VarName Type
 cfgToDot :: CFG -> Text
 cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
 
-    
 -- Node metadata relates pipeline nodes to 
 -- original program locations
 --data NodeMeta = NodeMeta C.ECtx C.Expr
