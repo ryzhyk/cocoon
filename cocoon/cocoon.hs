@@ -167,7 +167,7 @@ main = do
                                       putStrLn odotname
                                       let ir = IR.compilePort combined rl
                                       writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG ir
-                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.optimize ir)
+                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.optimize 0 ir)
                    $ refinePortRoles combined
              controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI histfile (confCtlPort config)

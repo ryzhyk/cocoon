@@ -24,7 +24,7 @@ import Control.Monad.State
 import Text.PrettyPrint
 import qualified Data.Map as M
 import qualified Data.Graph.Inductive as G 
-import Debug.Trace
+--import Debug.Trace
 
 import Util 
 import PP
@@ -211,7 +211,7 @@ exprDeps vars ctx e pl =
           -- isolate subgraph that computes e only
           cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
           -- optimize to eliminate unused variables
-          pl'' = I.optimize $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
+          pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
 
 exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do

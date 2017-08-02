@@ -15,7 +15,7 @@ limitations under the License.
 -}
 
 
-{-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, FlexibleContexts #-}
 
 module IROptimize(optimize) where
  
@@ -23,15 +23,19 @@ import qualified Data.Graph.Inductive as G
 import qualified Data.Map as M
 import Control.Monad.State
 import Data.List
---import Debug.Trace
 import Data.Maybe
+--import Debug.Trace
+--import System.IO.Unsafe
+--import Data.Text.Lazy (unpack)
 
 import IR
 
-optimize :: Pipeline -> Pipeline
-optimize pl | modified  = optimize pl'
-            | otherwise = pl'
-    where (pl', modified) = runState (pass pl) False
+optimize :: Int -> Pipeline -> Pipeline
+optimize p pl | modified  = optimize (p+1) pl'
+              | otherwise = pl'
+    where (pl', modified) = --trace(unsafePerformIO $ do {writeFile ("pass" ++ show p ++ ".dot") $ unpack $ cfgToDot $ plCFG pl; return ""}) $
+                            --trace ("******** optimizer pass " ++ show p ++ " *********") $
+                            runState (pass pl) False
 
 -- one pass of the optimizer
 pass :: Pipeline -> State Bool Pipeline
@@ -68,52 +72,37 @@ merge pl@Pipeline{..} n (BB as nxt) = pl{plCFG = cfg'}
 -- Remove assignments whose LHS is never read in the future
 optUnusedAssigns :: Pipeline -> State Bool Pipeline
 optUnusedAssigns pl = do
-    cfg' <- foldM nodeOptUnusedAssigns (plCFG pl) $ G.labNodes $ plCFG pl
+    let f :: CFGCtx -> State Bool (Maybe Action)
+        f ctx = f' ctx (ctxAction (plCFG pl) ctx)
+        f' ctx a@(ASet e1 _) | isNothing mvar = return $ Just a
+                             | used           = return $ Just a
+                             | otherwise      = do put True
+                                                   return Nothing
+            where mvar = var e1
+                  var (EVar x)       = Just x
+                  var (ESlice e _ _) = var e
+                  var _              = Nothing
+                  Just v = mvar
+                  match (CtxNode nd) = case node of
+                                            Fork{}   -> elem v $ nodeDeps node
+                                            Lookup{} -> elem v $ nodeDeps node
+                                            Cond{}   -> elem v $ concatMap (exprVars . fst) $ nodeConds node
+                                            Par{}    -> False
+                                       where node = fromJust $ G.lab (plCFG pl) nd
+                  match ctx' = elem v $ actionRHSVars $ ctxAction (plCFG pl) ctx'
+                  abort CtxNode{} = False
+                  abort ctx' = case ctxAction (plCFG pl) ctx' of
+                                    ASet (EVar v') _ | v' == v -> True
+                                    _                          -> False
+                  used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
+        f' _ a                              = return $ Just a
+    cfg' <- cfgMapCtxM f (plCFG pl)
     return pl{plCFG = cfg'}
-
-nodeOptUnusedAssigns :: CFG -> (NodeId, Node) -> State Bool CFG
-nodeOptUnusedAssigns cfg (i, node) = do
-    node' <- case node of
-                  Fork t vs b       -> (liftM $ Fork t vs) $ bbOptUnusedAssigns cfg i b
-                  Lookup t vs th el -> (liftM2 $ Lookup t vs) (bbOptUnusedAssigns cfg i th) (bbOptUnusedAssigns cfg i el)
-                  Cond cs           -> liftM Cond $ mapM (\(c,b) -> liftM (c,) $ bbOptUnusedAssigns cfg i b) cs
-                  Par bs            -> liftM Par $ mapM (bbOptUnusedAssigns cfg i) bs
-    let (Just (pre, _, _, suc), cfg_) = G.match i cfg
-    return $ (pre, i, node', suc) G.& cfg_
-
-bbOptUnusedAssigns :: CFG -> NodeId -> BB -> State Bool BB
-bbOptUnusedAssigns cfg i (BB as nxt) = do
-    as' <- mapM (\(a,as') -> actionOptUnusedAssigns cfg i a as') $ zip as (tail $ tails as)
-    return $ BB (catMaybes as') nxt
-
-actionOptUnusedAssigns :: CFG -> NodeId -> Action -> [Action] -> State Bool (Maybe Action)
-actionOptUnusedAssigns _   _  a@APut{} _           = return $ Just a
-actionOptUnusedAssigns _   _  a@ADelete{} _        = return $ Just a
-actionOptUnusedAssigns cfg i a@(ASet e1 _) after | isNothing mvar = return $ Just a
-                                                 | used           = return $ Just a
-                                                 | otherwise      = return Nothing
-    where mvar = var e1
-          var (EVar x)       = Just x
-          var (ESlice e _ _) = var e
-          var _              = Nothing
-          Just v = mvar
-          used = any (elem v . actionRHSVars) after ||                                 -- is var used in after?
-                 any (elem v . nodeRHSVars) (map (fromJust . G.lab cfg) $ G.dfs [i] cfg \\ [i]) -- is vars used in cfg?
-
-nodeRHSVars :: Node -> [VarName]
-nodeRHSVars (Fork _ vs b)       = nub $ vs ++ bbRHSVars b
-nodeRHSVars (Lookup _ vs b1 b2) = nub $ vs ++ bbRHSVars b1 ++ bbRHSVars b2
-nodeRHSVars (Cond cs)           = nub $ concatMap (\(c,b) -> exprVars c ++ bbRHSVars b) cs 
-nodeRHSVars (Par bs)            = nub $ concatMap bbRHSVars bs
-
-bbRHSVars :: BB -> [VarName]
-bbRHSVars (BB as _) = nub $ concatMap actionRHSVars as
 
 actionRHSVars :: Action -> [VarName]
 actionRHSVars (ASet _ e2)   = exprVars e2
 actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
 actionRHSVars (ADelete _ c) = exprVars c
-
 
 -- Remove unused variables
 optUnusedVars :: Pipeline -> State Bool Pipeline
@@ -128,6 +117,14 @@ optUnusedVars pl = do
 
 removeVar :: Pipeline -> VarName -> Pipeline
 removeVar pl v = pl{plVars = M.delete v (plVars pl)}
+
+
+-- variable used in RHS of action
+-- calculate all actions where this variable was last assigned
+-- if there's more than one, give up
+-- check if the RHS of the assigning action could be modified along the path
+-- if yes, give up; otherwise, substitute RHS
+
 
 --nodeRemoveVar :: VarName -> Node -> Node
 --nodeRemoveVar v (Fork r vs b)       = Fork r vs $ bbRemoveVar v b
