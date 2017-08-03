@@ -28,7 +28,7 @@ import Data.Text.Lazy(Text)
 import Data.List
 import Data.Maybe
 import Control.Monad
-import Debug.Trace
+--import Debug.Trace
 
 import Util
 import Ops
@@ -156,28 +156,28 @@ instance Show BB where
 bbVars :: BB -> [VarName]
 bbVars (BB as _) = nub $ concatMap actionVars as
 
-data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodeBB::BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
-          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodeThen :: BB, nodeElse :: BB}
+data Node = Fork   {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: Pipeline, nodeBB::BB}  -- list of vars fork condition depends on (prevents these var from being optimized away)
+          | Lookup {nodeRel :: RelName, nodeDeps :: [VarName], nodePL :: Pipeline, nodeThen :: BB, nodeElse :: BB}
           | Cond   {nodeConds :: [(Expr, BB)]}
           | Par    {nodeBBs :: [BB]}
 
 mapBB :: (BB -> BB) -> Node -> Node
-mapBB f (Fork r vs bb)        = Fork r vs $ f bb
-mapBB f (Lookup r vs bb1 bb2) = Lookup r vs (f bb1) (f bb2)
-mapBB f (Cond cs)             = Cond $ map (mapSnd f) cs
-mapBB f (Par bs)              = Par $ map f bs
+mapBB f (Fork r vs pl bb)        = Fork r vs pl $ f bb
+mapBB f (Lookup r vs pl bb1 bb2) = Lookup r vs pl (f bb1) (f bb2)
+mapBB f (Cond cs)                = Cond $ map (mapSnd f) cs
+mapBB f (Par bs)                 = Par $ map f bs
 
 nodeVars :: Node -> [VarName]
-nodeVars (Fork _ vs b)       = nub $ vs ++ bbVars b
-nodeVars (Lookup _ vs b1 b2) = nub $ vs ++ bbVars b1 ++ bbVars b2
-nodeVars (Cond cs)           = nub $ concatMap (\(c,b) -> exprVars c ++ bbVars b) cs 
-nodeVars (Par bs)            = nub $ concatMap bbVars bs
+nodeVars (Fork _ vs _ b)       = nub $ vs ++ bbVars b
+nodeVars (Lookup _ vs _ b1 b2) = nub $ vs ++ bbVars b1 ++ bbVars b2
+nodeVars (Cond cs)             = nub $ concatMap (\(c,b) -> exprVars c ++ bbVars b) cs 
+nodeVars (Par bs)              = nub $ concatMap bbVars bs
 
 instance PP Node where 
-    pp (Fork t vs b)       = ("fork(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp b)
-    pp (Lookup t vs th el) = ("lookup(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
-    pp (Cond cs)           = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
-    pp (Par bs)            = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
+    pp (Fork t vs _ b)       = ("fork(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp b)
+    pp (Lookup t vs _ th el) = ("lookup(" <> pp t <> ")[" <> (hsep $ punctuate comma $ map pp vs) <> "]") $$ (nest' $ pp th) $$ "default" $$ (nest' $ pp el)
+    pp (Cond cs)             = "cond" $$ (vcat $ map (\(c,b) -> (nest' $ pp c <> ":" <+> pp b)) cs)
+    pp (Par bs)              = "par" $$ (vcat $ map (\b -> (nest' $ ":" <+> pp b)) bs)
 
 instance Show Node where
     show = render . pp 
@@ -212,12 +212,12 @@ data CFGCtx = CtxNode       {ctxNode :: NodeId}
 ctxSuc :: CFG -> CFGCtx -> [CFGCtx]
 ctxSuc cfg ctx =
     case ctx of
-         CtxNode       nd                                                                  ->
+         CtxNode       nd ->
              case node of 
-                  Fork _ _ b     -> bbEntry (CtxFork nd) b
-                  Lookup _ _ t e -> nub $ bbEntry (CtxLookupThen nd) t ++ bbEntry (CtxLookupDef nd) e
-                  Cond cs        -> nub $ concat $ mapIdx (\(_, b) i -> bbEntry (CtxCond nd i) b) cs
-                  Par bs         -> nub $ concat $ mapIdx (\b i -> bbEntry (CtxPar nd i) b) bs
+                  Fork _ _ _ b     -> bbEntry (CtxFork nd) b
+                  Lookup _ _ _ t e -> nub $ bbEntry (CtxLookupThen nd) t ++ bbEntry (CtxLookupDef nd) e
+                  Cond cs          -> nub $ concat $ mapIdx (\(_, b) i -> bbEntry (CtxCond nd i) b) cs
+                  Par bs           -> nub $ concat $ mapIdx (\b i -> bbEntry (CtxPar nd i) b) bs
          CtxFork       nd a   | (a+1) < (length $ bbActions $ nodeBB node)                 -> [CtxFork nd (a+1)]
                               | otherwise                                                  -> bbSuc $ nodeBB node
          CtxLookupThen nd a   | (a+1) < (length $ bbActions $ nodeThen node)               -> [CtxLookupThen nd (a+1)]
@@ -253,11 +253,11 @@ nodePre :: CFG -> NodeId -> [CFGCtx]
 nodePre cfg nd = nub $ concatMap nodePre' $ G.pre cfg nd
     where nodePre' :: G.Node -> [CFGCtx]
           nodePre' nd' = case fromJust $ G.lab cfg nd' of
-                              Fork _ _ b     -> bbExit nd' (CtxFork nd') b
-                              Lookup _ _ t e -> nub $ (if bbNext t == Goto nd then bbExit nd' (CtxLookupThen nd') t else []) ++ 
-                                                      (if bbNext e == Goto nd then bbExit nd' (CtxLookupDef nd') e else [])
-                              Cond cs        -> nub $ concat $ mapIdx (\(_, b) i -> if bbNext b == Goto nd then bbExit nd' (CtxCond nd' i) b else []) cs
-                              Par bs         -> nub $ concat $ mapIdx (\b i -> if bbNext b == Goto nd then bbExit nd' (CtxPar nd' i) b else []) bs
+                              Fork _ _ _ b     -> bbExit nd' (CtxFork nd') b
+                              Lookup _ _ _ t e -> nub $ (if bbNext t == Goto nd then bbExit nd' (CtxLookupThen nd') t else []) ++ 
+                                                        (if bbNext e == Goto nd then bbExit nd' (CtxLookupDef nd') e else [])
+                              Cond cs          -> nub $ concat $ mapIdx (\(_, b) i -> if bbNext b == Goto nd then bbExit nd' (CtxCond nd' i) b else []) cs
+                              Par bs           -> nub $ concat $ mapIdx (\b i -> if bbNext b == Goto nd then bbExit nd' (CtxPar nd' i) b else []) bs
 
 bbExit :: NodeId -> (Int -> CFGCtx) -> BB -> [CFGCtx]
 bbExit nd f (BB as _) | length as > 0 = [f $ length as - 1]
@@ -296,18 +296,19 @@ ctxAction cfg ctx =
          CtxPar        _ b a -> (bbActions $ (nodeBBs node) !! b) !! a
     where node = fromJust $ G.lab cfg $ ctxNode ctx
 
-cfgMapCtxM :: (Monad m) => (CFGCtx -> m (Maybe Action)) -> CFG -> m CFG
-cfgMapCtxM f cfg = foldM (nodeMapCtxM f) cfg $ G.nodes cfg
+cfgMapCtxM :: (Monad m) => (NodeId -> Node -> Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> m CFG
+cfgMapCtxM g f cfg = foldM (nodeMapCtxM g f) cfg $ G.nodes cfg
 
-nodeMapCtxM :: (Monad m) => (CFGCtx -> m (Maybe Action)) -> CFG -> G.Node -> m CFG
-nodeMapCtxM f cfg nd = do
+nodeMapCtxM :: (Monad m) => (NodeId -> Node -> Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> G.Node -> m CFG
+nodeMapCtxM g f cfg nd = do
     let (Just (pre, _, node, suc), cfg_) = G.match nd cfg
-    node' <- case node of
-                  Fork t vs b       -> (liftM $ Fork t vs) $ bbMapCtxM f (CtxFork nd) b
-                  Lookup t vs th el -> (liftM2 $ Lookup t vs) (bbMapCtxM f (CtxLookupThen nd) th) (bbMapCtxM f (CtxLookupDef nd) el)
-                  Cond cs           -> liftM Cond $ mapIdxM (\(c,b) i -> liftM (c,) $ bbMapCtxM f (CtxCond nd i) b) cs
-                  Par bs            -> liftM Par $ mapIdxM (\b i -> bbMapCtxM f (CtxPar nd i) b) bs
-    return $ (pre, nd, node', suc) G.& cfg_
+        node' = g nd node
+    node'' <- case node' of
+                   Fork t vs pl b       -> (liftM $ Fork t vs pl) $ bbMapCtxM f (CtxFork nd) b
+                   Lookup t vs pl th el -> (liftM2 $ Lookup t vs pl) (bbMapCtxM f (CtxLookupThen nd) th) (bbMapCtxM f (CtxLookupDef nd) el)
+                   Cond cs              -> liftM Cond $ mapIdxM (\(c,b) i -> liftM (c,) $ bbMapCtxM f (CtxCond nd i) b) cs
+                   Par bs               -> liftM Par $ mapIdxM (\b i -> bbMapCtxM f (CtxPar nd i) b) bs
+    return $ (pre, nd, node'', suc) G.& cfg_
 
 bbMapCtxM :: (Monad m) => (CFGCtx -> m (Maybe Action)) -> (Int -> CFGCtx) -> BB -> m BB
 bbMapCtxM f fctx (BB as nxt) = do

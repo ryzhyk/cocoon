@@ -43,7 +43,8 @@ pass pl = do
     pl1 <- optStraightLine pl
     pl2 <- optUnusedAssigns pl1
     pl3 <- optUnusedVars pl2
-    return pl3
+    pl4 <- optVarSubstitute pl3
+    return pl4
 
 
 -- Merge nodes that contain straight-line code with predecessors
@@ -96,7 +97,7 @@ optUnusedAssigns pl = do
                                     _                          -> False
                   used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
         f' _ a                              = return $ Just a
-    cfg' <- cfgMapCtxM f (plCFG pl)
+    cfg' <- cfgMapCtxM (\_ node -> node) f (plCFG pl)
     return pl{plCFG = cfg'}
 
 actionRHSVars :: Action -> [VarName]
@@ -117,6 +118,32 @@ optUnusedVars pl = do
 
 removeVar :: Pipeline -> VarName -> Pipeline
 removeVar pl v = pl{plVars = M.delete v (plVars pl)}
+
+optVarSubstitute :: Pipeline -> State Bool Pipeline
+optVarSubstitute pl = return pl
+
+-- Substitute variable values
+--optVarSubstitute :: Pipeline -> State Bool Pipeline
+--optVarSubstitute pl@Pipeline{..} = do
+--    cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) f plCFG
+--    return pl{plCFG = cfg'}
+--
+--varSubstNode :: CFG -> G.Node -> Node -> Node
+--varSubstNode cfg nd node = 
+--    let vars = 
+--        substs = mapMaybe findSubstitution
+--        apply substitutions
+--
+--varSubstAction :: CFG -> CFGCtx -> Maybe Action 
+--varSubstAction cfg nd node = 
+--    let vars = actionRHSVars 
+--        substs = mapMaybe findSubstitution
+--        apply substitutions
+
+
+--iterate over contexts
+--iterate over RHS variables
+--backwards search for where the variable has been assigned
 
 
 -- variable used in RHS of action

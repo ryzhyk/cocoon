@@ -18,10 +18,11 @@ function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
 typedef Packet = eth_pkt_t
 
-typedef eth_pkt_t = EtherPacket { src  : mac_addr_t
-                                , dst  : mac_addr_t
-                                , vlan : vlan_t
-                                , l3   : l3_pkt_t}
+typedef eth_pkt_t = EtherPacket { portnum : bit<16>
+                                , src     : mac_addr_t
+                                , dst     : mac_addr_t
+                                , vlan    : vlan_t
+                                , l3      : l3_pkt_t}
 
 typedef vlan_t = VLANNone
                | VLAN { pcp : bit<3>

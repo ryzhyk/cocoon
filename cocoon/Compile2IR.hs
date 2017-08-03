@@ -75,10 +75,14 @@ compilePort' role@Role{..} = do
          Right _  -> return ()
 
     let rel = getRelation ?r roleTable
+    plvars <- gets (M.keys . I.plVars)
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
-    --let c = I.EBinOp Eq (I.ECol "portnum") (I.EPktField "portnum")
+    pl <- get
+    let c = eBinOp Eq (eField (eVar roleKey) "portnum") (eField ePacket "portnum")
+    let (cdeps, cpl) = exprDeps vars (CtxRole role) c pl
+        cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
-    updateNode entrynd (I.Lookup (name rel) [] (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+    updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     -- TODO: optimize 
 
 compileExpr :: (?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
@@ -135,9 +139,10 @@ compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     --let c' = mkScalarExpr vars' (CtxForkCond e ctx) c
     pl <- get
-    let cdeps = (exprDeps vars' (CtxForkCond e ctx) c pl) `intersect` plvars
+    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) c pl
+        cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b
-    updateNode entrynd (I.Fork t cdeps $ I.BB asns $ I.Goto entryndb) [entryndb]
+    updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 
 compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
@@ -147,13 +152,14 @@ compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     --let c' = mkScalarExpr vars' (CtxWithCond e ctx) c
     pl <- get
-    let cdeps = (exprDeps vars' (CtxWithCond e ctx) c pl) `intersect` plvars
+    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) c pl
+        cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case md of
          Just d -> do
              (entryndd, _) <- compileExpr vars (CtxWithDef e ctx) exitnd d
-             updateNode entrynd (I.Lookup t cdeps (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
-         Nothing -> updateNode entrynd (I.Lookup t cdeps (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
+             updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB asns $ I.Goto entryndd)) [entryndb, entryndd]
+         Nothing -> updateNode entrynd (I.Lookup t cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
     return vars
 
 compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
@@ -203,15 +209,20 @@ compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitn
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Pipeline -> [I.VarName]
-exprDeps vars ctx e pl = 
-    (nub $ concatMap nodeVars $ map snd $ G.labNodes $ G.nfilter (>= entry) $ I.plCFG pl'')
-     `intersect` (M.keys $ I.plVars pl)
+exprDeps :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
+exprDeps vars ctx e pl = (deps, pl'')
     where (entry, pl') = runState (exprDeps' vars ctx e) pl
           -- isolate subgraph that computes e only
           cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
           -- optimize to eliminate unused variables
           pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
+          -- all variables occurring in the expression
+          evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG pl''
+          -- variables 
+          deps = evars `intersect` (M.keys $ I.plVars pl)
+          -- new variables declared in the expression
+          --evars' = I.plVars pl'' M.\\ I.plVars pl
+
 
 exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do
