@@ -28,6 +28,7 @@ import Data.Text.Lazy(Text)
 import Data.List
 import Data.Maybe
 import Control.Monad
+import Data.Functor.Identity
 --import Debug.Trace
 
 import Util
@@ -84,6 +85,16 @@ instance PP Expr where
 instance Show Expr where
     show = render . pp
 
+exprMap :: (Expr -> Expr) -> Expr -> Expr
+exprMap f e@EPktField{}       = f e
+exprMap f e@EVar{}            = f e
+exprMap f e@ECol{}            = f e
+exprMap f   (ESlice e h l)    = f $ ESlice (exprMap f e) h l
+exprMap f e@EBool{}           = f e
+exprMap f e@EBit{}            = f e
+exprMap f   (EBinOp op e1 e2) = f $ EBinOp op (exprMap f e1) (exprMap f e2)
+exprMap f   (EUnOp op e)      = f $ EUnOp op $ exprMap f e
+
 exprVars :: Expr -> [VarName]
 exprVars e = nub $ exprVars' e
 
@@ -95,6 +106,18 @@ exprVars' (EBool _)         = []
 exprVars' (EBit _ _)        = []
 exprVars' (EBinOp _ e1 e2)  = exprVars' e1 ++ exprVars' e2
 exprVars' (EUnOp _ e)       = exprVars' e
+
+exprAtoms :: Expr -> [Expr]
+exprAtoms e = nub $ exprAtoms' e
+
+exprAtoms' e@EPktField{}      = [e]
+exprAtoms' e@EVar{}           = [e]
+exprAtoms' e@ECol{}           = [e]
+exprAtoms'   (ESlice e _ _)   = exprAtoms' e
+exprAtoms'   EBool{}          = []
+exprAtoms'   EBit{}           = []
+exprAtoms'   (EBinOp _ e1 e2) = exprAtoms' e1 ++ exprAtoms' e2
+exprAtoms'   (EUnOp _ e)      = exprAtoms' e
 
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)
@@ -296,13 +319,16 @@ ctxAction cfg ctx =
          CtxPar        _ b a -> (bbActions $ (nodeBBs node) !! b) !! a
     where node = fromJust $ G.lab cfg $ ctxNode ctx
 
-cfgMapCtxM :: (Monad m) => (NodeId -> Node -> Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> m CFG
+cfgMapCtxM :: (Monad m) => (NodeId -> Node -> m Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> m CFG
 cfgMapCtxM g f cfg = foldM (nodeMapCtxM g f) cfg $ G.nodes cfg
 
-nodeMapCtxM :: (Monad m) => (NodeId -> Node -> Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> G.Node -> m CFG
+cfgMapCtx :: (NodeId -> Node -> Node) -> (CFGCtx -> (Maybe Action)) -> CFG -> CFG
+cfgMapCtx g f cfg = runIdentity $ cfgMapCtxM (\nd node -> return $ g nd node) (\ctx -> return $ f ctx) cfg
+
+nodeMapCtxM :: (Monad m) => (NodeId -> Node -> m Node) -> (CFGCtx -> m (Maybe Action)) -> CFG -> G.Node -> m CFG
 nodeMapCtxM g f cfg nd = do
     let (Just (pre, _, node, suc), cfg_) = G.match nd cfg
-        node' = g nd node
+    node' <- g nd node
     node'' <- case node' of
                    Fork t vs pl b       -> (liftM $ Fork t vs pl) $ bbMapCtxM f (CtxFork nd) b
                    Lookup t vs pl th el -> (liftM2 $ Lookup t vs pl) (bbMapCtxM f (CtxLookupThen nd) th) (bbMapCtxM f (CtxLookupDef nd) el)

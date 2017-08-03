@@ -15,7 +15,7 @@ limitations under the License.
 -}
 
 
-{-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, FlexibleContexts #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, FlexibleContexts, LambdaCase #-}
 
 module IROptimize(optimize) where
  
@@ -97,7 +97,7 @@ optUnusedAssigns pl = do
                                     _                          -> False
                   used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
         f' _ a                              = return $ Just a
-    cfg' <- cfgMapCtxM (\_ node -> node) f (plCFG pl)
+    cfg' <- cfgMapCtxM (\_ node -> return node) f (plCFG pl)
     return pl{plCFG = cfg'}
 
 actionRHSVars :: Action -> [VarName]
@@ -119,19 +119,95 @@ optUnusedVars pl = do
 removeVar :: Pipeline -> VarName -> Pipeline
 removeVar pl v = pl{plVars = M.delete v (plVars pl)}
 
-optVarSubstitute :: Pipeline -> State Bool Pipeline
-optVarSubstitute pl = return pl
-
 -- Substitute variable values
---optVarSubstitute :: Pipeline -> State Bool Pipeline
---optVarSubstitute pl@Pipeline{..} = do
---    cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) f plCFG
---    return pl{plCFG = cfg'}
---
---varSubstNode :: CFG -> G.Node -> Node -> Node
---varSubstNode cfg nd node = 
---    let vars = 
---        substs = mapMaybe findSubstitution
+optVarSubstitute :: Pipeline -> State Bool Pipeline
+optVarSubstitute pl@Pipeline{..} = do
+    cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) plCFG
+    return pl{plCFG = cfg'}
+
+varSubstNode :: CFG -> NodeId -> Node -> State Bool Node
+varSubstNode cfg nd node = do
+    let -- variables that occur in the node
+        vars = case node of
+                    Fork _ vs _ _     -> vs
+                    Lookup _ vs _ _ _ -> vs
+                    Cond cs           -> nub $ concatMap (exprVars . fst) cs
+                    Par bs            -> []
+        substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg (CtxNode nd) v) vars
+        -- apply substitutions
+        node' = foldl' (\node_ (v, e) -> 
+                         case node_ of
+                              Fork{..}   -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = plSubstVar nodePl v e}
+                              Lookup{..} -> node_{nodeDeps = (nodeDeps \\ [v]) `union` exprVars e, nodePL = plSubstVar v e nodePl}
+                              Cond{..}   -> node_{nodeConds = map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds}
+                              Par{}      -> error "IROptimize.varSubstNode Par") 
+                       substs node
+    when (not $ null subst) $ put True
+    return node'
+
+varSubstAction :: CFG -> CFGCtx -> State Bool (Maybe Action)
+varSubstAction cfg ctx = do
+    let act = ctxAction cfg ctx
+        -- variables in RHS of the action
+        vars = case act of
+                    ASet     _ r  -> exprVars r
+                    APut     _ es -> nub $ concatMap exprVars es
+                    ADelete  _ c  -> exprVars c
+        substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg (CtxNode nd) v) vars
+        -- apply substitutions
+        node' = foldl' (\act_ (v, e) -> 
+                         case act_ of
+                              ASet     l r  -> Just $ ASet l $ exprSubstVar v e r
+                              APut     t es -> Just $ APut t $ map (exprSubstVar v e) es
+                              ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c)
+                       substs act
+    when (not $ null subst) $ put True
+    return node'
+
+findSubstitution :: CFG -> CFGCtx -> Var -> Maybe Expr
+findSubstitution cfg ctx v = 
+    -- first pass search for a unique predecessor node that assigns v
+    case ctxSearchBackward cfg ctx match1 abort1 of
+         [ctx'] -> let ASet _ r = ctxAction cfg ctx'
+                       as = exprAtoms r in
+                   -- search for intermediate assignements to variables in r
+                   case ctxSearchBackward cfg ctx (match2 as) (abort2 ctx') of
+                        []                      -> Just r
+                        [ctx''] | ctx'' == ctx' -> Just r
+                        _                       -> Nothing
+         _     -> Nothing
+    where
+    match1 CtxNode{} = False
+    match1 ctx_ = case ctxAction cfg ctx_ of
+                       ASet l _  | l == EVar v -> True
+                       _                       -> False
+    abort1 _ = False
+
+    match2 _  CtxNode{} = False
+    match2 as ctx_ = case ctxAction cfg ctx_ of
+                          ASet l _ | (not $ null $ exprAtoms l `intersect` as) -> True
+                          _                    -> False
+    abort2 ctx' ctx_ = ctx' == ctx_
+
+exprSubstVar :: VarName -> Expr -> Expr -> Expr
+exprSubstVar v e' e = exprMap (\case 
+                                EVar v' | v' == v -> e'
+                                x                 -> x) e
+
+plSubstVar :: VarName -> Expr -> Pipeline -> Pipeline
+plSubstVar pl v e = pl{plCFG = cfg'}
+    where
+    cfg' = cfgMapCtx g f $ plCFG pl
+    g :: NodeId -> Node -> Node 
+    -- only Cond and Par nodes occur in filter expressions
+    g _   Cond{..} = Cond $ map (\(c,b) -> exprSubstVar v e c) nodeConds
+    g _ n@Par{}    = n
+    f :: CFGCtx -> Maybe Action
+    f ctx = case ctxAction cfg ctx of
+                 ASet     l r  -> Just $ ASet (exprSubstVar v e l) (exprSubstVar v e r)
+                 APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
+                 ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
+
 --        apply substitutions
 --
 --varSubstAction :: CFG -> CFGCtx -> Maybe Action 
