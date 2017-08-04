@@ -29,7 +29,6 @@ import Data.Maybe
 --import Data.Text.Lazy (unpack)
 
 import IR
-import Ops
 
 optimize :: Int -> Pipeline -> Pipeline
 optimize p pl | modified  = optimize (p+1) pl'
@@ -269,7 +268,7 @@ mergeCond cfg nto n = (pre', nto, Cond csto', suc' ++ suc) G.& cfg2
           (Just (pre', _, Cond csto, suc'), cfg2) = G.match nto cfg1
           csto' = concatMap (\(c', b') -> if bbNext b' /= Goto n
                                              then [(c',b')]
-                                             else map (\(c,b) -> (EBinOp And c' c, BB (bbActions b' ++ bbActions b) (bbNext b))) cs) csto
+                                             else map (\(c,b) -> (conj[c', c], BB (bbActions b' ++ bbActions b) (bbNext b))) cs) csto
           
 --nodeRemoveVar :: VarName -> Node -> Node
 --nodeRemoveVar v (Fork r vs b)       = Fork r vs $ bbRemoveVar v b

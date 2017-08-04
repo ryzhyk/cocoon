@@ -178,6 +178,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EDelete _ t c)) = do
     return vars
  
 compileExprAt vars ctx entrynd exitnd (E e@(EMatch _ m cs)) = do
+    let csext = cs ++ if (fst (last cs) == ePHolder) then [] else [(ePHolder, eDrop)]
     cs' <- mapIdxM (\(c, a) i -> do entrya_ <- allocNode
                                     vars' <- foldM (\_vars (v, t) -> do 
                                                      (vars', _) <- declVar _vars v t entrya_
@@ -187,7 +188,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EMatch _ m cs)) = do
                                     let (c', asns) = mkMatchCond vars' (CtxMatchPat e ctx i) m c
                                     updateNode entrya_ (I.Par [I.BB asns $ I.Goto entrya]) [entrya]
                                     return (c', entrya_))
-                   cs 
+                   csext
     updateNode entrynd (I.Cond $ map (\(c,entry) -> (c, I.BB [] $ I.Goto entry)) cs') $ map snd cs'
     return vars
 
