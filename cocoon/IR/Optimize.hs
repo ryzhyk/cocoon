@@ -17,7 +17,7 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, FlexibleContexts, LambdaCase #-}
 
-module IROptimize(optimize) where
+module IR.Optimize(optimize) where
  
 import qualified Data.Graph.Inductive as G 
 import qualified Data.Map as M
@@ -28,7 +28,7 @@ import Data.Maybe
 --import System.IO.Unsafe
 --import Data.Text.Lazy (unpack)
 
-import IR
+import IR.IR
 
 optimize :: Int -> Pipeline -> Pipeline
 optimize p pl | modified  = optimize (p+1) pl'

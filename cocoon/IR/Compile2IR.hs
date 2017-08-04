@@ -16,7 +16,7 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings #-}
 
-module Compile2IR (compilePort) where
+module IR.Compile2IR (compilePort) where
 
 import Data.List
 import Data.Maybe
@@ -36,8 +36,8 @@ import Expr
 import Name
 import Type
 import Validate
-import qualified IR         as I
-import qualified IROptimize as I
+import qualified IR.IR       as I
+import qualified IR.Optimize as I
 
 type CompileState a = State I.Pipeline a
 type VMap = M.Map String String

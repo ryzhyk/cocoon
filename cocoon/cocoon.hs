@@ -37,9 +37,9 @@ import CLI
 import Syntax
 import Name
 import Refine
-import qualified IR         as IR
-import qualified Compile2IR as IR
-import qualified IROptimize as IR
+import qualified IR.IR         as IR
+import qualified IR.Compile2IR as IR
+import qualified IR.Optimize   as IR
 
 data TOption = CCN String
              | Action String

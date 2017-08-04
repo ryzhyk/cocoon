@@ -18,7 +18,7 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, OverloadedStrings, RecordWildCards, TupleSections #-}
 
-module IR where
+module IR.IR where
  
 import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
