@@ -98,26 +98,12 @@ optUnusedAssigns pl = do
                   var (ESlice e _ _) = var e
                   var _              = Nothing
                   Just v = mvar
-                  match (CtxNode nd) = case node of
-                                            Fork{}   -> elem v $ nodeDeps node
-                                            Lookup{} -> elem v $ nodeDeps node
-                                            Cond{}   -> elem v $ concatMap (exprVars . fst) $ nodeConds node
-                                            Par{}    -> False
-                                       where node = fromJust $ G.lab (plCFG pl) nd
-                  match ctx' = elem v $ actionRHSVars $ ctxAction (plCFG pl) ctx'
-                  abort CtxNode{} = False
-                  abort ctx' = case ctxAction (plCFG pl) ctx' of
-                                    ASet (EVar v') _ | v' == v -> True
-                                    _                          -> False
+                  match ctx' = elem v $ ctxRHSVars (plCFG pl) ctx' 
+                  abort ctx' = ctxAssignsFullVar (plCFG pl) v ctx'
                   used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
         f' _ a                              = return $ Just a
     cfg' <- cfgMapCtxM (\_ node -> return node) f (plCFG pl)
     return pl{plCFG = cfg'}
-
-actionRHSVars :: Action -> [VarName]
-actionRHSVars (ASet _ e2)   = exprVars e2
-actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
-actionRHSVars (ADelete _ c) = exprVars c
 
 -- Remove unused variables
 optUnusedVars :: Pipeline -> State Bool Pipeline
@@ -163,11 +149,7 @@ varSubstNode cfg nd node = do
 varSubstAction :: CFG -> CFGCtx -> State Bool (Maybe Action)
 varSubstAction cfg ctx = do
     let act = ctxAction cfg ctx
-        -- variables in RHS of the action
-        vars = case act of
-                    ASet     _ r  -> exprVars r
-                    APut     _ es -> nub $ concatMap exprVars es
-                    ADelete  _ c  -> exprVars c
+        vars = actionRHSVars act
         substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) vars
         -- apply substitutions
         act' = foldl' (\act_ (v, e) -> 
@@ -199,9 +181,8 @@ findSubstitution cfg ctx v =
          _     -> Nothing
     where
     match1 CtxNode{} = False
-    match1 ctx_ = case ctxAction cfg ctx_ of
-                       ASet l _  | l == EVar v -> True
-                       _                       -> False
+    match1 ctx_ = ctxAssignsFullVar cfg v ctx_
+
     abort1 _ = False
 
     match2 _  CtxNode{} = False
@@ -270,27 +251,10 @@ mergeCond cfg nto n = (pre', nto, Cond csto', suc' ++ suc) G.& cfg2
                                              then [(c',b')]
                                              else map (\(c,b) -> (conj[c', c], BB (bbActions b' ++ bbActions b) (bbNext b))) cs) csto
           
---nodeRemoveVar :: VarName -> Node -> Node
---nodeRemoveVar v (Fork r vs b)       = Fork r vs $ bbRemoveVar v b
---nodeRemoveVar v (Lookup r vs b1 b2) = Lookup r vs (bbRemoveVar v b1) (bbRemoveVar v b2)
---nodeRemoveVar v (Cond cs)           = Cond $ map (\(e, b) -> (e, bbRemoveVar v b)) cs
---nodeRemoveVar v (Par bs)            = Par $ map (bbRemoveVar v) bs
---
---bbRemoveVar :: VarName -> BB -> BB
---bbRemoveVar v (BB as nxt) = BB (filter (not . actionAssignsVar v) as) nxt
---
---actionAssignsVar :: VarName -> Action -> Bool
---actionAssignsVar v (ASet e _) = trace (if res then (show e ++ " assigns " ++ v) else (show e ++ " does not assign " ++ v)) res
---    where isvslice (EVar v')       = v' == v
---          isvslice (ESlice e' _ _) = isvslice e'
---          isvslice _               = False
---          res = isvslice e
---actionAssignsVar _ _          = False
-
 -- Optimizations: 
 --     + eliminate unused variables (for example only a few vars returned by a query are used)
 --     + variable elimination by substitution
 --     * merging tables to eliminate some variables
---     * merge cascade of conditions
+--     + merge cascade of conditions
 --     + merge sequence of basic blocks
 --     * merge cascades of parallel blocks

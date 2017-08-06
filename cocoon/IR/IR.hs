@@ -153,6 +153,11 @@ actionVars (ASet e1 e2)  = nub $ exprVars e1 ++ exprVars e2
 actionVars (APut _ vs)   = nub $ concatMap exprVars vs
 actionVars (ADelete _ e) = exprVars e
 
+actionRHSVars :: Action -> [VarName]
+actionRHSVars (ASet _ e2)   = exprVars e2
+actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
+actionRHSVars (ADelete _ c) = exprVars c
+
 -- Next action descriptor
 data Next = Goto NodeId
           | Send Expr
@@ -340,10 +345,25 @@ bbMapCtxM :: (Monad m) => (CFGCtx -> m (Maybe Action)) -> (Int -> CFGCtx) -> BB 
 bbMapCtxM f fctx (BB as nxt) = do
     as' <- (liftM catMaybes) $ mapIdxM (\_ i -> f (fctx i)) as
     return $ BB as' nxt
-    
 
--- Node metadata relates pipeline nodes to 
--- original program locations
---data NodeMeta = NodeMeta C.ECtx C.Expr
---type Meta = M.Map NodeId NodeMeta
+ctxRHSVars :: CFG -> CFGCtx -> [VarName]
+ctxRHSVars cfg (CtxNode nd) =  
+    case node of
+         Fork{}   -> nodeDeps node
+         Lookup{} -> nodeDeps node
+         Cond{}   -> nub $ concatMap (exprVars . fst) $ nodeConds node
+         Par{}    -> []
+     where node = fromJust $ G.lab cfg nd
+ctxRHSVars cfg ctx = actionRHSVars $ ctxAction cfg ctx
 
+ctxAssignsFullVar :: CFG -> VarName -> CFGCtx -> Bool
+ctxAssignsFullVar _ _ CtxNode{} = False
+ctxAssignsFullVar cfg v ctx     = case ctxAction cfg ctx of
+                                       ASet (EVar v') _ | v' == v -> True
+                                       _                          -> False
+
+ctxLiveVars :: Pipeline -> CFGCtx -> [VarName]
+ctxLiveVars Pipeline{..} ctx = filter live $ M.keys plVars
+    where 
+    -- forward search for locations that use the variable, aborting when the variable is assigned
+    live var = not $ null $ ctxSearchForward plCFG ctx (elem var . ctxRHSVars plCFG) (ctxAssignsFullVar plCFG var)
