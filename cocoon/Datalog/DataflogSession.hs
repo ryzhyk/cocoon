@@ -158,7 +158,7 @@ newSession path structs funs rels = do
                               , std_in  = CreatePipe
                               , std_err = UseHandle hremote}
     (Just hin, _, _, ph) <- createProcess cproc
-    let df = DFSession { dfQ     = SMTQuery structs [] funs []
+    let df = DFSession { dfQ     = SMTQuery structs [] funs [] []
                        , dfRels  = rels
                        , dfHTo   = hin
                        , dfHFrom = hlocal

@@ -78,7 +78,7 @@ ruleBodyRels' _                          = []
 
 mkRust ::  [Struct] -> [Function] -> [Relation] -> [Rule] -> Doc
 mkRust structs funs rels rules = 
-    let ?q = SMTQuery structs [] funs [] in
+    let ?q = SMTQuery structs [] funs [] [] in
     let ?rels = rels in
     let decls = vcat $ map mkStruct structs
         logic = mkRules rules

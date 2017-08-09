@@ -79,7 +79,10 @@ printQuery q@SMTQuery{..} =
         (vcat $ map (smtpp q) smtFuncs)
         $+$
         (vcat $ mapIdx (\e i -> parens $ text "assert" 
-                                         <+> (parens $ char '!' <+> smtppExpr q Nothing e <+> text ":named" <+> text assertName <> int i)) smtExprs)
+                                         <+> (parens $ char '!' <+> smtppExpr q Nothing e <+> text ":named" <+> text assertName <> int i)) smtHard)
+        $+$
+        (vcat $ map (\(e,w) -> parens $ text "assert-soft" 
+                                        <+> (parens $ char '!' <+> smtppExpr q Nothing e) <+> text ":weight" <+> pp w) smtSoft) 
 
 instance SMTPP Var where
     smtpp q (Var n t) = parens $  "declare-const"
@@ -147,14 +150,6 @@ instance SMTPP Function where
                                     <+> smtpp q funcType
                                     <+> smtppExpr q (Just f) funcDef
 
-instance SMTPP Relation where
-    smtpp q (Relation n as) = (parens $ "declare-rel" <+> ppDisRelName n <+> (parens $ smtpp q $ TBit 64)) $$
-                              (parens $ "declare-rel" <+> ppRelName n <+> (parens $ hsep $ map (smtpp q . varType) as))
-
-instance SMTPP GroundRule where
-    smtpp q (GroundRule r as i) = parens $ "rule" <+> 
-                                  (parens $ "=>" <+> (parens $ "not" <+> (parens $ ppDisRelName r <+> smtppExpr q Nothing (EBit 64 (fromIntegral i)))) 
-                                                    <+> (smtppExpr q Nothing $ ERelPred r as))
 instance SMTPP Rule where
     smtpp q (Rule vs h b i) = (vcat $ map (\v -> parens $ "declare-var" <+> (pp $ varname $ name v) <+> smtpp q (varType v)) vs) $$
                               (parens $ "rule" <+> 

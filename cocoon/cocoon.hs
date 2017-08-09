@@ -40,6 +40,7 @@ import Refine
 import qualified IR.IR         as IR
 import qualified IR.Compile2IR as IR
 import qualified IR.Optimize   as IR
+import qualified IR.Registers  as IR
 
 data TOption = CCN String
              | Action String
@@ -163,11 +164,17 @@ main = do
                  dfpath  = workdir </> "target" </> "debug" </> basename
              mapM_ (\(rl, _, _) -> do let dotname = workdir </> addExtension (name rl) "dot"
                                       let odotname = workdir </> addExtension (addExtension (name rl) "opt") "dot"
+                                      let rdotname = workdir </> addExtension (addExtension (name rl) "reg") "dot"
                                       putStrLn dotname
                                       putStrLn odotname
-                                      let ir = IR.compilePort combined rl
+                                      let ir  = IR.compilePort combined rl
+                                          opt = IR.optimize 0 ir
+                                      reg <- case IR.allocVarsToRegisters opt IR.ovsRegFile of
+                                                  Left e -> error e
+                                                  Right x -> return x
                                       writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG ir
-                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG $ IR.optimize 0 ir)
+                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG opt
+                                      writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg)
                    $ refinePortRoles combined
              controllerStart basename dfpath logfile (confCtlPort config) combined
              controllerCLI histfile (confCtlPort config)

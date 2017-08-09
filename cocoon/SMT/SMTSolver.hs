@@ -124,6 +124,22 @@ instance PP Expr where
 instance Show Expr where
     show = render . pp
 
+(#==) e1 e2 = EBinOp Eq     e1 e2
+(#/=) e1 e2 = EBinOp Neq    e1 e2
+(#<)  e1 e2 = EBinOp Lt     e1 e2
+(#>)  e1 e2 = EBinOp Gt     e1 e2
+(#<=) e1 e2 = EBinOp Lte    e1 e2
+(#>=) e1 e2 = EBinOp Gte    e1 e2
+(#&&) e1 e2 = EBinOp And    e1 e2
+(#||) e1 e2 = EBinOp Or     e1 e2
+(#=>) e1 e2 = EBinOp Impl   e1 e2
+(#+)  e1 e2 = EBinOp Plus   e1 e2
+(#-)  e1 e2 = EBinOp Minus  e1 e2
+(#%)  e1 e2 = EBinOp Mod    e1 e2
+(#>>) e1 e2 = EBinOp ShiftR e1 e2
+(#<<) e1 e2 = EBinOp ShiftL e1 e2
+(#++) e1 e2 = EBinOp Concat e1 e2
+
 exprMap :: (Expr -> Expr) -> Expr -> Expr
 exprMap g e@(EVar _)          = g e
 exprMap g   (EApply f as)     = g $ EApply f $ map (exprMap g) as
@@ -201,7 +217,8 @@ typ _ _  e                 = error $ "SMTSolver.typ " ++ show e
 data SMTQuery = SMTQuery { smtStructs :: [Struct]
                          , smtVars    :: [Var]
                          , smtFuncs   :: [Function]
-                         , smtExprs   :: [Expr]
+                         , smtHard    :: [Expr]
+                         , smtSoft    :: [(Expr, Int)]
                          }
 
 lookupConsStruct :: SMTQuery -> String -> Maybe Struct
@@ -245,7 +262,7 @@ allSolutionsVar' solver q var =
          Just Nothing      -> []
          Just (Just model) -> case M.lookup var model of
                                    Nothing  -> allValues q $ typ q Nothing $ EVar var
-                                   Just val -> let q' = q{smtExprs = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtExprs q)}
+                                   Just val -> let q' = q{smtHard = (EUnOp Not $ EBinOp Eq (EVar var) val) : (smtHard q)}
                                                in val:(allSolutionsVar' solver q' var)
 
 solToArray :: Expr -> [Integer]
@@ -268,6 +285,6 @@ allSolutions' nfound solver q =
                  Nothing           -> error "SMTSolver.allSolutions: Failed to solve SMT query"
                  Just Nothing      -> []
                  Just (Just model) -> let emodel = foldl' (\a (v,e) -> EBinOp And a (EBinOp Eq (EVar v) e)) (EBool True) $ M.toList model
-                                          q' = q{smtExprs = (EUnOp Not emodel) : (smtExprs q)}
+                                          q' = q{smtHard = (EUnOp Not emodel) : (smtHard q)}
                                       in model : allSolutions' (nfound + 1) solver q'
 

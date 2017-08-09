@@ -44,6 +44,10 @@ data Type = TBool
           | TBit Int
           deriving (Eq)
 
+typeWidth :: Type -> Int
+typeWidth TBool    = 1
+typeWidth (TBit w) = w
+
 instance PP Type where 
     pp TBool    = "bool"
     pp (TBit w) = "bit<" <> pp w <> ">"
