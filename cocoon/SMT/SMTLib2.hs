@@ -71,7 +71,7 @@ class SMTPP a where
     smtpp :: SMTQuery -> a -> Doc
 
 printQuery :: SMTQuery -> Doc
-printQuery q@SMTQuery{..} = 
+printQuery q@SMTQuery{..} =  
         (vcat $ map (smtpp q) smtStructs)
         $+$
         (vcat $ map (smtpp q) smtVars)
@@ -104,7 +104,7 @@ instance SMTPP Struct where
                                             $ map (\(Constructor cn fs) -> parens $ pp cn <+> (hsep $ map (\(Var f t) -> parens $ pp (cn ++ f) <+> smtpp q t) fs)) cs))
 
 smtppExpr :: SMTQuery -> Maybe Function -> Expr -> Doc
-smtppExpr _ _  (EVar n)           = pp n
+smtppExpr _ _  (EVar n)           = pp $ mkIdent n
 smtppExpr q mf (EField c e f)     = parens $ text (c ++ f) <+> smtppExpr q mf e
 smtppExpr _ _  (EBool True)       = "true"
 smtppExpr _ _  (EBool False)      = "false"
@@ -115,7 +115,7 @@ smtppExpr q mf (EIsInstance c e)  = parens $ "is-" <> pp c <+> smtppExpr q mf e
 smtppExpr _ _  (EStruct c [])     = pp c
 smtppExpr q mf (EStruct c fs)     = parens (pp c <+> (hsep $ map (smtppExpr q mf) fs))
 smtppExpr q mf (EBinOp Neq e1 e2) = smtppExpr q mf $ EUnOp Not $ EBinOp Eq e1 e2
-smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtpp q op <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
+smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtppBOp q mf op e1 <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
 smtppExpr q mf (EUnOp op e)       = parens $ smtpp q op <+> smtppExpr q mf e
 smtppExpr q mf (ESlice e h l)     = parens $ (parens $ char '_' <+> text "extract" <+> int h <+> int l) <+> smtppExpr q mf e
 smtppExpr q mf (ECond cs d)       = foldr (\(c,v) e -> parens $ "ite" <+> smtppExpr q mf c <+> smtppExpr q mf v <+> e) (smtppExpr q mf d) cs
@@ -124,22 +124,31 @@ smtppExpr q mf (EApply f as)      = parens $ ppFName f <+> (hsep $ map (smtppExp
 smtppExpr _ _  (ERelPred r [])    = ppRelName r
 smtppExpr q mf (ERelPred r as)    = parens $ ppRelName r <+> (hsep $ map (smtppExpr q mf) as)
 
-instance SMTPP BOp where
-    smtpp _ Eq     = "="
-    smtpp _ Neq    = error "SMTLib2.smtpp !="
-    smtpp _ Lt     = "bvult"
-    smtpp _ Gt     = "bvugt"
-    smtpp _ Lte    = "bvule"
-    smtpp _ Gte    = "bvuge"
-    smtpp _ And    = "and"
-    smtpp _ Or     = "or"
-    smtpp _ Impl   = "=>"
-    smtpp _ Plus   = "bvadd"
-    smtpp _ Minus  = "bvsub"
-    smtpp _ ShiftR = "bvlshr"
-    smtpp _ ShiftL = "bvshl"
-    smtpp _ Mod    = "bvurem"
-    smtpp _ Concat = "concat"
+smtppBOp :: SMTQuery -> Maybe Function -> BOp -> Expr -> Doc
+smtppBOp q mf op e = 
+    case (op, t) of
+         (Eq   , _)       -> "="
+         (Lt   , TBit{})  -> "bvult"
+         (Lt   , _)       -> "<"
+         (Gt   , TBit{})  -> "bvugt"
+         (Gt   , _ )      -> ">"
+         (Lte  , TBit{})  -> "bvule"
+         (Lte  , _)       -> "<="
+         (Gte  , TBit{})  -> "bvuge"
+         (Gte  , _)       -> ">="
+         (And  , _)       -> "and"
+         (Or   , _)       -> "or"
+         (Impl , _)       -> "=>"
+         (Plus , TBit{})  -> "bvadd"
+         (Plus , _)       -> "+"
+         (Minus, TBit{})  -> "bvsub"
+         (Minus, _)       -> "-"
+         (ShiftR, TBit{}) -> "bvlshr"
+         (ShiftL, TBit{}) -> "bvshl"
+         (Mod,    TBit{}) -> "bvurem"
+         (Concat, TBit{}) -> "concat"
+         _                -> error $ "SMTLib2.smtppBOp " ++ show op ++ " " ++ show t
+    where t = typ q mf e
 
 instance SMTPP UOp where
     smtpp _ Not   = "not"

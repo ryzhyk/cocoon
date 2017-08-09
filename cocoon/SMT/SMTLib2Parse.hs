@@ -83,7 +83,7 @@ errorParser = char '(' *> symbol "error" *> (many $ noneOf ['(',')']) <* char ')
 -- Parsing solver output
 ------------------------------------------------------
 
-reservedNames   = ["model", "declare-fun", "define-fun", "forall", "BitVec", "Array", "true", "false", "as-array"]
+reservedNames   = ["model", "declare-fun", "define-fun", "forall", "BitVec", "Array", "true", "false", "as-array", "objectives"]
 reservedOpNames = ["_"]
 
 lexer  = T.makeTokenParser emptyDef { T.identStart      =  letter 
@@ -114,7 +114,10 @@ lexeme     = T.lexeme     lexer
 ident =  identifier 
      <|> char '|' *> (many $ noneOf ['|']) <* char '|' <* spaces
 
-model = catMaybes <$> (parens $ reserved "model" *> many model_decl)
+objective = optionMaybe $ isobj *> (parens $ reserved "objectives" *> parens decimal)
+    where isobj = try $ lookAhead $ char '(' *> reserved "objectives"
+
+model = catMaybes <$ objective <*> (parens $ reserved "model" *> many model_decl)
 
 model_decl :: Parsec String () (Maybe ModelDecl)
 model_decl =  try const_decl
