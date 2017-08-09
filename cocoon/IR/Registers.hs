@@ -27,6 +27,7 @@ import qualified Data.Map as M
 import Data.List
 import Data.Maybe
 import GHC.Exts
+--import Debug.Trace
 
 import Ops
 import Util
@@ -93,9 +94,9 @@ vOff v = S.EVar $ vOffName v
 
 allocRegisters :: (MonadError String me) => Pipeline -> RegisterFile -> me (M.Map VarName (Int, Int))
 allocRegisters pl@Pipeline{..} (RegisterFile regs) = 
-    case smtres of
-         Nothing       -> throwError "Register allocation failed: "
-         Just (Left _) -> throwError er
+    case mmodel of
+         Nothing       -> throwError "Register allocation failed (SMT solver terminated without producing an answer)"
+         Just Nothing  -> throwError er
          _             -> return allocation
     where 
     -- for each location, determine the set of variables live at this location
@@ -105,7 +106,7 @@ allocRegisters pl@Pipeline{..} (RegisterFile regs) =
               f ctx     = do modify $ ((ctxLiveVars pl ctx):)
                              return $ Just $ ctxAction plCFG ctx
     -- pairs of simultaneously live variables
-    pairs = nub $ concatMap (\vs -> filter (\(v1,v2) -> v1 >= v2) -- remove symmetric and redundant pairs
+    pairs = nub $ concatMap (\vs -> filter (\(v1,v2) -> v1 > v2) -- remove symmetric and redundant pairs
                                     $ (,) <$> vs <*> vs) livesets
     
     -- SMT encoding:
@@ -127,12 +128,10 @@ allocRegisters pl@Pipeline{..} (RegisterFile regs) =
                    $ M.toList plVars
 
     noOverlap = map (\(v1, v2) -> let w1 = typeWidth $ plVars M.! v1
-                                      w2 = typeWidth $ plVars M.! v2 in 
-                                  S.conj $ map (\Register{..} -> 
-                                                 (vReg v1 #== vReg v2) #=>
-                                                 ((vOff v1 #>= vOff v2 #+ int w2) #|| 
-                                                  (vOff v2 #>= vOff v1 #+ int w1)))
-                                         $ regs)
+                                      w2 = typeWidth $ plVars M.! v2
+                                  in (vReg v1 #== vReg v2) #=>
+                                     ((vOff v1 #>= (vOff v2 #+ int w2)) #|| 
+                                      (vOff v2 #>= (vOff v1 #+ int w1))))
                     $ pairs
     -- soft constraints: 
     -- + for each variable and each field that is big enough to fit this variable, 
@@ -156,10 +155,12 @@ allocRegisters pl@Pipeline{..} (RegisterFile regs) =
                    , smtSoft    = map (,1) fieldOverlap
                    }
     solver = S.newSMTLib2Solver S.z3Config
-    smtres = (S.smtGetModelOrCore solver) q
-    Just (Left core) = smtres
-    Just (Right asn) = smtres
-    er = "Register allocation failed. Unsatisfiable core: " ++ (intercalate ", " $ map (show . (hard !!)) core)
+    mmodel = (S.smtGetModel solver) q
+    mcore = (S.smtGetCore solver) q{S.smtSoft=[]}
+    Just (Just asn) = mmodel
+    er = case mcore of
+              Just (Just core) -> "Register allocation failed. Unsatisfiable core: " ++ (intercalate ", " $ map (show . (hard !!)) core)
+              _                -> "Register allocations failed and no unsatisfiable core has been produced"
     allocation = M.mapWithKey (\v _ -> let S.EInt reg = asn M.! vRegName v
                                            S.EInt off = asn M.! vOffName v
                                        in (fromInteger reg, fromInteger off)) plVars
@@ -194,9 +195,11 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                                                     Right (RegField{..}, _) -> M.insert fieldName (TBit fieldSize) vs) M.empty 
                              $ M.keys vars
     let rename :: Expr -> Expr
-        rename (EVar v) | isNothing (M.lookup v allocation) = EVar v
-                        | t == TBool                        = EBinOp Eq e (EBit 1 1)
-                        | otherwise                         = e
+        rename = exprMap rename'
+        rename' :: Expr -> Expr
+        rename' (EVar v) | isNothing (M.lookup v allocation) = EVar v
+                         | t == TBool                        = EBinOp Eq e (EBit 1 1)
+                         | otherwise                         = e
             where (rid, off) = allocation M.! v
                   t = plVars pl M.! v
                   w = typeWidth t
@@ -207,8 +210,8 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                            Right (RegField{..}, off') -> if fieldSize == w
                                                             then EVar fieldName
                                                             else ESlice (EVar fieldName) (off' + w - 1) off'
-        rename (ESlice (ESlice (EVar v) _ l) h' l') = ESlice (EVar v) (l + h') (l + l')
-        rename e = e
+        rename' (ESlice (ESlice (EVar v) _ l) h' l') = ESlice (EVar v) (l + h') (l + l')
+        rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
                          Fork t vs pl' b       -> Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f $ plCFG pl'}) b
@@ -221,4 +224,6 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                      APut    t as -> Just $ APut t (map rename as)
                      ADelete t c  -> Just $ ADelete t (rename c)
     let cfg' = cfgMapCtx g f $ plCFG pl
-    return pl{plVars = mkvars $ plVars pl, plCFG = cfg'}
+    return {-$ trace ("register allocation:\n" ++ 
+                    (concatMap (\(v,t) -> v ++ ": " ++ show t ++ " -> " ++ show (rename $ EVar v) ++ "\n") $ M.toList $ plVars pl))-}
+           $ pl{plVars = mkvars $ plVars pl, plCFG = cfg'}
