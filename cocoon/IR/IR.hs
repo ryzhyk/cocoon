@@ -35,10 +35,11 @@ import Util
 import Ops
 import PP
 
-type NodeId  = G.Node
-type VarName = String
-type RelName = String
-type ColName = String
+type NodeId    = G.Node
+type VarName   = String
+type RelName   = String
+type ColName   = String
+type FieldName = String
 
 data Type = TBool
           | TBit Int
@@ -65,7 +66,7 @@ instance Show Var where
 
 -- data Relation = Relation RelName [Var]
 
-data Expr = EPktField String
+data Expr = EPktField FieldName
           | EVar      VarName
           | ECol      ColName
           | ESlice    Expr Int Int

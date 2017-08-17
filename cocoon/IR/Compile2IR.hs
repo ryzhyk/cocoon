@@ -16,7 +16,8 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings #-}
 
-module IR.Compile2IR (compilePort) where
+module IR.Compile2IR ( compileSwitch
+                     , compilePort) where
 
 import Data.List
 import Data.Maybe
@@ -36,6 +37,7 @@ import Expr
 import Name
 import Type
 import Validate
+import Role
 import qualified IR.IR       as I
 import qualified IR.Optimize as I
 
@@ -60,6 +62,12 @@ updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from)
                                                                 cfg' = (to, nid, n, from) G.& (G.delNode nid cfg)
                                                                 cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
                                                             in I.Pipeline vs cfg'' end
+
+compileSwitch :: Refine -> Relation -> [(String, I.Pipeline)]
+compileSwitch r rel = map (\port -> (name port, compilePort r port)) ports
+    where
+    ports = filter (\role -> roleIsInPort r (name role) && portRoleSwitch r role == name rel) 
+                   $ refineRoles r
 
 compilePort :: Refine -> Role -> I.Pipeline
 compilePort r role = let ?r = r in execState (compilePort' role) (I.Pipeline M.empty G.empty 0)
@@ -133,15 +141,20 @@ compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x)))) 
     return vars
 
 compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
+    -- Transform the fork statement to drop packets that do not match
+    -- the fork condition right after fork.  This is necessary, since
+    -- our OpenFlow backend will fork a packet on every row of the table.
+    -- We still keep the condition in the Fork node, so we can use it
+    -- in optimizations.
+    let b' = eSeq (eITE (eNot c) eDrop Nothing) b
     let rel = getRelation ?r t
         cols = relCols rel
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    --let c' = mkScalarExpr vars' (CtxForkCond e ctx) c
     pl <- get
     let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) c pl
         cdeps' = cdeps `intersect` plvars
-    (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b
+    (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
     return vars
 
@@ -150,7 +163,6 @@ compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
         cols = relCols rel
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
-    --let c' = mkScalarExpr vars' (CtxWithCond e ctx) c
     pl <- get
     let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) c pl
         cdeps' = cdeps `intersect` plvars
