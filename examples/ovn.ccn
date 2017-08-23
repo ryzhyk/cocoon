@@ -5,7 +5,7 @@
    Q: Does parent port enabled status apply to child ports?
  */
 
-typedef port_id_t  = uuid_t
+typedef port_id_t  = bit<32>
 typedef mac_addr_t = bit<48>
 typedef ip4_addr_t = bit<32>
 typedef ip6_addr_t = bit<128>
@@ -83,7 +83,7 @@ typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
 typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
                                , code : bit<8> }
 
-typedef uuid_t = bit<128>
+typedef uuid_t = bit<64>
 typedef vlan_id_t = bit<12>
 
 table LocalNetwork( name: uuid_t

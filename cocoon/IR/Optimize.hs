@@ -191,27 +191,6 @@ findSubstitution cfg ctx v =
                           _                    -> False
     abort2 ctx' ctx_ = ctx' == ctx_
 
-exprSubstVar :: VarName -> Expr -> Expr -> Expr
-exprSubstVar v e' e = exprMap (\case 
-                                EVar v' | v' == v -> e'
-                                x                 -> x) e
-
-plSubstVar :: VarName -> Expr -> Pipeline -> Pipeline
-plSubstVar v e pl = pl{plCFG = cfg'}
-    where
-    cfg' = cfgMapCtx g f $ plCFG pl
-    g :: NodeId -> Node -> Node 
-    -- only Cond and Par nodes occur in filter expressions
-    g _   Cond{..} = Cond $ map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds
-    g _ n@Par{}    = n
-    g _ n          = error $ "IROptimize.plSubstVar g " ++ show n
-    f :: CFGCtx -> Maybe Action
-    f ctx = case ctxAction (plCFG pl) ctx of
-                 ASet     l r  -> Just $ ASet (exprSubstVar v e l) (exprSubstVar v e r)
-                 APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
-                 ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
-
-
 -- Merge cascades of cond nodes
 optMergeCond :: Pipeline -> State Bool Pipeline
 optMergeCond pl@Pipeline{..} = do
@@ -223,7 +202,7 @@ optMergeCond pl@Pipeline{..} = do
                                                 (Just ([(_, n')], _, _, _), _) -> 
                                                     case G.lab cfg_ n' of
                                                          Just (Cond cs') -> do
-                                                             -- and does not modify variable n depends on
+                                                             -- and does not modify variables n depends on
                                                              let vs = concatMap (exprAtoms . fst) cs
                                                                  vs' = concatMap (bbLHSAtoms . snd) 
                                                                        $ filter ((==Goto n) . bbNext . snd) cs'

@@ -16,7 +16,7 @@ limitations under the License.
 
 -- Intemediate representation for dataplane languages like OpenFlow and P4
 
-{-# LANGUAGE ImplicitParams, OverloadedStrings, RecordWildCards, TupleSections #-}
+{-# LANGUAGE ImplicitParams, OverloadedStrings, RecordWildCards, TupleSections, LambdaCase #-}
 
 module IR.IR where
  
@@ -66,14 +66,14 @@ instance Show Var where
 
 -- data Relation = Relation RelName [Var]
 
-data Expr = EPktField FieldName
-          | EVar      VarName
-          | ECol      ColName
-          | ESlice    Expr Int Int
-          | EBool     Bool
-          | EBit      Int Integer
-          | EBinOp    BOp Expr Expr
-          | EUnOp     UOp Expr
+data Expr = EPktField {exprFieldName :: FieldName}
+          | EVar      {exprVarName :: VarName}
+          | ECol      {exprColName :: ColName}
+          | ESlice    {exprArg :: Expr, exprH :: Int, exprL :: Int}
+          | EBool     {exprBoolVal :: Bool}
+          | EBit      {exprWidth :: Int, exprIntVal :: Integer}
+          | EBinOp    {exprBOp :: BOp, exprArg1 :: Expr, exprArg2 :: Expr}
+          | EUnOp     {exprUOp :: UOp, exprArg :: Expr}
           deriving (Eq)
 
 instance PP Expr where
@@ -124,6 +124,29 @@ exprAtoms'   EBit{}           = []
 exprAtoms'   (EBinOp _ e1 e2) = exprAtoms' e1 ++ exprAtoms' e2
 exprAtoms'   (EUnOp _ e)      = exprAtoms' e
 
+exprSubstVar :: VarName -> Expr -> Expr -> Expr
+exprSubstVar v e' e = exprMap (\case 
+                                EVar v' | v' == v -> e'
+                                x                 -> x) e
+
+
+cfgSubstVar :: VarName -> Expr -> CFG -> CFG
+cfgSubstVar v e cfg = cfgMapCtx g f cfg
+    where
+    g :: NodeId -> Node -> Node 
+    -- only Cond and Par nodes occur in filter expressions
+    g _   Cond{..} = Cond $ map (\(c,b) -> (exprSubstVar v e c, b)) nodeConds
+    g _ n@Par{}    = n
+    g _ n          = error $ "IR.cfgSubstVar g " ++ show n
+    f :: CFGCtx -> Maybe Action
+    f ctx = case ctxAction cfg ctx of
+                 ASet     l r  -> Just $ ASet (exprSubstVar v e l) (exprSubstVar v e r)
+                 APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
+                 ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
+
+plSubstVar :: VarName -> Expr -> Pipeline -> Pipeline
+plSubstVar v e pl = pl{plCFG = cfgSubstVar v e (plCFG pl)}
+
 conj :: [Expr] -> Expr
 conj = conj' . filter (/= EBool True)
 
@@ -139,6 +162,9 @@ disj' :: [Expr] -> Expr
 disj' []     = EBool False
 disj' [e]    = e
 disj' (e:es) = EBinOp Or e (disj' es)
+
+
+type Record = M.Map ColName Expr
 
 data Action = ASet     Expr Expr
             | APut     String [Expr]

@@ -25,7 +25,9 @@ import System.Console.GetOpt
 import Control.Exception
 import Control.Monad
 import Data.Text.Lazy (unpack)
+import OpenFlow.IR2OF
 
+import qualified Data.Graph.Inductive as G 
 import qualified Datalog.Dataflog as DL
 import qualified Datalog as DL
 import qualified Datalog.DataflogTemplate as DL
@@ -168,12 +170,15 @@ main = do
                                       putStrLn dotname
                                       putStrLn odotname
                                       let ir  = IR.compilePort combined rl
-                                          opt = IR.optimize 0 ir
+                                      writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG ir
+                                      let opt = IR.optimize 0 ir
+                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG opt
+                                      mapM_ (\(nd, node) -> case node of
+                                                                 IR.Lookup _ _ pl _ _ -> writeFile ("node" ++ show nd ++ ".dot") $ unpack $ IR.cfgToDot $ IR.plCFG pl
+                                                                 _                    -> return ()) $ G.labNodes (IR.plCFG opt)
                                       reg <- case IR.allocVarsToRegisters opt IR.ovsRegFile of
                                                   Left e -> error e
                                                   Right x -> return x
-                                      writeFile dotname $ unpack $ IR.cfgToDot $ IR.plCFG ir
-                                      writeFile odotname $ unpack $ IR.cfgToDot $ IR.plCFG opt
                                       writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg)
                    $ refinePortRoles combined
              controllerStart basename dfpath logfile (confCtlPort config) combined

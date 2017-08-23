@@ -20,41 +20,28 @@ limitations under the License.
 
 module OpenFlow.OpenFlow where
 
-import qualified Data.Map    as M
-import qualified Data.IntMap as IM
-import Data.List
-import Data.Maybe
-import Control.Monad.State
-
-import Syntax
-import Topology
-import NS
-import Name
-import Eval
-import Util
-import Pos
-import Expr
-import Type
-
 data Mask = Mask Int Integer
 
-data Value = ValIP4   Integer
-           | ValMAC48 Integer
-           | ValInt   Int Integer
+-- TODO: add format field (IP4, IP6, MAC, etc)
+data Value = Value { valWidth :: Int
+                   , valVal   :: Integer}
+                   deriving (Eq)
 
-data Field = InPort
-           | EthSrc
-           | EthDst
-           | Register String
+data Field = Field { fieldName :: String
+                   , fieldWidth :: Int}
 
 data Match = Match { matchField :: Field
                    , matchMask  :: Maybe Mask
                    , matchVal   :: Value
                    }
 
-data Expr = EField Field
-          | ESlice Expr (Int, Int)
+data Expr = EField Field (Maybe (Int, Int))
           | EVal   Value
+
+
+exprIsConst :: Expr -> Bool
+exprIsConst (EVal _) = True
+exprIsConst _        = False
 
 type HTable  = Int
 type Prio    = Int
@@ -74,6 +61,7 @@ data Flow = Flow { flowPriority :: Prio
 data GroupType = GroupAll
                | GroupIndirect
 
+type BucketId = Int
 data Bucket = Bucket (Maybe BucketId) [Action]
 
 data Group = Group GroupId GroupType [Bucket]

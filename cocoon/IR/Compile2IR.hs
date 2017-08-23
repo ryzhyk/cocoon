@@ -17,7 +17,9 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings #-}
 
 module IR.Compile2IR ( compileSwitch
-                     , compilePort) where
+                     , compilePort
+                     , (.+)
+                     , val2Record) where
 
 import Data.List
 import Data.Maybe
@@ -87,7 +89,7 @@ compilePort' role@Role{..} = do
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
     pl <- get
     let c = eBinOp Eq (eField (eVar roleKey) "portnum") (eField ePacket "portnum")
-    let (cdeps, cpl) = exprDeps vars (CtxRole role) c pl
+    let (cdeps, cpl) = exprDeps vars (CtxRole role) rel roleKey c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
@@ -152,7 +154,7 @@ compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
@@ -164,7 +166,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel v c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case md of
@@ -222,15 +224,19 @@ compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitn
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
-exprDeps vars ctx e pl = (deps, pl'')
+exprDeps :: (?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
+exprDeps vars ctx rel relvar e pl = (deps, pl''')
     where (entry, pl') = runState (exprDeps' vars ctx e) pl
           -- isolate subgraph that computes e only
           cfg' = G.nfilter (\nd -> elem nd $ G.dfs [entry] (I.plCFG pl')) $ I.plCFG pl'
           -- optimize to eliminate unused variables
           pl'' = I.optimize (-1000) $ pl{I.plEntryNode = entry, I.plCFG = cfg'}
+          -- substitute variable names with column names
+          cols = relCols rel
+          relvs = map fst $ var2Scalars relvar (relRecordType rel)
+          pl''' = foldl' (\pl_ (v,c) -> I.plSubstVar v c pl_) pl'' (zip relvs cols)
           -- all variables occurring in the expression
-          evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG pl''
+          evars = nub $ concatMap nodeVars $ map snd $ G.labNodes $ I.plCFG pl'''
           -- variables 
           deps = evars `intersect` (M.keys $ I.plVars pl)
           -- new variables declared in the expression
@@ -240,7 +246,8 @@ exprDeps vars ctx e pl = (deps, pl'')
 exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do
     -- make sure I.optimize keep variables that effect the result of e
-    -- by inserting a fake drop depending on the value of e
+    -- by inserting a fake drop depending on the value of e. 
+    -- Note: IR2OF.hs relies on this behavior
     let e' = exprModifyResult (\e_ -> eITE e_ eDrop Nothing) e
     entrynd <- allocNode
     exitnd <- allocNode
@@ -399,3 +406,13 @@ tagType cs = TBit nopos $ tagWidth cs
 
 tagVal :: [Constructor] -> String -> Integer
 tagVal cs c = fromIntegral $ fromJust $ findIndex ((== c) . name) cs
+
+val2Record :: (?r::Refine) => String -> Expr -> I.Record
+val2Record rname e@(E (EStruct{})) = M.fromList $ zip names vals
+    where
+    vals = mkExpr M.empty CtxRefine e
+    rel = getRelation ?r rname
+    names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
+val2Record _ e = error $ "Compile2IR.val2Record " ++ show e
+
+

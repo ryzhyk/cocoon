@@ -39,14 +39,14 @@ import SMT.SMTSolver ((#==), (#<), (#<=), (#>=), (#&&), (#||), (#=>), (#+))
 data RegisterFile = RegisterFile [Register]
 
 type RegName   = String
-type FieldName = String
+type RegFieldName = String
 
 data Register = Register { regName   :: RegName
                          , regSize   :: Int
                          , regFields :: [RegField]
                          }
 
-data RegField = RegField { fieldName   :: FieldName
+data RegField = RegField { fieldName   :: RegFieldName
                          , fieldSize   :: Int
                          , fieldOffset :: Int
                          }

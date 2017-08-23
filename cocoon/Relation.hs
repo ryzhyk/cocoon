@@ -20,6 +20,8 @@ module Relation (relRecordType,
                  relGraph,
                  relTypes, 
                  relFuncsRec,
+                 relIsSwitch,
+                 relPrimaryKey,
                  ruleIsRecursive) where
 
 import qualified Data.Graph.Inductive as G
@@ -81,3 +83,11 @@ relFuncTypes r rel = nub
                      $ concatMap (\f -> funcType f : (map typ $ funcArgs f) ++ (maybe [] (exprTypes r (CtxFunc f CtxRefine)) $ funcDef f))
                      $ map (getFunc r) 
                      $ relFuncsRec r rel
+
+relIsSwitch :: Relation -> Bool
+relIsSwitch Relation{..} = case relAnnotation of
+                                Just RelSwitch{} -> True
+                                _                -> False
+
+relPrimaryKey :: Relation -> Maybe [Expr]
+relPrimaryKey Relation{..} = fmap constrFields $ find isPrimaryKey relConstraints
