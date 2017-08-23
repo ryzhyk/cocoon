@@ -20,6 +20,8 @@ limitations under the License.
 
 module OpenFlow.OpenFlow where
 
+import Numeric
+
 data Mask = Mask Int Integer
 
 -- TODO: add format field (IP4, IP6, MAC, etc)
@@ -27,8 +29,15 @@ data Value = Value { valWidth :: Int
                    , valVal   :: Integer}
                    deriving (Eq)
 
+instance Show Value where
+    show (Value _ v) = showHex v ""
+
 data Field = Field { fieldName :: String
                    , fieldWidth :: Int}
+                   deriving (Eq)
+
+instance Show Field where
+    show f = fieldName f
 
 data Match = Match { matchField :: Field
                    , matchMask  :: Maybe Mask
@@ -38,6 +47,9 @@ data Match = Match { matchField :: Field
 data Expr = EField Field (Maybe (Int, Int))
           | EVal   Value
 
+instance Show Expr where
+    show (EField f msl) = show f ++ maybe "" (\(h,l) -> "[" ++ show h ++ ":" ++ show l ++ "]") msl
+    show (EVal v)       = show v
 
 exprIsConst :: Expr -> Bool
 exprIsConst (EVal _) = True

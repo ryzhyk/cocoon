@@ -56,6 +56,9 @@ instance PP BOp where
     pp ShiftL = "<<"
     pp Concat = "++"
 
+bopReturnsBool :: BOp -> Bool
+bopReturnsBool op = elem op [Eq, Neq, Lt, Gt, Lte, Gte, And, Or, Impl]
+
 instance Show BOp where
     show = render . pp
 
