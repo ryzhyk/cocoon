@@ -197,20 +197,19 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
     let rename :: Expr -> Expr
         rename = exprMap rename'
         rename' :: Expr -> Expr
-        rename' (EVar v) | isNothing (M.lookup v allocation) = EVar v
-                         | t == TBool                        = EBinOp Eq e (EBit 1 1)
-                         | otherwise                         = e
+        rename' (EVar v t) | isNothing (M.lookup v allocation) = EVar v t
+                           | t == TBool                        = EBinOp Eq e (EBit 1 1)
+                           | otherwise                         = e
             where (rid, off) = allocation M.! v
-                  t = plVars pl M.! v
                   w = typeWidth t
                   e = case field (rid, off, w) of
                            Left (Register{..}, off')  -> if regSize == w
-                                                            then EVar regName
-                                                            else ESlice (EVar regName) (off' + w - 1) off'
+                                                            then EVar regName $ TBit regSize
+                                                            else ESlice (EVar regName $ TBit regSize) (off' + w - 1) off'
                            Right (RegField{..}, off') -> if fieldSize == w
-                                                            then EVar fieldName
-                                                            else ESlice (EVar fieldName) (off' + w - 1) off'
-        rename' (ESlice (ESlice (EVar v) _ l) h' l') = ESlice (EVar v) (l + h') (l + l')
+                                                            then EVar fieldName $ TBit fieldSize
+                                                            else ESlice (EVar fieldName $ TBit fieldSize) (off' + w - 1) off'
+        rename' (ESlice (ESlice (EVar v t) _ l) h' l') = ESlice (EVar v t) (l + h') (l + l')
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of

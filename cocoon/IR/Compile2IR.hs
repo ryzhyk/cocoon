@@ -277,7 +277,7 @@ vnameAt v nd = v ++ "@" ++ show nd
 declAsnVar :: (?r::Refine) => VMap -> String -> Type -> I.NodeId -> [I.Expr] -> CompileState (VMap, [I.Action])
 declAsnVar vars vname vtype nd vals = do
     (vars', vs) <- declVar vars vname vtype nd
-    let asns = map (uncurry I.ASet) $ zip (map (I.EVar . fst) vs) vals
+    let asns = map (uncurry I.ASet) $ zip (map (uncurry I.EVar) vs) vals
     return (vars', asns)
 
 mkMatchCond :: (?r::Refine) => VMap -> ECtx -> Expr -> Expr -> (I.Expr, [I.Action])
@@ -297,7 +297,7 @@ expandPattern :: (?r::Refine) => VMap -> ECtx -> Expr -> [Maybe I.Expr]
 expandPattern vars ctx e = exprTreeFlatten $ exprFoldCtx (expandPattern' vars) ctx e
 
 expandPattern' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
-expandPattern' vars ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\_ n -> Just $ I.EVar $ ((vars M.! v) .+ n))
+expandPattern' vars ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\t n -> Just $ I.EVar ((vars M.! v) .+ n) t)
 expandPattern' _    ctx (EPHolder _)     = fields "" (exprType ?r ctx ePHolder) (\_ _ -> Nothing)
 expandPattern' _    _   (EStruct _ c fs) = ETNode $ tag ++ fls
     where TStruct _ cs = fromJust $ tdefType $ consType ?r c
@@ -317,7 +317,7 @@ mkScalarExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Expr
 mkScalarExpr vars ctx e = e' where [e'] = mkExpr vars ctx e
 
 relCols :: (?r::Refine) => Relation -> [I.Expr]
-relCols rel = exprTreeFlatten $ fields "" (relRecordType rel) $ \_ n -> I.ECol n
+relCols rel = exprTreeFlatten $ fields "" (relRecordType rel) $ \t n -> I.ECol n t
 
 var2Scalars :: (?r::Refine) => String -> Type -> [(I.VarName, I.Type)]
 var2Scalars v t = exprTreeFlatten $ fields "" t $ \t' n -> (v .+ n, t')
@@ -336,8 +336,8 @@ mkExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> [I.Expr]
 mkExpr vars ctx e = {-trace ("mkExpr " ++ show e ++ " in\n" ++ show ctx) $ -} exprTreeFlatten $ exprFoldCtx (mkExpr' vars) ctx e
 
 mkExpr' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree I.Expr) -> ExprTree I.Expr
-mkExpr' vars ctx (EVar _ v)                          = {-trace ("\n\n\n\n***************EVar " ++ show v ++ " in\n" ++ show ctx ++ "\nvars: " ++ show vars) $-} fields "" (typ $ getVar ?r ctx v) (\_ n -> I.EVar $ ((vars M.! v) .+ n))
-mkExpr' _    _   (EPacket _)                         = fields "" (fromJust $ tdefType $ getType ?r packetTypeName) (\_ n -> I.EPktField n)
+mkExpr' vars ctx (EVar _ v)                          = {-trace ("\n\n\n\n***************EVar " ++ show v ++ " in\n" ++ show ctx ++ "\nvars: " ++ show vars) $-} fields "" (typ $ getVar ?r ctx v) (\t n -> I.EVar ((vars M.! v) .+ n) t)
+mkExpr' _    _   (EPacket _)                         = fields "" (fromJust $ tdefType $ getType ?r packetTypeName) (flip I.EPktField)
 mkExpr' _    _   (EField _ (ETNode fs) f)            = fromJust $ lookup f fs
 mkExpr' _    _   (EBool _ b)                         = ETLeaf $ I.EBool b
 mkExpr' _    _   (EBit _ w v)                        = ETLeaf $ I.EBit w v
@@ -363,7 +363,7 @@ mkExpr' _   _   (EBinOp _ Neq t1 t2)                = ETLeaf $ I.disj
                                                       $ zip (exprTreeFlatten t1) (exprTreeFlatten t2)
 mkExpr' _   _   (EUnOp _ op (ETLeaf e))             = ETLeaf $ I.EUnOp op e
 mkExpr' _   _   (ETyped _ e _)                      = e
-mkExpr' _   ctx EAnon{}                             = fields "" (exprType ?r ctx eAnon) $ \_ n -> I.ECol n
+mkExpr' _   ctx EAnon{}                             = fields "" (exprType ?r ctx eAnon) $ flip I.ECol
 mkExpr' _   _   e                                   = error $ "Compile2IR.mkExpr' " ++ show e
 
 (.+) :: String -> String -> String

@@ -45,9 +45,6 @@ type IRSwitches = M.Map String IRSwitch
 -- (SwitchRelation, primary key)
 type SwitchId = (String, Integer)
 
-fieldMap :: M.Map I.FieldName O.Field
-fieldMap = undefined
-
 -- For each switch table
 --  Compute and compile all port roles
 precompile :: C.Refine -> IRSwitches
@@ -109,7 +106,8 @@ updatePort :: (String, I.Pipeline) -> SwitchId -> Delta -> [O.Command]
 updatePort (prel, pl) (_, i) db = delcmd ++ addcmd
     where
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
-    match f = mkSimpleCond M.empty $ I.EBinOp Eq (I.EPktField "portnum") (f M.! "portnum")
+    match f = let pnum = f M.! "portnum" in
+             mkSimpleCond M.empty $ I.EBinOp Eq (I.EPktField "portnum" $ I.TBit $ I.exprWidth pnum) pnum
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [mkGoto pl $ I.plEntryNode pl]) $ match f) add
 
@@ -163,13 +161,9 @@ mkAction _   a              = error $ "not implemented: IR2OF.mkAction" ++ show 
 mkExpr :: I.Record -> I.Expr -> O.Expr
 mkExpr val e = 
     case e of
-         I.EPktField f     -> case M.lookup f fieldMap of
-                                   Nothing -> error $ "IR2OF.mkExpr: unknown field: " ++ show f
-                                   Just f' -> O.EField f' Nothing
-         I.EVar      v     -> case M.lookup v fieldMap of
-                                   Nothing -> error $ "IR2OF.mkExpr: unknown variable: " ++ show v
-                                   Just v' -> O.EField v' Nothing
-         I.ECol      c     -> case M.lookup c val of
+         I.EPktField f t   -> O.EField (O.Field f $ I.typeWidth t) Nothing
+         I.EVar      v t   -> O.EField (O.Field v $ I.typeWidth t) Nothing
+         I.ECol      c _   -> case M.lookup c val of
                                    Nothing -> error $ "IR2OF.mkExpr: unknown column: " ++ show c
                                    Just v  -> mkExpr val v
          I.ESlice    x h l -> slice (mkExpr val x) h l
@@ -194,8 +188,7 @@ mkCond ((c, a):cs) = mkCond' c [([], a)] $ mkCond cs
 mkCond' :: I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
 mkCond' c yes no = 
     case c of
-         I.EBinOp Eq e1 e2 | isbool M.empty e1 
-                                       -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
+         I.EBinOp Eq e1 e2 | isbool e1 -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
                            | otherwise -> let cs' = mkMatch (mkExpr M.empty e1) (mkExpr M.empty e2)
                                           in concatMap (\c' -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches c' m)) yes) cs' ++ no
          I.EBinOp Neq e1 e2            -> mkCond' (I.EUnOp Not (I.EBinOp Eq e1 e2)) yes no
@@ -205,12 +198,13 @@ mkCond' c yes no =
          I.EBinOp And e1 e2            -> mkCond' e1 (mkCond' e2 yes no) no
          _                             -> error $ "IR2OF.mkCond': expression is not supported: " ++ show c
 
-isbool :: I.Record -> I.Expr -> Bool
-isbool _ I.EBool{}         = True
-isbool v (I.ECol c)        = isbool v $ v M.! c
-isbool _ (I.EBinOp op _ _) = bopReturnsBool op
-isbool _ (I.EUnOp Not _)   = True
-isbool _ _                 = False
+isbool :: I.Expr -> Bool
+isbool I.EBool{}               = True
+isbool (I.ECol _ I.TBool)      = True
+isbool (I.EPktField _ I.TBool) = True
+isbool (I.EBinOp op _ _)       = bopReturnsBool op
+isbool (I.EUnOp Not _)         = True
+isbool _                       = False
 
 -- TODO: use BDDs to encode arbitrary pipelines
 mkPLMatch :: I.Pipeline -> I.Record -> [[O.Match]]
@@ -229,7 +223,7 @@ mkPLMatch I.Pipeline{..} val =
 mkSimpleCond :: I.Record -> I.Expr -> [[O.Match]]
 mkSimpleCond val c = 
     case c of
-         I.EBinOp Eq e1 e2 | not (isbool val e1) 
+         I.EBinOp Eq e1 e2 | not (isbool e1) 
                                      -> mkMatch (mkExpr val e1) (mkExpr val e2)
          I.EBinOp Neq e1 e2          -> mkSimpleCond val (I.EUnOp Not (I.EBinOp Eq e1 e2))
          I.EBinOp Impl e1 e2         -> mkSimpleCond val (I.EBinOp Or (I.EUnOp Not e1) e2)

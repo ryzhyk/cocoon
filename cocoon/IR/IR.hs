@@ -66,9 +66,9 @@ instance Show Var where
 
 -- data Relation = Relation RelName [Var]
 
-data Expr = EPktField {exprFieldName :: FieldName}
-          | EVar      {exprVarName :: VarName}
-          | ECol      {exprColName :: ColName}
+data Expr = EPktField {exprFieldName :: FieldName, exprType :: Type}
+          | EVar      {exprVarName :: VarName, exprType :: Type}
+          | ECol      {exprColName :: ColName, exprType :: Type}
           | ESlice    {exprArg :: Expr, exprH :: Int, exprL :: Int}
           | EBool     {exprBoolVal :: Bool}
           | EBit      {exprWidth :: Int, exprIntVal :: Integer}
@@ -77,9 +77,9 @@ data Expr = EPktField {exprFieldName :: FieldName}
           deriving (Eq)
 
 instance PP Expr where
-    pp (EPktField f)     = "pkt." <> pp f
-    pp (EVar v)          = pp v
-    pp (ECol col)        = "." <> pp col
+    pp (EPktField f _)   = "pkt." <> pp f
+    pp (EVar v _)        = pp v
+    pp (ECol col _)      = "." <> pp col
     pp (ESlice e h l)    = pp e <> "[" <> pp h <> ":" <> pp l <> "]"
     pp (EBool True)      = "true" 
     pp (EBool False)     = "false" 
@@ -103,9 +103,9 @@ exprMap f   (EUnOp op e)      = f $ EUnOp op $ exprMap f e
 exprVars :: Expr -> [VarName]
 exprVars e = nub $ exprVars' e
 
-exprVars' (EPktField _)     = []
-exprVars' (EVar v)          = [v]
-exprVars' (ECol _)          = []
+exprVars' (EPktField _ _)   = []
+exprVars' (EVar v _)        = [v]
+exprVars' (ECol _ _)        = []
 exprVars' (ESlice e _ _)    = exprVars' e
 exprVars' (EBool _)         = []
 exprVars' (EBit _ _)        = []
@@ -126,8 +126,8 @@ exprAtoms'   (EUnOp _ e)      = exprAtoms' e
 
 exprSubstVar :: VarName -> Expr -> Expr -> Expr
 exprSubstVar v e' e = exprMap (\case 
-                                EVar v' | v' == v -> e'
-                                x                 -> x) e
+                                EVar v' _ | v' == v -> e'
+                                x                   -> x) e
 
 
 cfgSubstVar :: VarName -> Expr -> CFG -> CFG
@@ -390,8 +390,8 @@ ctxRHSVars cfg ctx = actionRHSVars $ ctxAction cfg ctx
 ctxAssignsFullVar :: CFG -> VarName -> CFGCtx -> Bool
 ctxAssignsFullVar _ _ CtxNode{} = False
 ctxAssignsFullVar cfg v ctx     = case ctxAction cfg ctx of
-                                       ASet (EVar v') _ | v' == v -> True
-                                       _                          -> False
+                                       ASet (EVar v' _) _ | v' == v -> True
+                                       _                            -> False
 
 ctxLiveVars :: Pipeline -> CFGCtx -> [VarName]
 ctxLiveVars Pipeline{..} ctx = filter live $ M.keys plVars

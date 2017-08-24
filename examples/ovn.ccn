@@ -16,7 +16,38 @@ function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
 function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
 function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
-typedef Packet = eth_pkt_t
+typedef Packet = Packet {
+ *   - NXM_OF_IN_PORT
+ *   - NXM_OF_ETH_DST
+ *   - NXM_OF_ETH_SRC
+ *   - NXM_OF_ETH_TYPE
+ *   - NXM_OF_VLAN_TCI
+ *   - NXM_OF_IP_TOS
+ *   - NXM_OF_IP_PROTO
+ *   - NXM_OF_IP_SRC
+ *   - NXM_OF_IP_DST
+ *   - NXM_OF_TCP_SRC
+ *   - NXM_OF_TCP_DST
+ *   - NXM_OF_UDP_SRC
+ *   - NXM_OF_UDP_DST
+ *   - NXM_OF_ICMP_TYPE
+ *   - NXM_OF_ICMP_CODE
+ *   - NXM_OF_ARP_OP
+ *   - NXM_OF_ARP_SPA
+ *   - NXM_OF_ARP_TPA
+ *   - NXM_NX_TUN_ID
+ *   - NXM_NX_ARP_SHA
+ *   - NXM_NX_ARP_THA
+ *   - NXM_NX_ICMPV6_TYPE
+ *   - NXM_NX_ICMPV6_CODE
+ *   - NXM_NX_ND_SLL
+ *   - NXM_NX_ND_TLL
+ *   - NXM_NX_REG(idx) for idx in the switch's accepted range.
+ *   - NXM_NX_PKT_MARK
+ *   - NXM_NX_TUN_IPV4_SRC
+ *   - NXM_NX_TUN_IPV4_DST
+
+}
 
 typedef eth_pkt_t = EtherPacket { portnum : bit<16>
                                 , src     : mac_addr_t

@@ -94,7 +94,7 @@ optUnusedAssigns pl = do
                              | otherwise      = do put True
                                                    return Nothing
             where mvar = var e1
-                  var (EVar x)       = Just x
+                  var (EVar x _)     = Just x
                   var (ESlice e _ _) = var e
                   var _              = Nothing
                   Just v = mvar
