@@ -183,7 +183,12 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
                                          "View must have at least one non-recursive rule") relDef
     case annot of
          Nothing                      -> return ()
-         Just (RelSwitch _)           -> return ()
+         Just (RelSwitch p)           -> do
+             assertR r (isJust $ relPrimaryKey rel) p $ "Relation with #switch annotation must have a primary key" 
+             assertR r ((length $ fromJust $ relPrimaryKey rel) == 1) p 
+                       $ "Relation with #switch annotation must have a primary key with a single column" 
+             assertR r (isBit r $ exprType' r (CtxRelKey rel) $ head $ fromJust $ relPrimaryKey rel) p 
+                       $ "Relation with #switch annotation must have a primary key of type bit<N>" 
          Just (RelPort p (inp, outp)) -> do
              inrole  <- checkRole p r inp
              outrole <- checkRole p r outp
