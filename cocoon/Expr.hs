@@ -38,6 +38,7 @@ module Expr ( exprMapM
             , exprIsDeterministic
             , exprSendsToRoles
             , exprSendsTo
+            , exprUsesRels
             , isLExpr
             , isLVar
             , isLRel
@@ -320,6 +321,19 @@ exprSendsTo' :: Expr -> [Expr]
 exprSendsTo' e = execState (exprTraverseM (\case
                                             ESend _ loc -> modify (loc:)
                                             _           -> return ()) e) []
+
+exprUsesRels :: Refine -> Expr -> [String]
+exprUsesRels r e = nub $ exprCollect (\case 
+                                       EWith{..}    -> [exprTable]
+                                       EAny{..}     -> [exprTable]
+                                       EFor{..}     -> [exprTable]
+                                       EFork{..}    -> [exprTable]
+                                       EPut{..}     -> [exprTable]
+                                       EDelete{..}  -> [exprTable]
+                                       ERelPred{..} -> [exprRel]
+                                       EApply{..}   -> maybe [] (exprUsesRels r) $ funcDef $ getFunc r exprFunc
+                                       _            -> [])
+                                     (++) e
 
 isLExpr :: Refine -> ECtx -> Expr -> Bool
 isLExpr r ctx e = exprFoldCtx (isLExpr' r) ctx e
@@ -612,3 +626,5 @@ exprVarRename :: (String -> String) -> Expr -> Expr
 exprVarRename f e = exprFold g e
     where g (EVar pos v) = E $ EVar pos $ f v
           g e'           = E e'
+
+

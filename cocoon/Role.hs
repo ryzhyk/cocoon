@@ -13,9 +13,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
+
+{-# LANGUAGE RecordWildCards #-}
+
 module Role ( roleSendsToRolesRec
             , roleIsInPort
             , roleIsOutPort
+            , roleUsesRels
             , portRoleSwitch) where
 
 import Data.List
@@ -43,6 +47,9 @@ roleIsInPort r rl = elem rl $ map (name . sel1) $ refinePortRoles r
 
 roleIsOutPort :: Refine -> String -> Bool
 roleIsOutPort r rl = elem rl $ map (name . sel2) $ refinePortRoles r
+
+roleUsesRels :: Refine -> Role -> [String]
+roleUsesRels r Role{..} = nub $ roleTable : exprUsesRels r roleBody
 
 portRoleSwitch :: Refine -> Role -> String
 portRoleSwitch r rl = swrole

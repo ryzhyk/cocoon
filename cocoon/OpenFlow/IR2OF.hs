@@ -18,7 +18,8 @@ limitations under the License.
 
 module OpenFlow.IR2OF( precompile
                      , buildSwitch
-                     , updateSwitch) where
+                     , updateSwitch
+                     , recordField) where
 
 import qualified Data.Graph.Inductive.Graph     as G
 import qualified Data.Graph.Inductive.Query.DFS as G
@@ -141,12 +142,15 @@ getBucketId rname f = fromInteger pkey
     where   
     rel = C.getRelation ?r rname
     Just [key] = C.relPrimaryKey rel
-    pkeyname = mkkey key
-    mkkey (C.E (C.EVar _ v))      = v
-    mkkey (C.E (C.EField _ e fl)) = mkkey e I..+ fl
-    mkkey e                       = error $ "IR2OF.mkkey " ++ show e
-    I.EBit _ pkey = f M.! pkeyname
+    I.EBit _ pkey = recordField f key
 
+recordField :: I.Record -> C.Expr -> I.Expr
+recordField rec fexpr = rec M.! fname
+    where
+    fname = mkname fexpr
+    mkname (C.E (C.EVar _ v))      = v
+    mkname (C.E (C.EField _ e fl)) = mkname e I..+ fl
+    mkname e                       = error $ "IR2OF.mkname " ++ show e
 
 mkStaticBB :: I.Pipeline -> I.BB -> [O.Action]
 mkStaticBB pl b = mkBB pl (error "IR2OF.mkStaticBB requesting field value") b

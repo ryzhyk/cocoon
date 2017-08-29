@@ -22,7 +22,8 @@ module Refine( funcGraph
              , refineRelsSorted
              , refinePortRels
              , refineSwitchRels
-             , refinePortRoles) where
+             , refinePortRoles
+             , refineAddDelta) where
 
 import Data.List
 import Data.Maybe
@@ -65,14 +66,32 @@ refineRelsSorted r = map (getRelation r) $ reverse $ G.topsort' $ relGraph r
 
 refinePortRels :: Refine -> [Relation]
 refinePortRels r = filter ((\case
-                             Just RelPort{..} -> True
-                             _                -> False) . relAnnotation) $ refineRels r
+                             Just RelPort{} -> True
+                             _              -> False) . relAnnotation) $ refineRels r
 
+-- relations with switch annotation
 refineSwitchRels :: Refine -> [Relation]
 refineSwitchRels r = filter ((\case
                              Just RelSwitch{..} -> True
                              _                  -> False) . relAnnotation) $ refineRels r 
 
 refinePortRoles :: Refine -> [(Role, Role, Relation)]
-refinePortRoles r = map (\rel@Relation{relAnnotation = Just (RelPort _ (inp, outp)), ..} -> (getRole r inp, getRole r outp, rel))
+refinePortRoles r = map (\rel@Relation{relAnnotation = Just (RelPort _ (inp, outp))} -> (getRole r inp, getRole r outp, rel))
                     $ refinePortRels r
+
+
+-- relations referenced in roles
+refineRelsUsedInRoles :: Refine -> [String]
+refineRelsUsedInRoles r = nub $ concatMap (roleUsesRels r) $ refineRoles r
+
+-- for every relation referenced in a role (whether a table or a view), add
+-- 1. Realized-state _table_ with the same columns as the primary relation, but
+--    without any rules or constraints 
+-- 2. Delta view with extra polarity column that keeps track of the
+--    difference between desired and realized state
+refineAddDelta :: Refine -> Refine
+refineAddDelta r = foldl' (\r' rname -> let (realized, delta) = relMkDelta $ getRelation r' rname
+                                        in r'{refineRels = refineRels r' ++ [realized,delta]}) 
+                   r $ refineRelsUsedInRoles r
+
+

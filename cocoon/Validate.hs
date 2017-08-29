@@ -189,6 +189,9 @@ relValidate2 r rel@Relation{relAnnotation=annot, ..} = do
                        $ "Relation with #switch annotation must have a primary key with a single column" 
              assertR r (isBit r $ exprType' r (CtxRelKey rel) $ head $ fromJust $ relPrimaryKey rel) p 
                        $ "Relation with #switch annotation must have a primary key of type bit<N>" 
+             assertR r (case find ((== "failed") . name) $ relArgs rel of
+                             Nothing -> False
+                             Just f  -> isBool r f) p $ "Relation with #switch annotation must have a Boolean field named \"failed\"" 
          Just (RelPort p (inp, outp)) -> do
              inrole  <- checkRole p r inp
              outrole <- checkRole p r outp

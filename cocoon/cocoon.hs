@@ -141,13 +141,13 @@ main = do
     case confAction config of
          ActionCLI -> controllerCLI histfile (confCtlPort config)
          ActionSQL -> do 
-             combined <- readValidate fname workdir
+             combined <- readValidateAddDelta fname workdir
              let schema = mkSchema basename combined
                  schfile = workdir </> addExtension basename "schema"
              writeFile schfile $ render schema
              putStrLn $ "Schema written to file " ++ schfile
          ActionDL -> do
-             combined <- readValidate fname workdir
+             combined <- readValidateAddDelta fname workdir
              let (structs, funcs, rels) = DL.refine2DL combined
                  rels' = concatMap ((\(r,rs) -> map fst $ r:(concat rs)) . snd) rels
                  rules = concatMap ((\(r,rs) -> concatMap snd $ r:(concat rs)) . snd) rels
@@ -160,7 +160,7 @@ main = do
              writeFile cargofile $ render cargo
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
-             combined <- readValidate fname workdir
+             combined <- readValidateAddDelta fname workdir
              putStrLn "Starting controller"
              let logfile = workdir </> addExtension basename "log"
                  dfpath  = workdir </> "target" </> "debug" </> basename
@@ -185,8 +185,8 @@ main = do
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  
-readValidate :: FilePath -> FilePath -> IO Refine
-readValidate fname workdir = do
+readValidateAddDelta :: FilePath -> FilePath -> IO Refine
+readValidateAddDelta fname workdir = do
     createDirectoryIfMissing False workdir
     fdata <- readFile fname
     spec <- case parse cocoonGrammar fname fdata of
@@ -197,7 +197,8 @@ readValidate fname workdir = do
                      Right rs -> return rs
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
     putStrLn "Validation complete"
-    return $ head combined 
+    let withdelta = refineAddDelta $ head combined
+    return withdelta
 --
 --    let ps = pairs combined
 --

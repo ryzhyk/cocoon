@@ -75,6 +75,13 @@ rel2DL rel = ((rel', rules), constrs)
                         $ relDef rel
           constrs = mapIdx (constr2DL rel) $ relConstraints rel
 
+-- pick the subset of relations used in roles
+--      generate persistent realized versions of these relations (no constraints or rules)
+--      generate delta relations with additional polarity field and
+--      rules to compute it from base relations:
+--          delta(true, x)  :- rel(x) /\ not rel'(x)
+--          delta(false, x) :- not rel(x) /\ rel'(x)
+
 constr2DL :: (?r::Refine) => Relation -> Constraint -> Int -> [(DL.Relation, [DL.Rule])]
 constr2DL rel (PrimaryKey _ fs) i            = pkeyIndex rel fs ++ uniqueConstr i rel fs
 constr2DL rel (Unique _ fs)     i            = uniqueConstr i rel fs
