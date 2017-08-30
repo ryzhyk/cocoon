@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings #-}
+{-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings, FlexibleContexts #-}
 
 module IR.Compile2IR ( compileSwitch
                      , compilePort
@@ -25,9 +25,11 @@ import Data.List
 import Data.Maybe
 import Control.Monad.State
 import Text.PrettyPrint
+import System.FilePath.Posix 
+import Debug.Trace
+import System.IO.Unsafe
 import qualified Data.Map as M
 import qualified Data.Graph.Inductive as G 
---import Debug.Trace
 
 import Util 
 import PP
@@ -65,14 +67,21 @@ updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from)
                                                                 cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
                                                             in I.Pipeline vs cfg'' end
 
-compileSwitch :: Refine -> Relation -> [(String, I.Pipeline)]
-compileSwitch r rel = map (\port -> (name port, compilePort r port)) ports
+compileSwitch :: FilePath -> Refine -> Relation -> [(String, I.Pipeline)]
+compileSwitch workdir r rel = map (\port -> (name port, compilePort workdir r port)) ports
     where
     ports = filter (\role -> roleIsInPort r (name role) && portRoleSwitch r role == name rel) 
                    $ refineRoles r
 
-compilePort :: Refine -> Role -> I.Pipeline
-compilePort r role = let ?r = r in execState (compilePort' role) (I.Pipeline M.empty G.empty 0)
+compilePort :: FilePath -> Refine -> Role -> I.Pipeline
+compilePort workdir r role =
+    let ?r = r in 
+    let compiled = execState (compilePort' role) (I.Pipeline M.empty G.empty 0)
+        dotname = workdir </> addExtension (name role) "dot"
+        odotname = workdir </> addExtension (addExtension (name role) "opt") "dot"
+        optimized = trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) 
+                    $ I.optimize 0 compiled 
+    in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG optimized) odotname; return ""}) optimized
 
 compilePort' :: (?r::Refine) => Role -> CompileState ()
 compilePort' role@Role{..} = do 
@@ -93,7 +102,6 @@ compilePort' role@Role{..} = do
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
-    -- TODO: optimize 
 
 compileExpr :: (?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
 compileExpr vars ctx exitnd e = do
@@ -407,12 +415,13 @@ tagType cs = TBit nopos $ tagWidth cs
 tagVal :: [Constructor] -> String -> Integer
 tagVal cs c = fromIntegral $ fromJust $ findIndex ((== c) . name) cs
 
-val2Record :: (?r::Refine) => String -> Expr -> I.Record
-val2Record rname e@(E (EStruct{})) = M.fromList $ zip names vals
-    where
-    vals = mkExpr M.empty CtxRefine e
-    rel = getRelation ?r rname
-    names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
-val2Record _ e = error $ "Compile2IR.val2Record " ++ show e
+val2Record :: Refine -> String -> Expr -> I.Record
+val2Record r rname e@(E (EStruct{})) = 
+    let ?r = r in
+    let vals = mkExpr M.empty CtxRefine e
+        rel = getRelation r rname
+        names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
+    in M.fromList $ zip names vals
+val2Record _ _ e = error $ "Compile2IR.val2Record " ++ show e
 
 

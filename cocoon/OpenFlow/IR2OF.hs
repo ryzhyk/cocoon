@@ -14,9 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE ImplicitParams, TupleSections, RecordWildCards #-}
+{-# LANGUAGE ImplicitParams, TupleSections, RecordWildCards, FlexibleContexts #-}
 
-module OpenFlow.IR2OF( precompile
+module OpenFlow.IR2OF( IRSwitch
+                     , IRSwitches
+                     , precompile
                      , buildSwitch
                      , updateSwitch
                      , recordField) where
@@ -28,35 +30,51 @@ import Data.List
 import Data.Maybe
 import Data.Bits
 import Control.Monad
+import Control.Monad.Except
+import Debug.Trace
+import System.FilePath.Posix
+import System.IO.Unsafe
 
 import Util
 import Ops
 import Name
 import qualified IR.IR             as I
 import qualified IR.Compile2IR     as I
+import qualified IR.Registers      as I
 import qualified OpenFlow.OpenFlow as O
 import qualified Syntax            as C -- Cocoon
 import qualified Relation          as C
 import qualified NS                as C
 
+-- Uniquely identify an instance of the switch:
+-- (SwitchRelation, primary key)
+type SwitchId = Integer
+
 type IRSwitch = [(String, I.Pipeline)]
 type IRSwitches = M.Map String IRSwitch
 
--- Uniquely identify an instance of the switch:
--- (SwitchRelation, primary key)
-type SwitchId = (String, Integer)
+let maxOFTables = 255
 
 -- For each switch table
 --  Compute and compile all port roles
-precompile :: C.Refine -> IRSwitches
-precompile r = M.fromList 
-               $ map (\rel -> (name rel, assignTables $ I.compileSwitch r rel)) 
-               $ filter C.relIsSwitch $ C.refineRels r
+precompile :: (MonadError String me) => FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
+precompile workdir r rfile = do
+    let swrels = filter C.relIsSwitch $ C.refineRels r
+    (liftM M.fromList) 
+     $ mapM (\rel -> do let ir = I.compileSwitch workdir r rel
+                        ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
+                                                    let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
+                                                    trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
+                                                 `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name rel ++ ":" ++ e)) ir
+                        (ntables, ir'') = assignTables ir'
+                        when (ntables > maxOFTables) 
+                            $ throwError $ name rel ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
+                        return (name rel, ir'')) swrels
 
 -- Relabel port CFGs into openflow table numbers
-assignTables :: IRSwitch -> IRSwitch
-assignTables pls = snd $ foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel start pl
-                                                          in (start', pls' ++ [(n, pl')])) (1, pls) pls
+assignTables :: IRSwitch -> (Int, IRSwitch)
+assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel start pl
+                                                    in (start', pls' ++ [(n, pl')])) (1, pls) pls
     where 
     relabel :: Int -> I.Pipeline -> (Int, I.Pipeline)
     relabel start pl = (start + length ordered, pl{I.plCFG = cfg', I.plEntryNode = start})
@@ -72,39 +90,27 @@ assignTables pls = snd $ foldl' (\(start, pls') (n,pl) -> let (start', pl') = re
                                                 in (pre', nd', node', suc')) 
                       $ I.plCFG pl
 
--- TODO: move to a non-OF-specific file
--- Data structure to represent database delta 
--- or a complete snapshot.  Maps relation name into 
--- a set of facts with polarities.
-type Delta = M.Map String [(Bool, I.Record)]
-type DB    = M.Map String [I.Record]
-
--- TODO backend-independent update procedure:
--- read all deltas in one transaction
--- update each switch from deltas
--- update realized state
-
 -- New switch event
 --   Store the list of tables this switch depends on
-buildSwitch :: (?r::C.Refine) => IRSwitch -> DB -> SwitchId -> [O.Command]
-buildSwitch ports db swid = table0 : (staticcmds ++ updcmds)
+buildSwitch :: C.Refine -> IRSwitch -> I.DB -> SwitchId -> [O.Command]
+buildSwitch r ports db swid = table0 : (staticcmds ++ updcmds)
     where
     table0 = O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]
     -- Configure static part of the pipeline
     staticcmds = concatMap (\(_, pl) -> concatMap (mkNode pl) $ G.labNodes $ I.plCFG pl) ports
     -- Configure dynamic part from primary tables
-    updcmds = updateSwitch ports swid (M.map (map (True,)) db)
+    updcmds = updateSwitch r ports swid (M.map (map (True,)) db)
 
-updateSwitch :: (?r::C.Refine) => IRSwitch -> SwitchId -> Delta -> [O.Command]
-updateSwitch ports swid db = portcmds ++ nodecmds
+updateSwitch :: C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
+updateSwitch r ports swid db = portcmds ++ nodecmds
     where
     -- update table0 if ports have been added or removed
     portcmds = concatMap (\(prel, pl) -> updatePort (prel,pl) swid db) ports
     -- update pipeline nodes
-    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode db pl) $ G.labNodes $ I.plCFG pl) ports
+    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl) $ G.labNodes $ I.plCFG pl) ports
 
-updatePort :: (String, I.Pipeline) -> SwitchId -> Delta -> [O.Command]
-updatePort (prel, pl) (_, i) db = delcmd ++ addcmd
+updatePort :: (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
+updatePort (prel, pl) i db = delcmd ++ addcmd
     where
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
     match f = let pnum = f M.! "portnum" in
@@ -121,8 +127,8 @@ mkNode pl (nd, node) =
          I.Lookup _ _ _ _ el -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pl el]
          I.Fork{}            -> [O.AddGroup $ O.Group nd O.GroupAll []]
 
-updateNode :: (?r::C.Refine) => Delta -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
-updateNode db portpl (nd, node) = 
+updateNode :: C.Refine -> I.Delta -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
+updateNode r db portpl (nd, node) = 
     case node of
          I.Par _              -> []
          I.Cond _             -> []
@@ -133,14 +139,14 @@ updateNode db portpl (nd, node) =
                                  in delcmd ++ addcmd
          I.Fork t _ _ b       -> -- create a bucket for each table row
                                  let (add, del) = partition fst (db M.! t) 
-                                     delcmd = map (\(_,f) -> O.DelBucket nd $ getBucketId t f) del
-                                     addcmd = map (\(_,f) -> O.AddBucket nd $ O.Bucket (Just $ getBucketId t f) $ mkBB portpl f b) add
+                                     delcmd = map (\(_,f) -> O.DelBucket nd $ getBucketId r t f) del
+                                     addcmd = map (\(_,f) -> O.AddBucket nd $ O.Bucket (Just $ getBucketId r t f) $ mkBB portpl f b) add
                                  in delcmd ++ addcmd
 
-getBucketId :: (?r::C.Refine) => String -> I.Record -> O.BucketId
-getBucketId rname f = fromInteger pkey
+getBucketId :: C.Refine -> String -> I.Record -> O.BucketId
+getBucketId r rname f = fromInteger pkey
     where   
-    rel = C.getRelation ?r rname
+    rel = C.getRelation r rname
     Just [key] = C.relPrimaryKey rel
     I.EBit _ pkey = recordField f key
 
@@ -292,33 +298,3 @@ mkGoto pl nd =
 --    Then run normal table update
 
 -- Delete switch
-
--- Table update
---    one of tables we care about?
---      yes: find all nodes that lookup or fork on this table
-
-
-
-
--- compute total order of nodes (map node ids to table numbers or
--- re-assign node numbers)
-
--- convert each node to a table:
-
--- Statically computed
--- * Par    -- all group, bucket per branch
--- * Cond   -- conditions to matches, indirect group for each branch
-
--- Dynamically updated
--- * First table that dispatches packet to the right pipeline
--- * Lookup -- encode table+constraint as OF table, BB to action list for each table entry
--- * Fork   -- precompute factorization into groups, action set per group
-
--- Merging ports
--- Switch role -> IR
-
--- Static pass:
--- IR -> OF program with empty table
-
--- Dynamic pass:
--- Relation update -> Switch ID -> OF program update

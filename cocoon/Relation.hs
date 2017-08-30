@@ -25,7 +25,7 @@ module Relation (relRecordType,
                  ruleIsRecursive,
                  relRealizedName,   
                  relDeltaName,
-                 relMkDelta
+                 relMkDelta,
                  relSwitchPorts) where
 
 import qualified Data.Graph.Inductive as G
@@ -130,8 +130,8 @@ relMkDelta rel = (realized, delta)
 relSwitchPorts :: Refine -> Relation -> [Relation]
 relSwitchPorts r rel = 
     filter (\rel' -> case relAnnotation rel' of
-                          RelPort{} -> let swrole = constrForeign $ head 
-                                                    $ filter ((== [eVar "switch"]) . constrFields) 
-                                                    $ filter isForeignKey $ relConstraints rel'
-                                       in name rel == swrole
-                          _         -> False) $ refineRels r
+                          Just RelPort{} -> let swrole = constrForeign $ head 
+                                                         $ filter ((== [eVar "switch"]) . constrFields) 
+                                                         $ filter isForeignKey $ relConstraints rel'
+                                            in name rel == swrole
+                          _              -> False) $ refineRels r

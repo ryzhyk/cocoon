@@ -24,7 +24,7 @@ import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
 import qualified Data.GraphViz        as G
 import Text.PrettyPrint
-import Data.Text.Lazy(Text)
+import Data.Text.Lazy(Text, unpack)
 import Data.List
 import Data.Maybe
 import Control.Monad
@@ -166,6 +166,12 @@ disj' (e:es) = EBinOp Or e (disj' es)
 
 type Record = M.Map ColName Expr
 
+-- Database delta: maps relation name into a set of facts with polarities.
+type Delta = M.Map RelName [(Bool, Record)]
+
+-- Database snapshot
+type DB    = M.Map RelName [Record]
+
 data Action = ASet     Expr Expr
             | APut     String [Expr]
             | ADelete  String Expr
@@ -258,6 +264,9 @@ type Vars = M.Map VarName Type
 
 cfgToDot :: CFG -> Text
 cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
+
+cfgDump :: CFG -> FilePath -> IO ()
+cfgDump cfg f = writeFile f $ unpack $ cfgToDot cfg
 
 -- CFG context identifies location within a CFG
 data CFGCtx = CtxNode       {ctxNode :: NodeId}

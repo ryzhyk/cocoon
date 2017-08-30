@@ -24,10 +24,7 @@ import System.Directory
 import System.Console.GetOpt
 import Control.Exception
 import Control.Monad
-import Data.Text.Lazy (unpack)
-import OpenFlow.IR2OF
 
-import qualified Data.Graph.Inductive as G 
 import qualified Datalog.Dataflog as DL
 import qualified Datalog as DL
 import qualified Datalog.DataflogTemplate as DL
@@ -37,12 +34,9 @@ import SQL
 import Controller
 import CLI
 import Syntax
-import Name
 import Refine
-import qualified IR.IR         as IR
-import qualified IR.Compile2IR as IR
-import qualified IR.Optimize   as IR
-import qualified IR.Registers  as IR
+import qualified IR.Registers   as IR
+import qualified OpenFlow.IR2OF as OF
 
 data TOption = CCN String
              | Action String
@@ -161,9 +155,13 @@ main = do
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
              combined <- readValidateAddDelta fname workdir
-             putStrLn "Starting controller"
+             putStrLn "Compiling"
+             ir <- case OF.precompile workdir combined IR.ovsRegFile of
+                        Left e  -> error e
+                        Right x -> return x
              let logfile = workdir </> addExtension basename "log"
                  dfpath  = workdir </> "target" </> "debug" </> basename
+    {-
              mapM_ (\(rl, _, _) -> do let dotname = workdir </> addExtension (name rl) "dot"
                                       let odotname = workdir </> addExtension (addExtension (name rl) "opt") "dot"
                                       let rdotname = workdir </> addExtension (addExtension (name rl) "reg") "dot"
@@ -179,9 +177,10 @@ main = do
                                       reg <- case IR.allocVarsToRegisters opt IR.ovsRegFile of
                                                   Left e -> error e
                                                   Right x -> return x
-                                      writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg)
-                   $ refinePortRoles combined
-             controllerStart basename dfpath logfile (confCtlPort config) combined
+                                      writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg) 
+                   $ refinePortRoles combined -}
+             putStrLn "Starting controller"
+             controllerStart basename dfpath logfile (confCtlPort config) combined ir
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  

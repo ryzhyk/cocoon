@@ -24,7 +24,8 @@ module Eval ( KMap
             , eput
             , emodify
             , eyield
-            , evalExpr) where
+            , evalExpr
+            , evalConstExpr) where
 
 import qualified Data.Map as M
 import Data.Maybe
@@ -32,6 +33,7 @@ import Data.Bits
 import Data.List
 import Control.Monad.State.Strict
 import Text.PrettyPrint
+import System.IO.Unsafe
 
 import Expr
 import qualified SMT             as SMT
@@ -81,6 +83,10 @@ emodify f = modify $ \(m, y) -> (f m, y)
 
 eyield :: Expr -> EvalState ()
 eyield e = modify $ \(m,y) -> (m, y ++ [e])
+
+evalConstExpr :: Refine -> Expr -> Expr
+evalConstExpr r e = head $ fst $ unsafePerformIO 
+    $ evalExpr r CtxRefine M.empty (error $ "Eval.evalConstExpr: attempt to access DL when evaluating " ++ show e) e
 
 evalExpr :: Refine -> ECtx -> KMap -> DL.Session -> Expr -> IO ([Expr], KMap)
 evalExpr r ctx kmap dl e = do let ?dl = dl      

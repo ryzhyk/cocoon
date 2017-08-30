@@ -18,7 +18,8 @@ limitations under the License.
 
 {-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings, TupleSections, FlexibleContexts #-}
 
-module IR.Registers ( allocVarsToRegisters
+module IR.Registers ( RegisterFile(..)
+                    , allocVarsToRegisters
                     , ovsRegFile) where
 
 import Control.Monad.State

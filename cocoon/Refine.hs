@@ -21,6 +21,7 @@ module Refine( funcGraph
              , refineIsDeterministic
              , refineRelsSorted
              , refinePortRels
+             , refineRelsUsedInRoles
              , refineSwitchRels
              , refinePortRoles
              , refineAddDelta) where
