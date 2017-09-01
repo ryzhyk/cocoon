@@ -53,10 +53,10 @@ type SwitchId = Integer
 type IRSwitch = [(String, I.Pipeline)]
 type IRSwitches = M.Map String IRSwitch
 
-let maxOFTables = 255
+maxOFTables = 255
 
 -- For each switch table
---  Compute and compile all port roles
+--  Compute and compile all port roles, perform register and OF table allocation
 precompile :: (MonadError String me) => FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
 precompile workdir r rfile = do
     let swrels = filter C.relIsSwitch $ C.refineRels r
@@ -66,7 +66,7 @@ precompile workdir r rfile = do
                                                     let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
                                                     trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
                                                  `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name rel ++ ":" ++ e)) ir
-                        (ntables, ir'') = assignTables ir'
+                        let (ntables, ir'') = assignTables ir'
                         when (ntables > maxOFTables) 
                             $ throwError $ name rel ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
                         return (name rel, ir'')) swrels
@@ -292,9 +292,3 @@ mkGoto pl nd =
     case G.lab (I.plCFG pl) nd of
          Just (I.Fork{}) -> O.ActionGroup nd
          _               -> O.ActionGoto nd 
-
--- New/delete port
---    Update the entry point table first
---    Then run normal table update
-
--- Delete switch

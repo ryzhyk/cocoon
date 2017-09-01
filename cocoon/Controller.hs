@@ -31,7 +31,9 @@ import Pipes
 import Control.Pipe.Serialize ( serializer, deserializer )
 import GHC.IO.Handle
 import System.IO
+import qualified Control.Concurrent      as T
 import qualified Control.Concurrent.Lock as L
+import qualified Control.Concurrent.MVar as MV
 import Data.IORef
 import Text.Parsec
 import Eval
@@ -57,6 +59,10 @@ import qualified OpenFlow.IR2OF          as OF
 import qualified IR.IR                   as IR
 import qualified IR.Compile2IR           as IR
 
+-- Messages sent by the primary controller thread to the
+-- synchronization thread.
+data Msg = MsgSync       -- database changed -- reconfigure the switches
+         | MsgTerminate  -- disconnecting -- terminate
 
 data ControllerState = ControllerDisconnected { ctlDBName       :: String
                                               , ctlDFPath       :: FilePath
@@ -71,6 +77,10 @@ data ControllerState = ControllerDisconnected { ctlDBName       :: String
                                               , ctlConstraints  :: [(Relation, [DL.Relation])]
                                               , ctlDB           :: PG.Connection
                                               , ctlXaction      :: Bool
+                                              , ctlXactionLock  :: L.Lock
+                                              , ctlSyncSem      :: MV.MVar Msg
+                                              , ctlTermSem      :: MV.MVar ()
+                                              , ctlSyncThread   :: T.ThreadId
                                               }
 
 type DaemonState = (Maybe Handle, ControllerState)
@@ -145,12 +155,12 @@ execExpr e s@ControllerConnected{..} =
          Right _ -> if ctlXaction
                        then do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
                                return (s, intercalate ",\n" $ map show val)
-                       else do DL.start ctlDL
+                       else do _start s
                                (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
-                               (do _ <- _commit s
+                               (do _ <- _commitNotify s
                                    return ()
                                 `catch` \ex -> do 
-                                    DL.rollback ctlDL
+                                    _rollback s
                                     throw (ex::SomeException))
                                return (s, intercalate ",\n" $ map show val)
 execExpr _ _ = error "execExpr called in disconnected state"
@@ -179,9 +189,14 @@ connect ControllerDisconnected{..} = do
     db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
     (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
         (dl, constr) <- startDLSession ctlDFPath
-        (do let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False
+        (do xlock <- L.new
+            xsem  <- MV.newEmptyMVar
+            tsem  <- MV.newEmptyMVar
+            let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
             populateDB
-            return (?s, "Connected"))
+            syncThr <- T.forkIO $ syncThread ?s
+            let s = ?s{ctlSyncThread = syncThr}
+            return (s, "Connected"))
          `catch` \e -> do
              closeDLSession dl
              throw (e::SomeException))
@@ -193,8 +208,12 @@ connect ControllerConnected{} = throw $ AssertionFailed "already connected"
 -- This is the only way to transition to disconnected state.
 -- Performs correct cleanup
 disconnect :: Action
-disconnect ControllerConnected{..} = do
-    (when ctlXaction $ DL.rollback ctlDL) `catch` \e -> error $ "Rollback failed: " ++ show (e :: SomeException)
+disconnect s@ControllerConnected{..} = do
+    (when ctlXaction $ _rollback s) `catch` \e -> error $ "Rollback failed: " ++ show (e :: SomeException)
+    --- send termination notification to sync thread; wait for it to terminate
+    _ <- MV.tryTakeMVar ctlSyncSem
+    MV.putMVar ctlSyncSem MsgTerminate
+    _ <- MV.takeMVar ctlTermSem
     (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
     PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
     return $ (ControllerDisconnected ctlDBName ctlDFPath ctlRefine ctlIR, "Disconnected")
@@ -202,37 +221,58 @@ disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connect
 
 start :: Action
 start s@ControllerConnected{..} | not ctlXaction = do
-    DL.start ctlDL
+    _start s
     return $ (s{ctlXaction = True}, "ok")
                                 | otherwise = error "Transaction already in progress"
 start ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
 rollback :: Action
 rollback s@ControllerConnected{..} | ctlXaction = do
-    DL.rollback ctlDL
+    _rollback s
     return $ (s{ctlXaction = False}, "ok")
                                    | otherwise = error "No transaction in progress"
 rollback ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
 commit :: Action
 commit s@ControllerConnected{..} | ctlXaction = do
-    _ <- _commit s
+    _ <- _commitNotify s
     return (s{ctlXaction = False}, "ok")
                                  | otherwise = error "No transaction in progress"
 commit ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
+_start :: ControllerState -> IO ()
+_start s = do 
+    let ControllerConnected{..} = s
+    L.acquire ctlXactionLock
+    DL.start ctlDL
+
 _commit :: ControllerState -> IO ([DL.Fact], [DL.Fact])
 _commit s = do
+    let ControllerConnected{..} = s
     let ?s = s
-    let ?r = ctlRefine s
+    let ?r = ctlRefine
     validateConstraints
-    delta <- DL.commit $ ctlDL s
+    delta <- DL.commit ctlDL
     let (inserts', deletes') = partition snd delta
     let inserts = map fst inserts'
     let deletes = map fst deletes'
-    mapM_ (\DL.Fact{..} -> SQL.deleteFrom (ctlDB s) factRel $ map SMT.exprFromSMT factArgs) deletes
-    mapM_ (\DL.Fact{..} -> SQL.insertInto (ctlDB s) factRel $ map SMT.exprFromSMT factArgs) inserts
+    mapM_ (\DL.Fact{..} -> SQL.deleteFrom ctlDB factRel $ map SMT.exprFromSMT factArgs) deletes
+    mapM_ (\DL.Fact{..} -> SQL.insertInto ctlDB factRel $ map SMT.exprFromSMT factArgs) inserts
+    L.release ctlXactionLock
     return (inserts, deletes)
+
+_commitNotify :: ControllerState -> IO ([DL.Fact], [DL.Fact])
+_commitNotify s = do
+    (ins, dels) <- _commit s
+    when ((not $ null ins) || (not $ null dels)) $ do _ <- MV.tryPutMVar (ctlSyncSem s) MsgSync
+                                                      return ()
+    return (ins, dels)
+
+_rollback :: ControllerState -> IO ()
+_rollback s = do 
+    let ControllerConnected{..} = s
+    DL.rollback ctlDL
+    L.release ctlXactionLock
 
 startDLSession :: (?r::Refine) => FilePath -> IO (DL.Session, [(Relation, [DL.Relation])])
 startDLSession dfpath = do
@@ -274,24 +314,38 @@ readDB = mapM_ (\rel -> do rows <- SQL.readTable (ctlDB ?s) rel
 factField :: (?s::ControllerState) => DL.Fact -> (Expr -> Expr) -> Expr
 factField (DL.Fact rel as) g = evalConstExpr (ctlRefine ?s) $ g (eStruct rel $ map SMT.exprFromSMT as)
 
+syncThread :: ControllerState -> IO ()
+syncThread s = do
+    let ControllerConnected{..} = s
+    let ?s = s
+    sync
+    msg <- MV.takeMVar ctlSyncSem
+    case msg of
+         MsgSync      -> syncThread s
+         MsgTerminate -> do sync
+                            MV.putMVar ctlTermSem ()
+    
+    -- TODO: Problem: race condition if switch has been removed
+    -- from desired before we mark it as failed.
+
 sync :: (?s::ControllerState) => IO ()
 sync = do
     let ControllerConnected{..} = ?s
         factSwitchId rel f = let Just [key] = relPrimaryKey rel
-                                 e = mkkey key
                                  mkkey (E (EVar _ v))     e' = eField e' v
                                  mkkey (E (EField _ x a)) e' = eField (mkkey x e') a
                                  mkkey x                  _  = error $ "Controller.sync: mmkkey " ++ show x
                                  E (EBit _ _ swid) = factField f (mkkey key)
                              in swid
-        factSwitchFailed rel f = let E (EBool _ fl) = factField f (\v -> eField v "failed") in fl
+        factSwitchFailed f = let E (EBool _ fl) = factField f (\v -> eField v "failed") in fl
         factSetSwitchFailed rel (DL.Fact n as) fl = let Just i = findIndex ((=="failed") . name) $ relArgs rel
                                                     in DL.Fact n $ take i as ++ (SMT.EBool fl : drop (i+1) as)
 
+    _start ?s
     (delta, dlfacts) <- readDelta
     -- enabled switch removed from desired or marked as disabled:
     --  * reset switch to clean state if reachable
-    mapM_ (\rel -> do let deleted = filter (\(pol,f) -> not pol && (not $ factSwitchFailed rel f)) $ dlfacts M.! name rel
+    mapM_ (\rel -> do let deleted = filter (\(pol,f) -> not pol && (not $ factSwitchFailed f)) $ dlfacts M.! name rel
                       mapM_ (\(_,f) -> (resetSwitch f) `catch` (\(SomeException _) -> return ())) deleted)
           $ refineSwitchRels ctlRefine
     -- relations for which switches have been enabled or created
@@ -305,6 +359,8 @@ sync = do
                                                 concatMap (roleUsesRels ctlRefine . getRole ctlRefine . fst . annotRoles . fromJust . relAnnotation) ports)
                    newSwRels
     reldb <- readRealized realized
+    _ <- _commit ?s
+
     -- new or newly enabled switch in desired:
     --  * reset switch
     --  * buildSwitch from precompiled spec and configure with the current realized state.
@@ -317,7 +373,7 @@ sync = do
                                                  sendCmds f cmds
                                                  return ((name rel, swid), True)
                                               `catch` (\(SomeException _) -> return ((name rel, swid), False)))
-                              $ filter (not . factSwitchFailed rel)
+                              $ filter (not . factSwitchFailed)
                               $ map snd $ filter fst
                               $ dlfacts M.! (name rel))
                      newSwRels
@@ -336,7 +392,7 @@ sync = do
     -- Reconfiguration finished; update the DB (in one transaction):
     --  * add Delta to realized
     --  * mark failed switches as disabled in desired 
-    DL.start ctlDL
+    _start ?s
     mapM_ (\(pol, DL.Fact rel args) -> let rel' = relRealizedName rel
                                            f = DL.Fact rel' args in
                                        if pol then DL.addFact ctlDL f else DL.removeFact ctlDL f) 
@@ -346,8 +402,10 @@ sync = do
                                       f' = factSetSwitchFailed rel f False in
                                   when (elem (name rel, swid) failed') $ do {DL.removeFact ctlDL f; DL.addFact ctlDL f'}) switches)
           $ refineSwitchRels ctlRefine
-    _ <- DL.commit ctlDL
-    return ()
+    _ <- _commit ?s
+    if not $ null failed'
+       then sync
+       else return ()
 
 -- send OpenFlow commands to the switch; returns False in case of
 -- failure
@@ -390,10 +448,3 @@ enumRelationIR :: (?s::ControllerState) => String -> String -> IO [IR.Record]
 enumRelationIR nrel nconstr = do
     facts <- DL.enumRelation (ctlDL ?s) nrel
     return $ map (IR.val2Record (ctlRefine ?s) nconstr . eStruct nconstr . map SMT.exprFromSMT . DL.factArgs) facts
-
--- :validate
---
---insert relname (<val1>, <val2>)
---the (p in <relation> | <cond>) p
---
---every request is a transaction
