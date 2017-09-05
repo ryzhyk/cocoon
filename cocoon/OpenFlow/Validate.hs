@@ -1,0 +1,6 @@
+-- can only fork on tables that contain bucket_id (32-bit primary key)
+-- Packet type must be the OpenFlow packet
+-- refineRelsUsedInRoles only contain fields of OF-compatible types
+-- (i.e, no strings or int's)
+-- Switch type must contain OpenFlow channel info: (protocol/host/port, bridge name)
+-- Packet type matches the OpenFlow packet type

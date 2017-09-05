@@ -38,7 +38,6 @@ import System.IO.Unsafe
 import Util
 import Ops
 import Name
-import Backend
 import qualified IR.IR             as I
 import qualified IR.Compile2IR     as I
 import qualified IR.Registers      as I
@@ -59,7 +58,7 @@ maxOFTables = 255
 
 -- For each switch table
 --  Compute and compile all port roles, perform register and OF table allocation
-precompile :: (MonadError String me) => StructReify -> FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
+precompile :: (MonadError String me) => B.StructReify -> FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
 precompile structs workdir r rfile = do
     let swrels = filter C.relIsSwitch $ C.refineRels r
     (liftM M.fromList) 

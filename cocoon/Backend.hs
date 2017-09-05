@@ -14,23 +14,32 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
+{-# LANGUAGE RankNTypes, FlexibleContexts #-}
 
 module Backend where
 
 import qualified Data.Map as M
+import Control.Monad.Except
 
 import Syntax
-import IR.Registers
+import qualified IR.IR as IR
+import qualified Datalog.Datalog as DL
 
 newtype FName = FName String deriving (Eq, Ord)
 
+-- Map IR field names to names known to the backend
 type FieldMap = M.Map String FName
 
+-- reifyWidth - Number of bits to represent tags of tagged union (struct) types,
+-- reifyCons  - Backend-specific encoding of constructor values 
 data StructReify = StructReify { reifyWidth :: M.Map String Int
                                , reifyCons  :: M.Map String Integer
                                }
 
-data Backend = Backend { backendRegisters :: RegisterFile  -- Backend's register file
-                       , backendPktType   :: Type          -- Packet type assumed by backend
-                       , backendStructs   :: StructReify 
-                       }
+data Backend p = Backend { backendStructs      :: StructReify 
+                         , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()
+                         , backendPrecompile   :: forall me . (MonadError String me) => FilePath -> Refine -> me p
+                         , backendBuildSwitch  :: FilePath -> Refine -> DL.Fact -> p -> IR.DB -> IO ()
+                         , backendUpdateSwitch :: FilePath -> Refine -> DL.Fact -> p -> IR.Delta -> IO ()
+                         , backendResetSwitch  :: FilePath -> Refine -> DL.Fact -> IO ()
+                         }

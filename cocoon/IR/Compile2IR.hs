@@ -74,7 +74,7 @@ compileSwitch structs workdir r rel = map (\port -> (name port, compilePort stru
     ports = filter (\role -> roleIsInPort r (name role) && portRoleSwitch r role == name rel) 
                    $ refineRoles r
 
-compilePort :: StructReify ->  FilePath -> Refine -> Role -> I.Pipeline
+compilePort :: StructReify -> FilePath -> Refine -> Role -> I.Pipeline
 compilePort structs workdir r role =
     let ?r = r in 
     let ?s = structs in

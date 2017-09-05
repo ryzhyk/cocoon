@@ -15,7 +15,11 @@ limitations under the License.
 -}
 {-# LANGUAGE ImplicitParams, RecordWildCards, TupleSections, LambdaCase #-}
 
-module Datalog(refine2DL) where
+module Datalog( refine2DL
+              , factField
+              , factSwitchId
+              , factSwitchFailed
+              , factSetSwitchFailed) where
 
 import Control.Monad.State
 import Data.List
@@ -24,9 +28,11 @@ import Data.String.Utils
 
 import Name
 import Pos
+
 import Util
 import qualified SMT.SMTSolver   as SMT
 import qualified Datalog.Datalog as DL
+import Eval
 import SMT
 import Syntax
 import Refine
@@ -145,3 +151,23 @@ fieldCond' r ctx (EField _ e f)  = do
        else modify ((eMatch e $ map (\c -> (eStruct (name c) (map (\_ -> ePHolder) $ consArgs c), eTrue)) cs' ++ [(ePHolder, eFalse)]):)
 fieldCond' _ _   e               = error $ "SMT.fieldCond' " ++ show e
 
+
+factField :: Refine -> DL.Fact -> (Expr -> Expr) -> Expr
+factField r (DL.Fact rel as) g = evalConstExpr r $ g (eStruct rel $ map SMT.exprFromSMT as)
+
+factSwitchId :: Refine -> String -> DL.Fact -> Integer
+factSwitchId r rname f = let rel = getRelation r rname
+                             Just [key] = relPrimaryKey rel
+                             mkkey (E (EVar _ v))     e' = eField e' v
+                             mkkey (E (EField _ x a)) e' = eField (mkkey x e') a
+                             mkkey x                  _  = error $ "Controller.sync: mmkkey " ++ show x
+                             E (EBit _ _ swid) = factField r f (mkkey key)
+                         in swid
+
+factSwitchFailed :: Refine -> DL.Fact -> Bool
+factSwitchFailed r f = let E (EBool _ fl) = factField r f (\v -> eField v "failed") in fl
+
+factSetSwitchFailed :: Refine -> String -> DL.Fact -> Bool -> DL.Fact
+factSetSwitchFailed r rname (DL.Fact n as) fl = let rel = getRelation r rname
+                                                    Just i = findIndex ((=="failed") . name) $ relArgs rel
+                                                in DL.Fact n $ take i as ++ (SMT.EBool fl : drop (i+1) as)

@@ -14,29 +14,66 @@ See the License for the specific language governing permissions and
 limitations under the License.
 -}
 
-{-# LANGUAGE OverloadedStrings, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings, RecordWildCards, FlexibleContexts #-}
 
-module OpenFlow.OVS ( ovsStructReify
-                    , ovsSendCmds
-                    , ovsReset
-                    , ovsFieldMap
-                    , ovsRegFile) where
+module OpenFlow.OVS (ovsBackend) where
 
 import Text.PrettyPrint
 import qualified Data.Map as M
 import Text.Printf
-import System.Directory
 import System.FilePath.Posix
 import System.Process
 import System.Exit
 import Control.Monad
+import Control.Monad.Except
 
 import Util
 import PP
 import Backend
 import Numeric
-import OpenFlow.OpenFlow
+import Syntax
 import IR.Registers
+import qualified OpenFlow.OpenFlow as OF
+import qualified OpenFlow.IR2OF    as OF
+import qualified IR.IR             as IR
+import qualified Datalog.Datalog   as DL
+import qualified Datalog           as DL
+
+ovsBackend :: Backend OF.IRSwitches
+ovsBackend = Backend { backendStructs      = ovsStructReify
+                     , backendValidate     = error "backendValidate not implemented"
+                     , backendPrecompile   = ovsPrecompile
+                     , backendBuildSwitch  = ovsBuildSwitch
+                     , backendUpdateSwitch = ovsUpdateSwitch
+                     , backendResetSwitch  = ovsResetSwitch
+                     }
+
+ovsPrecompile :: (MonadError String me) => FilePath -> Refine -> me OF.IRSwitches
+ovsPrecompile workdir r = OF.precompile ovsStructReify workdir r ovsRegFile
+
+ovsBuildSwitch :: FilePath -> Refine -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
+ovsBuildSwitch workdir r f@(DL.Fact rname _) ir db = do
+    let swid = DL.factSwitchId r rname f
+        E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
+        E (EString _ swname) = DL.factField r f (\v -> eField v "name")
+        cmds = OF.buildSwitch ovsFieldMap r (ir M.! rname) db swid
+    ovsResetSwitch workdir r f
+    sendCmds workdir rname swid swaddr swname cmds
+
+ovsUpdateSwitch :: FilePath -> Refine -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
+ovsUpdateSwitch workdir r f@(DL.Fact rname _) ir delta = do
+    let swid = DL.factSwitchId r rname f
+        E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
+        E (EString _ swname) = DL.factField r f (\v -> eField v "name")
+        cmds = OF.updateSwitch ovsFieldMap r (ir M.! rname) swid delta
+    sendCmds workdir rname swid swaddr swname cmds
+
+ovsResetSwitch :: FilePath -> Refine -> DL.Fact -> IO ()
+ovsResetSwitch workdir r f@(DL.Fact rname _) = do
+    let swid = DL.factSwitchId r rname f
+        E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
+        E (EString _ swname) = DL.factField r f (\v -> eField v "name")
+    reset workdir rname swid swaddr swname
 
 ovsRegFile :: RegisterFile
 ovsRegFile = RegisterFile $
@@ -83,8 +120,8 @@ ovsStructReify = undefined
 -- add_or_mod, delete, insert_bucket, or remove_bucket, of which the 
 -- add is assumed if a bare group is given.
 
-ovsReset :: String -> String -> IO ()
-ovsReset swaddr swname = undefined
+reset :: FilePath -> String -> Integer -> String -> String -> IO ()
+reset _ _ _ _ _ = undefined
 
 data Format = Hex
             | Dec
@@ -102,8 +139,8 @@ ovsFieldAttributes = undefined
 ovsFieldMap :: FieldMap
 ovsFieldMap = undefined
 
-ovsSendCmds :: FilePath -> String -> Integer -> String -> String -> [Command] -> IO ()
-ovsSendCmds workdir swrel swid swaddr swname cmds = do
+sendCmds :: FilePath -> String -> Integer -> String -> String -> [OF.Command] -> IO ()
+sendCmds workdir swrel swid swaddr swname cmds = do
    let ofcmds = render $ vcat $ map mkCmd cmds
        fname = swrel ++ "-" ++ show swid
        f = workdir </> addExtension fname "of"
@@ -116,67 +153,67 @@ ovsSendCmds workdir swrel swid swaddr swname cmds = do
 
 commaCat = hcat . punctuate comma . filter (not . (==empty))
 
-mkCmd :: Command -> Doc
-mkCmd (AddFlow t Flow{..}) = vcat
-                             $ map (\m -> "flow add" <+>
-                                          commaCat [ "table=" <> pp t
-                                                   , "priority=" <> pp flowPriority
-                                                   , commaCat m
-                                                   , "actions=" <> (commaCat $ map mkAction flowActions)])
-                             $ allComb $ map mkMatch flowMatch
-mkCmd (DelFlow t p ms)     = vcat 
-                             $ map (\m -> "flow delete_strict" <+>
-                                          commaCat [ "table=" <> pp t
-                                                   , "priority=" <> pp p
-                                                   , commaCat m])
+mkCmd :: OF.Command -> Doc
+mkCmd (OF.AddFlow t OF.Flow{..}) = vcat
+                                   $ map (\m -> "flow add" <+>
+                                                commaCat [ "table=" <> pp t
+                                                         , "priority=" <> pp flowPriority
+                                                         , commaCat m
+                                                         , "actions=" <> (commaCat $ map mkAction flowActions)])
+                                   $ allComb $ map mkMatch flowMatch
+mkCmd (OF.DelFlow t p ms)        = vcat 
+                                   $ map (\m -> "flow delete_strict" <+>
+                                                commaCat [ "table=" <> pp t
+                                                         , "priority=" <> pp p
+                                                         , commaCat m])
                              $ allComb $ map mkMatch ms
-mkCmd (AddGroup Group{..}) = "group add" <+>
-                              commaCat [ "group_id=" <> pp groupId
-                                       , "type=" <> pp groupType
-                                       , commaCat $ map (("bucket=" <>) . mkBucket) groupBuckets]
-mkCmd (DelGroup gid)       = "group delete" <+> "group_id=" <> pp gid
-mkCmd (AddBucket gid b)    = "group insert_bucket" <+> 
-                             "group_id=" <> pp gid <> comma <>
-                             "bucket=" <> mkBucket b
-mkCmd (DelBucket gid bid)  = "group remove_bucket" <+> 
-                             "group_id=" <> pp gid <> comma <>
-                             "bucket_id=" <> pp bid
+mkCmd (OF.AddGroup OF.Group{..}) = "group add" <+>
+                                   commaCat [ "group_id=" <> pp groupId
+                                            , "type=" <> pp groupType
+                                            , commaCat $ map (("bucket=" <>) . mkBucket) groupBuckets]
+mkCmd (OF.DelGroup gid)          = "group delete" <+> "group_id=" <> pp gid
+mkCmd (OF.AddBucket gid b)       = "group insert_bucket" <+> 
+                                   "group_id=" <> pp gid <> comma <>
+                                   "bucket=" <> mkBucket b
+mkCmd (OF.DelBucket gid bid)     = "group remove_bucket" <+> 
+                                   "group_id=" <> pp gid <> comma <>
+                                   "bucket_id=" <> pp bid
 
-mkMatch :: Match -> [Doc]
-mkMatch Match{..} = map (\m -> pp matchField <> "=" <> mkVal attrFormat matchVal <> m) masks
-    where Field n _ = matchField
+mkMatch :: OF.Match -> [Doc]
+mkMatch OF.Match{..} = map (\m -> pp matchField <> "=" <> mkVal attrFormat matchVal <> m) masks
+    where OF.Field n _ = matchField
           Attributes{..} = ovsFieldAttributes M.! n
           masks = case matchMask of
-                       Nothing               -> [empty]
-                       Just m | isFullMask m -> [empty]
-                              | attrMaskable -> ["/" <> mkMask attrFormat m]
-                              | otherwise    -> error $ "OVS.mkMatch: wildcards not allowed for field " ++ show matchField
+                       Nothing                  -> [empty]
+                       Just m | OF.isFullMask m -> [empty]
+                              | attrMaskable    -> ["/" <> mkMask attrFormat m]
+                              | otherwise       -> error $ "OVS.mkMatch: wildcards not allowed for field " ++ show matchField
 
 
-mkAction :: Action -> Doc
-mkAction (ActionOutput p)       = "output:" <> pp p
-mkAction (ActionGroup  g)       = "group:" <> pp g
-mkAction ActionDrop             = "drop"
-mkAction (ActionSet l r@EVal{}) = "load:" <> pp r <> "->" <> pp l
-mkAction (ActionSet l r)        = "move:" <> pp r <> "->" <> pp l
-mkAction (ActionGoto t)         = "goto_table:" <> pp t
+mkAction :: OF.Action -> Doc
+mkAction (OF.ActionOutput p)          = "output:" <> pp p
+mkAction (OF.ActionGroup  g)          = "group:" <> pp g
+mkAction OF.ActionDrop                = "drop"
+mkAction (OF.ActionSet l r@OF.EVal{}) = "load:" <> pp r <> "->" <> pp l
+mkAction (OF.ActionSet l r)        = "move:" <> pp r <> "->" <> pp l
+mkAction (OF.ActionGoto t)         = "goto_table:" <> pp t
 
-mkBucket :: Bucket -> Doc
-mkBucket (Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid
-                                    , "actions=" <> (commaCat $ map mkAction as)]
+mkBucket :: OF.Bucket -> Doc
+mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid
+                                       , "actions=" <> (commaCat $ map mkAction as)]
 
 pprintf x y = text $ printf x y
 
-mkVal :: Format -> Value -> Doc
-mkVal Hex (Value _ v) = "0x" <> (pp $ showHex v "")
-mkVal Dec (Value _ v) = pp v
-mkVal IP4 (Value _ v) = (pp $ bitSlice v 31 24) <> "." <> (pp $ bitSlice v 23 16) <> "." <> (pp $ bitSlice v 15 8) <> "." <> (pp $ bitSlice v 7 0)
-mkVal IP6 (Value _ v) = (pprintf "%04x" $ bitSlice v 127 112) <> ":" <> (pprintf "%04x" $ bitSlice v 111 96) <> ":" <> 
-                        (pprintf "%04x" $ bitSlice v 95 80) <> ":" <> (pprintf "%04x" $ bitSlice v 79 64) <> ":" <>
-                        (pprintf "%04x" $ bitSlice v 63 48) <> ":" <> (pprintf "%04x" $ bitSlice v 47 32) <> ":" <> 
-                        (pprintf "%04x" $ bitSlice v 31 16) <> ":" <> (pprintf "%04x" $ bitSlice v 15 0)
-mkVal MAC (Value _ v) = (pprintf "%02x" $ bitSlice v 47 40) <> ":" <> (pprintf "%02x" $ bitSlice v 39 32) <> ":" <> (pprintf "%02x" $ bitSlice v 31 24) <> ":" <> 
-                        (pprintf "%02x" $ bitSlice v 23 16) <> ":" <> (pprintf "%02x" $ bitSlice v 15 8) <> ":" <> (pprintf "%02x" $ bitSlice v 7 0)
+mkVal :: Format -> OF.Value -> Doc
+mkVal Hex (OF.Value _ v) = "0x" <> (pp $ showHex v "")
+mkVal Dec (OF.Value _ v) = pp v
+mkVal IP4 (OF.Value _ v) = (pp $ bitSlice v 31 24) <> "." <> (pp $ bitSlice v 23 16) <> "." <> (pp $ bitSlice v 15 8) <> "." <> (pp $ bitSlice v 7 0)
+mkVal IP6 (OF.Value _ v) = (pprintf "%04x" $ bitSlice v 127 112) <> ":" <> (pprintf "%04x" $ bitSlice v 111 96) <> ":" <> 
+                           (pprintf "%04x" $ bitSlice v 95 80) <> ":" <> (pprintf "%04x" $ bitSlice v 79 64) <> ":" <>
+                           (pprintf "%04x" $ bitSlice v 63 48) <> ":" <> (pprintf "%04x" $ bitSlice v 47 32) <> ":" <> 
+                           (pprintf "%04x" $ bitSlice v 31 16) <> ":" <> (pprintf "%04x" $ bitSlice v 15 0)
+mkVal MAC (OF.Value _ v) = (pprintf "%02x" $ bitSlice v 47 40) <> ":" <> (pprintf "%02x" $ bitSlice v 39 32) <> ":" <> (pprintf "%02x" $ bitSlice v 31 24) <> ":" <> 
+                           (pprintf "%02x" $ bitSlice v 23 16) <> ":" <> (pprintf "%02x" $ bitSlice v 15 8) <> ":" <> (pprintf "%02x" $ bitSlice v 7 0)
 
-mkMask :: Format -> Mask -> Doc
+mkMask :: Format -> OF.Mask -> Doc
 mkMask f v = mkVal f v

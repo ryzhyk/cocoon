@@ -14,7 +14,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -}
-{-# LANGUAGE RecordWildCards, ImplicitParams, LambdaCase #-}
+{-# LANGUAGE RecordWildCards, ImplicitParams, LambdaCase, FlexibleContexts #-}
 
 import System.Environment
 import Text.Parsec.Prim
@@ -35,7 +35,7 @@ import Controller
 import CLI
 import Syntax
 import Refine
-import qualified OpenFlow.IR2OF as OF
+import Backend
 import qualified OpenFlow.OVS   as OF
 
 data TOption = CCN String
@@ -154,9 +154,10 @@ main = do
              writeFile cargofile $ render cargo
              putStrLn $ "Datalog program written to file " ++ rsfile
          ActionController -> do 
+             let backend@Backend{..} = OF.ovsBackend
              combined <- readValidateAddDelta fname workdir
              putStrLn "Compiling"
-             ir <- case OF.precompile OF.ovsStructReify workdir combined OF.ovsRegFile of
+             ir <- case backendPrecompile workdir combined of
                         Left e  -> error e
                         Right x -> return x
              let logfile = workdir </> addExtension basename "log"
@@ -180,7 +181,7 @@ main = do
                                       writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg) 
                    $ refinePortRoles combined -}
              putStrLn "Starting controller"
-             controllerStart workdir basename dfpath logfile (confCtlPort config) combined ir
+             controllerStart workdir backend basename dfpath logfile (confCtlPort config) combined ir
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  
