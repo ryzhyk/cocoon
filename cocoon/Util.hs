@@ -123,8 +123,20 @@ msb n = 1 + (msb $ n `shiftR` 1)
 bitSlice :: (Bits a, Num a) => a -> Int -> Int -> a
 bitSlice v h l = (v `shiftR` l) .&. (2^(h-l+1) - 1)
 
+bitRange :: (Bits a, Num a) => Int -> Int -> a
+bitRange h l = foldl' (\a i -> setBit a i) (fromInteger 0) [l..h]
+
 -- Group elements in the list (unlike groupBy, this function groups all
 -- equivalent elements, not just adjacent ones)
 sortAndGroup :: (Ord b) => (a -> b) -> [a] -> [[a]]
 sortAndGroup f = groupBy (\x y -> f x == f y) .
                  sortBy (\x y -> compare (f x) (f y))
+
+
+--Returns all combinations of a list of lists. Example:
+--allcomb [[1, 2], [3], [2, 3, 4]] = [[1, 3, 2], [1, 3, 3], [1, 3, 4], [2, 3, 2], [2, 3, 3], [2, 3, 4]]
+allComb :: [[a]] -> [[a]]
+allComb [] = [[]]
+--allComb ([]:xs) = allComb xs
+allComb (x:xs) = concatMap (h (allComb xs)) x
+    where h xs' x' = map (x' :) xs'

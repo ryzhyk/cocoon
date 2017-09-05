@@ -38,10 +38,12 @@ import System.IO.Unsafe
 import Util
 import Ops
 import Name
+import Backend
 import qualified IR.IR             as I
 import qualified IR.Compile2IR     as I
 import qualified IR.Registers      as I
 import qualified OpenFlow.OpenFlow as O
+import qualified Backend           as B
 import qualified Syntax            as C -- Cocoon
 import qualified Relation          as C
 import qualified NS                as C
@@ -57,11 +59,11 @@ maxOFTables = 255
 
 -- For each switch table
 --  Compute and compile all port roles, perform register and OF table allocation
-precompile :: (MonadError String me) => FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
-precompile workdir r rfile = do
+precompile :: (MonadError String me) => StructReify -> FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
+precompile structs workdir r rfile = do
     let swrels = filter C.relIsSwitch $ C.refineRels r
     (liftM M.fromList) 
-     $ mapM (\rel -> do let ir = I.compileSwitch workdir r rel
+     $ mapM (\rel -> do let ir = I.compileSwitch structs workdir r rel
                         ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
                                                     let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
                                                     trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
@@ -92,24 +94,24 @@ assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel 
 
 -- New switch event
 --   Store the list of tables this switch depends on
-buildSwitch :: C.Refine -> IRSwitch -> I.DB -> SwitchId -> [O.Command]
-buildSwitch r ports db swid = table0 : (staticcmds ++ updcmds)
+buildSwitch :: B.FieldMap -> C.Refine -> IRSwitch -> I.DB -> SwitchId -> [O.Command]
+buildSwitch fldmap r ports db swid = table0 : (staticcmds ++ updcmds)
     where
     table0 = O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]
     -- Configure static part of the pipeline
-    staticcmds = concatMap (\(_, pl) -> concatMap (mkNode pl) $ G.labNodes $ I.plCFG pl) ports
+    staticcmds = let ?f = fldmap in concatMap (\(_, pl) -> concatMap (mkNode pl) $ G.labNodes $ I.plCFG pl) ports
     -- Configure dynamic part from primary tables
-    updcmds = updateSwitch r ports swid (M.map (map (True,)) db)
+    updcmds = updateSwitch fldmap r ports swid (M.map (map (True,)) db)
 
-updateSwitch :: C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
-updateSwitch r ports swid db = portcmds ++ nodecmds
+updateSwitch :: B.FieldMap -> C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
+updateSwitch fldmap r ports swid db = portcmds ++ nodecmds
     where
     -- update table0 if ports have been added or removed
-    portcmds = concatMap (\(prel, pl) -> updatePort (prel,pl) swid db) ports
+    portcmds = let ?f=fldmap in concatMap (\(prel, pl) -> updatePort (prel,pl) swid db) ports
     -- update pipeline nodes
-    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl) $ G.labNodes $ I.plCFG pl) ports
+    nodecmds = let ?f=fldmap in concatMap (\(_, pl) -> concatMap (updateNode r db pl) $ G.labNodes $ I.plCFG pl) ports
 
-updatePort :: (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
+updatePort :: (?f::B.FieldMap) => (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
 updatePort (prel, pl) i db = delcmd ++ addcmd
     where
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
@@ -118,7 +120,7 @@ updatePort (prel, pl) i db = delcmd ++ addcmd
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [mkGoto pl $ I.plEntryNode pl]) $ match f) add
 
-mkNode :: I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
+mkNode :: (?f::B.FieldMap) => I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
 mkNode pl (nd, node) = 
     case node of
          I.Par bs            -> [ O.AddGroup $ O.Group nd O.GroupAll $ map (O.Bucket Nothing . mkStaticBB pl) bs 
@@ -127,7 +129,7 @@ mkNode pl (nd, node) =
          I.Lookup _ _ _ _ el -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pl el]
          I.Fork{}            -> [O.AddGroup $ O.Group nd O.GroupAll []]
 
-updateNode :: C.Refine -> I.Delta -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
+updateNode :: (?f::B.FieldMap) => C.Refine -> I.Delta -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
 updateNode r db portpl (nd, node) = 
     case node of
          I.Par _              -> []
@@ -158,21 +160,21 @@ recordField rec fexpr = rec M.! fname
     mkname (C.E (C.EField _ e fl)) = mkname e I..+ fl
     mkname e                       = error $ "IR2OF.mkname " ++ show e
 
-mkStaticBB :: I.Pipeline -> I.BB -> [O.Action]
+mkStaticBB :: (?f::B.FieldMap) => I.Pipeline -> I.BB -> [O.Action]
 mkStaticBB pl b = mkBB pl (error "IR2OF.mkStaticBB requesting field value") b
 
-mkBB :: I.Pipeline -> I.Record -> I.BB -> [O.Action]
+mkBB :: (?f::B.FieldMap) => I.Pipeline -> I.Record -> I.BB -> [O.Action]
 mkBB pl val (I.BB as n) = map (mkAction val) as ++ [mkNext pl val n]
 
-mkAction :: I.Record -> I.Action -> O.Action
+mkAction :: (?f::B.FieldMap) => I.Record -> I.Action -> O.Action
 mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
 mkAction _   a              = error $ "not implemented: IR2OF.mkAction" ++ show a
 
-mkExpr :: I.Record -> I.Expr -> O.Expr
+mkExpr :: (?f::B.FieldMap) => I.Record -> I.Expr -> O.Expr
 mkExpr val e = 
     case e of
-         I.EPktField f t   -> O.EField (O.Field f $ I.typeWidth t) Nothing
-         I.EVar      v t   -> O.EField (O.Field v $ I.typeWidth t) Nothing
+         I.EPktField f t   -> O.EField (O.Field (?f M.! f) $ I.typeWidth t) Nothing
+         I.EVar      v t   -> O.EField (O.Field (B.FName v) $ I.typeWidth t) Nothing
          I.ECol      c _   -> case M.lookup c val of
                                    Nothing -> error $ "IR2OF.mkExpr: unknown column: " ++ show c
                                    Just v  -> mkExpr val v
@@ -185,17 +187,17 @@ slice (O.EField f Nothing)       h l = O.EField f $ Just (h, l)
 slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
-mkLookupFlow :: I.Pipeline -> I.Record -> I.Pipeline -> I.BB -> [O.Flow]
+mkLookupFlow :: (?f::B.FieldMap) => I.Pipeline -> I.Record -> I.Pipeline -> I.BB -> [O.Flow]
 mkLookupFlow pl val lpl b = map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch lpl val
     as = mkBB pl val b
     
-mkCond :: [(I.Expr, [O.Action])] -> [([O.Match], [O.Action])]
+mkCond :: (?f::B.FieldMap) => [(I.Expr, [O.Action])] -> [([O.Match], [O.Action])]
 mkCond []          = [([], [O.ActionDrop])]
 mkCond ((c, a):cs) = mkCond' c [([], a)] $ mkCond cs
 
-mkCond' :: I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
+mkCond' :: (?f::B.FieldMap) => I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
 mkCond' c yes no = 
     case c of
          I.EBinOp Eq e1 e2 | isbool e1 -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
@@ -217,7 +219,7 @@ isbool (I.EUnOp Not _)         = True
 isbool _                       = False
 
 -- TODO: use BDDs to encode arbitrary pipelines
-mkPLMatch :: I.Pipeline -> I.Record -> [[O.Match]]
+mkPLMatch :: (?f::B.FieldMap) => I.Pipeline -> I.Record -> [[O.Match]]
 mkPLMatch I.Pipeline{..} val = 
     if G.size plCFG == 2 
        then case G.lab plCFG plEntryNode of
@@ -230,7 +232,7 @@ mkPLMatch I.Pipeline{..} val =
     cs2expr ((c, _):cs)              = I.EBinOp And (I.EUnOp Not c) $ cs2expr cs
     cs2expr []                       = I.EBool False 
 
-mkSimpleCond :: I.Record -> I.Expr -> [[O.Match]]
+mkSimpleCond :: (?f::B.FieldMap) => I.Record -> I.Expr -> [[O.Match]]
 mkSimpleCond val c = 
     case c of
          I.EBinOp Eq e1 e2 | not (isbool e1) 
@@ -256,14 +258,14 @@ concatMatches m1 m2 = foldM (\ms m@(O.Match f msk v) ->
 combineMatches :: O.Field -> (Maybe O.Mask, O.Value) -> (Maybe O.Mask, O.Value) -> Maybe O.Match
 combineMatches f (mm1, O.Value w v1) (mm2, O.Value _ v2) = if v1' == v2' then Just (O.Match f m' $ O.Value w v') else Nothing
     where m1 = case mm1 of
-                    Nothing           -> -1
-                    Just (O.Mask _ m) -> m
+                    Nothing            -> -1
+                    Just (O.Value _ m) -> m
           m2 = case mm2 of
-                    Nothing           -> -1
-                    Just (O.Mask _ m) -> m
+                    Nothing            -> -1
+                    Just (O.Value _ m) -> m
           v1' = v1 .&. m1 .&. m2
           v2' = v2 .&. m1 .&. m2
-          m' = if m1 .|. m2 == -1 then Nothing else Just (O.Mask w $ m1 .|. m2)
+          m' = if m1 .|. m2 == -1 then Nothing else Just (O.Value w $ m1 .|. m2)
           v' = (v1 .&. m1) .|. (v2 .&. m2)
 
 mkMatch :: O.Expr -> O.Expr -> [[O.Match]]
@@ -279,10 +281,9 @@ mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
     (O.EVal v2) = e2
     (O.EField f sl) = e1
     slice2mask :: O.Field -> Maybe (Int, Int) -> Maybe O.Mask
-    slice2mask fl msl = fmap (O.Mask (O.fieldWidth fl) . bitRange) msl
-    bitRange (h,l) = foldl' (\a i -> setBit a i) (0::Integer) [l..h]
+    slice2mask fl msl = fmap (O.Value (O.fieldWidth fl) . uncurry bitRange) msl
 
-mkNext :: I.Pipeline -> I.Record -> I.Next -> O.Action
+mkNext :: (?f::B.FieldMap) => I.Pipeline -> I.Record -> I.Next -> O.Action
 mkNext pl _ (I.Goto nd) = mkGoto pl nd
 mkNext _  r (I.Send e)  = O.ActionOutput $ mkExpr r e
 mkNext _  _ I.Drop      = O.ActionDrop

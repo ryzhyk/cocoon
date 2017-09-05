@@ -19,8 +19,11 @@ limitations under the License.
 {-# LANGUAGE ImplicitParams, RecordWildCards, OverloadedStrings, TupleSections, FlexibleContexts #-}
 
 module IR.Registers ( RegisterFile(..)
-                    , allocVarsToRegisters
-                    , ovsRegFile) where
+                    , Register(..)
+                    , RegField(..)
+                    , RegName
+                    , RegFieldName
+                    , allocVarsToRegisters) where
 
 import Control.Monad.State
 import Control.Monad.Except
@@ -51,35 +54,6 @@ data RegField = RegField { fieldName   :: RegFieldName
                          , fieldSize   :: Int
                          , fieldOffset :: Int
                          }
-
-ovsRegFile :: RegisterFile
-ovsRegFile = RegisterFile $
-             [ Register "metadata" 64   []
-             , Register "xxreg0"   128  [ RegField "xreg0"  64 64
-                                        , RegField "xreg1"  64 0
-                                        , RegField "reg0"   32 96
-                                        , RegField "reg1"   32 64
-                                        , RegField "reg2"   32 32
-                                        , RegField "reg3"   32 0]
-             , Register "xxreg1"   128  [ RegField "xreg2"  64 64
-                                        , RegField "xreg3"  64 0
-                                        , RegField "reg4"   32 96
-                                        , RegField "reg5"   32 64
-                                        , RegField "reg6"   32 32
-                                        , RegField "reg7"   32 0]
-             , Register "xxreg2"   128  [ RegField "xreg4"  64 64
-                                        , RegField "xreg5"  64 0
-                                        , RegField "reg8"   32 96
-                                        , RegField "reg9"   32 64
-                                        , RegField "reg10"  32 32
-                                        , RegField "reg11"  32 0]
-             , Register "xxreg3"   128  [ RegField "xreg6"  64 64
-                                        , RegField "xreg7"  64 0
-                                        , RegField "reg12"  32 96
-                                        , RegField "reg13"  32 64
-                                        , RegField "reg14"  32 32
-                                        , RegField "reg15"  32 0]
-             ]
 
 vRegName :: VarName -> String
 vRegName v = v ++ "#reg"

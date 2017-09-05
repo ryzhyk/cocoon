@@ -35,8 +35,8 @@ import Controller
 import CLI
 import Syntax
 import Refine
-import qualified IR.Registers   as IR
 import qualified OpenFlow.IR2OF as OF
+import qualified OpenFlow.OVS   as OF
 
 data TOption = CCN String
              | Action String
@@ -156,7 +156,7 @@ main = do
          ActionController -> do 
              combined <- readValidateAddDelta fname workdir
              putStrLn "Compiling"
-             ir <- case OF.precompile workdir combined IR.ovsRegFile of
+             ir <- case OF.precompile OF.ovsStructReify workdir combined OF.ovsRegFile of
                         Left e  -> error e
                         Right x -> return x
              let logfile = workdir </> addExtension basename "log"
@@ -180,7 +180,7 @@ main = do
                                       writeFile rdotname $ unpack $ IR.cfgToDot $ IR.plCFG reg) 
                    $ refinePortRoles combined -}
              putStrLn "Starting controller"
-             controllerStart basename dfpath logfile (confCtlPort config) combined ir
+             controllerStart workdir basename dfpath logfile (confCtlPort config) combined ir
              controllerCLI histfile (confCtlPort config)
          ActionNone -> error "action not specified"
  

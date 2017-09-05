@@ -64,12 +64,14 @@ import qualified IR.Compile2IR           as IR
 data Msg = MsgSync       -- database changed -- reconfigure the switches
          | MsgTerminate  -- disconnecting -- terminate
 
-data ControllerState = ControllerDisconnected { ctlDBName       :: String
+data ControllerState = ControllerDisconnected { ctlWorkDir      :: FilePath
+                                              , ctlDBName       :: String
                                               , ctlDFPath       :: FilePath
                                               , ctlRefine       :: Refine
                                               , ctlIR           :: OF.IRSwitches
                                               }
-                     | ControllerConnected    { ctlDBName       :: String
+                     | ControllerConnected    { ctlWorkDir      :: FilePath 
+                                              , ctlDBName       :: String
                                               , ctlDFPath       :: FilePath
                                               , ctlRefine       :: Refine
                                               , ctlIR           :: OF.IRSwitches
@@ -90,13 +92,13 @@ data Violation = Violation Relation Constraint DL.Fact
 instance Show Violation where
     show (Violation rel c f) = "row " ++ show f ++ " violates constraint " ++ show c ++ " on table " ++ name rel
 
-controllerStart :: String -> FilePath -> FilePath -> Int -> Refine -> OF.IRSwitches -> IO ()
-controllerStart dbname dfpath logfile port r switches = do
+controllerStart :: FilePath -> String -> FilePath -> FilePath -> Int -> Refine -> OF.IRSwitches -> IO ()
+controllerStart workdir dbname dfpath logfile port r switches = do
     let dopts = DaemonOptions{ daemonPort           = port
                              , daemonPidFile        = InHome
                              , printOnDaemonStarted = True}
     lock <- L.new
-    ref <- newIORef (Nothing, ControllerDisconnected dbname dfpath r switches)
+    ref <- newIORef (Nothing, ControllerDisconnected workdir dbname dfpath r switches)
     ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
 controllerLoop :: L.Lock -> IORef DaemonState -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
@@ -192,7 +194,7 @@ connect ControllerDisconnected{..} = do
         (do xlock <- L.new
             xsem  <- MV.newEmptyMVar
             tsem  <- MV.newEmptyMVar
-            let ?s = ControllerConnected ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
+            let ?s = ControllerConnected ctlWorkDir ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
             populateDB
             syncThr <- T.forkIO $ syncThread ?s
             let s = ?s{ctlSyncThread = syncThr}
@@ -216,7 +218,7 @@ disconnect s@ControllerConnected{..} = do
     _ <- MV.takeMVar ctlTermSem
     (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
     PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
-    return $ (ControllerDisconnected ctlDBName ctlDFPath ctlRefine ctlIR, "Disconnected")
+    return $ (ControllerDisconnected ctlWorkDir ctlDBName ctlDFPath ctlRefine ctlIR, "Disconnected")
 disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
 
 start :: Action
@@ -368,9 +370,9 @@ sync = do
     --  * send commands to the switch via ovs-ofctl (starting with resetting to clean state)
     failed <- liftM (map fst . filter (not . snd) . concat)
               $ mapM (\rel -> mapM (\f -> let swid = factSwitchId rel f
-                                              cmds = OF.buildSwitch ctlRefine (ctlIR M.! name rel) reldb swid in
+                                              cmds = OF.buildSwitch OF.ovsFieldMap ctlRefine (ctlIR M.! name rel) reldb swid in
                                               do resetSwitch f
-                                                 sendCmds f cmds
+                                                 sendCmds (name rel) swid f cmds
                                                  return ((name rel, swid), True)
                                               `catch` (\(SomeException _) -> return ((name rel, swid), False)))
                               $ filter (not . factSwitchFailed)
@@ -383,15 +385,17 @@ sync = do
     failed' <- liftM ((failed ++) . map fst . filter (not . snd) . concat)
                $ mapM (\rel -> do swfacts <- liftM (map (\f -> (factSwitchId rel f, f))) $ DL.enumRelation ctlDL (name rel) 
                                   let swfacts' = filter (\(swid, _) -> isNothing $ find (==(name rel, swid)) failed) swfacts
-                                  mapM (\(swid, f) -> do let cmds = OF.updateSwitch ctlRefine (ctlIR M.! name rel) swid delta
-                                                         sendCmds f cmds
+                                  mapM (\(swid, f) -> do let cmds = OF.updateSwitch OF.ovsFieldMap ctlRefine (ctlIR M.! name rel) swid delta
+                                                         sendCmds (name rel) swid f cmds
                                                          return ((name rel, swid), True)
                                                       `catch` (\(SomeException _) -> return ((name rel,swid), False)))
                                         swfacts')
                $ refineSwitchRels ctlRefine
     -- Reconfiguration finished; update the DB (in one transaction):
     --  * add Delta to realized
-    --  * mark failed switches as disabled in desired 
+    --  * mark failed switches as disabled in desired (note: only
+    --  switches that are still in the desired configuration will be
+    --  marked; some of the failed switches may have been deleted by the user)
     _start ?s
     mapM_ (\(pol, DL.Fact rel args) -> let rel' = relRealizedName rel
                                            f = DL.Fact rel' args in
@@ -409,11 +413,11 @@ sync = do
 
 -- send OpenFlow commands to the switch; returns False in case of
 -- failure
-sendCmds :: (?s::ControllerState) => DL.Fact -> [OF.Command] -> IO ()
-sendCmds f cmds = 
+sendCmds :: (?s::ControllerState) => String -> Integer -> DL.Fact -> [OF.Command] -> IO ()
+sendCmds rname swid f cmds = 
     let E (EString _ swaddr) = factField f (\v -> eField v "address")
         E (EString _ swname) = factField f (\v -> eField v "name")
-    in OF.ovsSendCmds swaddr swname cmds
+    in OF.ovsSendCmds (ctlWorkDir ?s) rname swid swaddr swname cmds
 
 resetSwitch :: (?s::ControllerState) => DL.Fact -> IO ()
 resetSwitch f = 
@@ -431,7 +435,7 @@ readDelta = do
                                                       let facts' = map (\(DL.Fact _ ((SMT.EBool p):as)) -> (p, DL.Fact rname as)) facts
                                                       return (rname, facts')) usedandsw
    let irdelta = M.mapWithKey (\rname facts -> 
-                                map (mapSnd $ (IR.val2Record ctlRefine rname) . eStruct rname . map SMT.exprFromSMT . DL.factArgs) facts) 
+                                map (mapSnd $ (IR.val2Record ctlRefine OF.ovsStructReify rname) . eStruct rname . map SMT.exprFromSMT . DL.factArgs) facts) 
                  $ M.restrictKeys ofdelta $ S.fromList used
    return (irdelta, ofdelta)
 
@@ -447,4 +451,4 @@ readRealized rels =
 enumRelationIR :: (?s::ControllerState) => String -> String -> IO [IR.Record]
 enumRelationIR nrel nconstr = do
     facts <- DL.enumRelation (ctlDL ?s) nrel
-    return $ map (IR.val2Record (ctlRefine ?s) nconstr . eStruct nconstr . map SMT.exprFromSMT . DL.factArgs) facts
+    return $ map (IR.val2Record (ctlRefine ?s) OF.ovsStructReify nconstr . eStruct nconstr . map SMT.exprFromSMT . DL.factArgs) facts

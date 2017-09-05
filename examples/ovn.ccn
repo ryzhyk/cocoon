@@ -49,17 +49,18 @@ typedef Packet = Packet {
 
 }
 
-typedef eth_pkt_t = EtherPacket { portnum : bit<16>
-                                , src     : mac_addr_t
-                                , dst     : mac_addr_t
-                                , vlan    : vlan_t
-                                , l3      : l3_pkt_t}
+enum eth_pkt_t:bit<16> = EtherPacket { portnum : bit<16>
+                                     , src     : mac_addr_t
+                                     , dst     : mac_addr_t
+                                     , vlan    : vlan_t
+                                     , l3      : l3_pkt_t}
 
 typedef vlan_t = VLANNone
                | VLAN { pcp : bit<3>
                       , dei : bit<1>
                       , vid : bit<12>}
 
+#
 typedef l3_pkt_t = L3PktIP4   { ip4 : ip4_pkt_t
                               , l4  : l4_pkt_t}
                  | L3PktIP6   { ip6 : ip6_pkt_t

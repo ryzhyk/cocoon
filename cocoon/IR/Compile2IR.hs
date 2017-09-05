@@ -42,6 +42,7 @@ import Name
 import Type
 import Validate
 import Role
+import Backend
 import qualified IR.IR       as I
 import qualified IR.Optimize as I
 
@@ -67,15 +68,16 @@ updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from)
                                                                 cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
                                                             in I.Pipeline vs cfg'' end
 
-compileSwitch :: FilePath -> Refine -> Relation -> [(String, I.Pipeline)]
-compileSwitch workdir r rel = map (\port -> (name port, compilePort workdir r port)) ports
+compileSwitch :: StructReify -> FilePath -> Refine -> Relation -> [(String, I.Pipeline)]
+compileSwitch structs workdir r rel = map (\port -> (name port, compilePort structs workdir r port)) ports
     where
     ports = filter (\role -> roleIsInPort r (name role) && portRoleSwitch r role == name rel) 
                    $ refineRoles r
 
-compilePort :: FilePath -> Refine -> Role -> I.Pipeline
-compilePort workdir r role =
+compilePort :: StructReify ->  FilePath -> Refine -> Role -> I.Pipeline
+compilePort structs workdir r role =
     let ?r = r in 
+    let ?s = structs in
     let compiled = execState (compilePort' role) (I.Pipeline M.empty G.empty 0)
         dotname = workdir </> addExtension (name role) "dot"
         odotname = workdir </> addExtension (addExtension (name role) "opt") "dot"
@@ -83,7 +85,7 @@ compilePort workdir r role =
                     $ I.optimize 0 compiled 
     in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG optimized) odotname; return ""}) optimized
 
-compilePort' :: (?r::Refine) => Role -> CompileState ()
+compilePort' :: (?s::StructReify, ?r::Refine) => Role -> CompileState ()
 compilePort' role@Role{..} = do 
     entrynd <- allocNode
     setEntryNode entrynd
@@ -103,13 +105,13 @@ compilePort' role@Role{..} = do
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
 
-compileExpr :: (?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
+compileExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
 compileExpr vars ctx exitnd e = do
     entrynd <- allocNode
     vars' <- compileExprAt vars ctx entrynd exitnd e
     return (entrynd, vars')
 
-compileExprAt :: (?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
+compileExprAt :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
 compileExprAt vars ctx entrynd exitnd (E e@(ESeq _ e1 e2)) = do
     entrynd2 <- allocNode
     vars' <- compileExprAt vars (CtxSeq1 e ctx) entrynd (Just entrynd2) e1
@@ -232,7 +234,7 @@ compileExprAt vars _   entrynd exitnd (E EAnon{})    = ignore vars entrynd exitn
 compileExprAt _    _   _       _      e              = error $ "Compile2IR: compileExprAt " ++ show e
 
 -- Compile boolean expression and determine its dependencies without changing compilation state
-exprDeps :: (?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
+exprDeps :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Relation -> String -> Expr -> I.Pipeline -> ([I.VarName], I.Pipeline)
 exprDeps vars ctx rel relvar e pl = (deps, pl''')
     where (entry, pl') = runState (exprDeps' vars ctx e) pl
           -- isolate subgraph that computes e only
@@ -251,7 +253,7 @@ exprDeps vars ctx rel relvar e pl = (deps, pl''')
           --evars' = I.plVars pl'' M.\\ I.plVars pl
 
 
-exprDeps' :: (?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
+exprDeps' :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> CompileState I.NodeId
 exprDeps' vars ctx e = do
     -- make sure I.optimize keep variables that effect the result of e
     -- by inserting a fake drop depending on the value of e. 
@@ -272,7 +274,7 @@ ignore vars entrynd exitnd = do
     updateNode entrynd (I.Par [I.BB [] $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
     return vars
 
-declVar :: (?r::Refine) => VMap -> String -> Type -> I.NodeId -> CompileState (VMap, [(I.VarName, I.Type)])
+declVar :: (?s::StructReify, ?r::Refine) => VMap -> String -> Type -> I.NodeId -> CompileState (VMap, [(I.VarName, I.Type)])
 declVar vars vname vtype nd = do
     let vname' = vnameAt vname nd
     let vs = var2Scalars vname' vtype
@@ -282,13 +284,13 @@ declVar vars vname vtype nd = do
 vnameAt :: String -> I.NodeId -> I.VarName
 vnameAt v nd = v ++ "@" ++ show nd
 
-declAsnVar :: (?r::Refine) => VMap -> String -> Type -> I.NodeId -> [I.Expr] -> CompileState (VMap, [I.Action])
+declAsnVar :: (?s::StructReify, ?r::Refine) => VMap -> String -> Type -> I.NodeId -> [I.Expr] -> CompileState (VMap, [I.Action])
 declAsnVar vars vname vtype nd vals = do
     (vars', vs) <- declVar vars vname vtype nd
     let asns = map (uncurry I.ASet) $ zip (map (uncurry I.EVar) vs) vals
     return (vars', asns)
 
-mkMatchCond :: (?r::Refine) => VMap -> ECtx -> Expr -> Expr -> (I.Expr, [I.Action])
+mkMatchCond :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> Expr -> (I.Expr, [I.Action])
 mkMatchCond vars ctx m pat = (I.conj conds, acts)
     where
     (conds, acts) = foldl' (\(cs, as) (e1, me2) -> 
@@ -301,33 +303,33 @@ mkMatchCond vars ctx m pat = (I.conj conds, acts)
 matchVars :: (?r::Refine) => ECtx -> Expr -> [(String, Type)]
 matchVars ctx e = map (\(v, ctx') -> (v, exprType ?r ctx' $ eVarDecl v)) $ exprVarDecls ctx e
 
-expandPattern :: (?r::Refine) => VMap -> ECtx -> Expr -> [Maybe I.Expr]
+expandPattern :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> [Maybe I.Expr]
 expandPattern vars ctx e = exprTreeFlatten $ exprFoldCtx (expandPattern' vars) ctx e
 
-expandPattern' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
+expandPattern' :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree (Maybe I.Expr)) -> ExprTree (Maybe I.Expr)
 expandPattern' vars ctx (EVarDecl _ v)   = fields "" (exprType ?r ctx $ eVarDecl v) (\t n -> Just $ I.EVar ((vars M.! v) .+ n) t)
 expandPattern' _    ctx (EPHolder _)     = fields "" (exprType ?r ctx ePHolder) (\_ _ -> Nothing)
 expandPattern' _    _   (EStruct _ c fs) = ETNode $ tag ++ fls
-    where TStruct _ cs = fromJust $ tdefType $ consType ?r c
+    where t@(TypeDef _ _ (Just (TStruct _ cs))) = consType ?r c
           Constructor{..} = getConstructor ?r c
-          tag = if' (needsTag cs) [("_tag", ETLeaf $ Just $ I.EBit (tagWidth cs) (tagVal cs c))] []
+          tag = if needsTag t then [("_tag", ETLeaf $ Just $ I.EBit (tagWidth t) (tagVal cs c))] else []
           fls = map (\f -> let tree = case findIndex (== f) consArgs of
                                            Just i  -> fs !! i
                                            Nothing -> fields "" (typ f) (\_ _ -> Nothing)
-                                      in (name f, tree)) $ structFields cs
+                           in (name f, tree)) $ structFields cs
 expandPattern' _    _   (ETuple _ fs)    = ETNode $ mapIdx (\f i -> (show i, f)) fs
 expandPattern' _    _   e                = error $ "Compile2IR.expandPattern' " ++ show e
 
 -- function calls
 -- version of expr2Statement that inlines function calls
 
-mkScalarExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> I.Expr
+mkScalarExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> I.Expr
 mkScalarExpr vars ctx e = e' where [e'] = mkExpr vars ctx e
 
-relCols :: (?r::Refine) => Relation -> [I.Expr]
+relCols :: (?s::StructReify, ?r::Refine) => Relation -> [I.Expr]
 relCols rel = exprTreeFlatten $ fields "" (relRecordType rel) $ \t n -> I.ECol n t
 
-var2Scalars :: (?r::Refine) => String -> Type -> [(I.VarName, I.Type)]
+var2Scalars :: (?s::StructReify, ?r::Refine) => String -> Type -> [(I.VarName, I.Type)]
 var2Scalars v t = exprTreeFlatten $ fields "" t $ \t' n -> (v .+ n, t')
 
 data ExprTree a = ETNode [(String, ExprTree a)] 
@@ -340,26 +342,26 @@ instance PP a => PP (ExprTree a) where
 instance PP a => Show (ExprTree a) where
     show = render . pp
 
-mkExpr :: (?r::Refine) => VMap -> ECtx -> Expr -> [I.Expr]
+mkExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Expr -> [I.Expr]
 mkExpr vars ctx e = {-trace ("mkExpr " ++ show e ++ " in\n" ++ show ctx) $ -} exprTreeFlatten $ exprFoldCtx (mkExpr' vars) ctx e
 
-mkExpr' :: (?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree I.Expr) -> ExprTree I.Expr
+mkExpr' :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> ExprNode (ExprTree I.Expr) -> ExprTree I.Expr
 mkExpr' vars ctx (EVar _ v)                          = {-trace ("\n\n\n\n***************EVar " ++ show v ++ " in\n" ++ show ctx ++ "\nvars: " ++ show vars) $-} fields "" (typ $ getVar ?r ctx v) (\t n -> I.EVar ((vars M.! v) .+ n) t)
 mkExpr' _    _   (EPacket _)                         = fields "" (fromJust $ tdefType $ getType ?r packetTypeName) (flip I.EPktField)
 mkExpr' _    _   (EField _ (ETNode fs) f)            = fromJust $ lookup f fs
 mkExpr' _    _   (EBool _ b)                         = ETLeaf $ I.EBool b
 mkExpr' _    _   (EBit _ w v)                        = ETLeaf $ I.EBit w v
-mkExpr' _    ctx (EInt _ v)                        = case typ' ?r $ exprType ?r ctx (eInt v) of    
-                                                          TBit _ w -> ETLeaf $ I.EBit w v
-                                                          _        -> error $ "Compile2IR.mkExpr' " ++ show v ++ " not a bitvector type"
+mkExpr' _    ctx (EInt _ v)                          = case typ' ?r $ exprType ?r ctx (eInt v) of    
+                                                            TBit _ w -> ETLeaf $ I.EBit w v
+                                                            _        -> error $ "Compile2IR.mkExpr' " ++ show v ++ " not a bitvector type"
 mkExpr' _    _   (EStruct _ c fs)                    = ETNode $ tag ++ fls
-    where TStruct _ cs = fromJust $ tdefType $ consType ?r c
+    where t@(TypeDef _ _ (Just (TStruct _ cs))) = consType ?r c
           Constructor{..} = getConstructor ?r c
-          tag = if' (needsTag cs) [("_tag", ETLeaf $ I.EBit (tagWidth cs) (tagVal cs c))] []
+          tag = if needsTag t then [("_tag", ETLeaf $ I.EBit (tagWidth t) (tagVal cs c))] else []
           fls = map (\f -> let tree = case findIndex (== f) consArgs of
                                            Just i  -> fs !! i
                                            Nothing -> defaultETree $ typ f
-                                      in (name f, tree)) $ structFields cs
+                           in (name f, tree)) $ structFields cs
 mkExpr' _   _   (ETuple _ fs)                       = ETNode $ mapIdx (\f i -> (show i, f)) fs 
 mkExpr' _   _   (ESlice _ (ETLeaf e) h l)           = ETLeaf $ I.ESlice e h l
 mkExpr' _   _   (EBinOp _ op (ETLeaf e1) (ETLeaf e2)) = ETLeaf $ I.EBinOp op e1 e2
@@ -380,12 +382,13 @@ mkExpr' _   _   e                                   = error $ "Compile2IR.mkExpr
 (.+) s1 s2 = s1 ++ "." ++ s2
 
 
-fields :: (?r::Refine) => String -> Type -> (I.Type -> String -> a) -> ExprTree a
+fields :: (?s::StructReify, ?r::Refine) => String -> Type -> (I.Type -> String -> a) -> ExprTree a
 fields pref t f = 
     case typ' ?r t of
          TBool _      -> ETLeaf $ f I.TBool pref
          TBit _ w     -> ETLeaf $ f (I.TBit w) pref
-         TStruct _ cs -> ETNode $ (if' (needsTag cs) [("_tag", fields (pref .+ "_tag") (tagType cs) f)] []) ++ (map (\fl -> (name fl, fields (pref .+ name fl) (typ fl) f)) $ structFields cs)
+         t'@TStruct{} -> let d = structTypeDef ?r t' in
+                         ETNode $ (if' (needsTag d) [("_tag", fields (pref .+ "_tag") (tagType d) f)] []) ++ (map (\fl -> (name fl, fields (pref .+ name fl) (typ fl) f)) $ structFields $ typeCons t')
          TTuple _ as  -> ETNode $ mapIdx (\t' i -> (show i, fields (pref .+ show i) t' f)) as
          t'           -> error $ "Compile2IR.fields " ++ show t'
 
@@ -394,34 +397,40 @@ exprTreeFlatten :: ExprTree a -> [a]
 exprTreeFlatten (ETLeaf x) = [x]
 exprTreeFlatten (ETNode ts) = concatMap (exprTreeFlatten . snd) ts
 
-defaultETree :: (?r::Refine) => Type -> ExprTree I.Expr
+defaultETree :: (?s::StructReify, ?r::Refine) => Type -> ExprTree I.Expr
 defaultETree t =
     case typ' ?r t of
          TBool _      -> ETLeaf $ I.EBool False
          TBit _ w     -> ETLeaf $ I.EBit w 0
-         TStruct _ cs -> ETNode $ (if' (needsTag cs) [("_tag", defaultETree $ tagType cs)] []) ++ (map (\fl -> (name fl, defaultETree (typ fl))) $ structFields cs)
+         t'@TStruct{} -> let d = structTypeDef ?r t' in
+                         ETNode $ (if' (needsTag d) [("_tag", defaultETree $ tagType d)] []) ++ (map (\fl -> (name fl, defaultETree (typ fl))) $ structFields $ typeCons t')
          TTuple _ as  -> ETNode $ mapIdx (\t' i -> (show i, defaultETree t')) as
          t'           -> error $ "Compile2IR.defaultETree " ++ show t'
 
-needsTag :: [Constructor] -> Bool
-needsTag cs = length cs > 1
+needsTag :: (?s::StructReify, ?r::Refine) => TypeDef -> Bool
+needsTag t = tagWidth t > 0
 
-tagWidth :: [Constructor] -> Int
-tagWidth cs = bitWidth $ length cs - 1
+tagWidth :: (?s::StructReify, ?r::Refine) => TypeDef -> Int
+tagWidth t = case M.lookup (tdefName t) (reifyWidth ?s) of
+                  Just w  -> w 
+                  Nothing -> bitWidth $ length (typeCons $ fromJust $ tdefType t) - 1
 
-tagType :: [Constructor] -> Type
-tagType cs = TBit nopos $ tagWidth cs
+tagType :: (?s::StructReify, ?r::Refine) => TypeDef -> Type
+tagType t = TBit nopos $ tagWidth t
 
-tagVal :: [Constructor] -> String -> Integer
-tagVal cs c = fromIntegral $ fromJust $ findIndex ((== c) . name) cs
+tagVal :: (?s::StructReify, ?r::Refine) => [Constructor] -> String -> Integer
+tagVal cs c = case M.lookup c (reifyCons ?s) of
+                   Just v  -> v
+                   Nothing -> fromIntegral $ fromJust $ findIndex ((== c) . name) cs
 
-val2Record :: Refine -> String -> Expr -> I.Record
-val2Record r rname e@(E (EStruct{})) = 
+val2Record :: Refine -> StructReify -> String -> Expr -> I.Record
+val2Record r structs rname e@(E (EStruct{})) = 
     let ?r = r in
+    let ?s = structs in
     let vals = mkExpr M.empty CtxRefine e
         rel = getRelation r rname
         names = exprTreeFlatten $ fields "" (relRecordType rel) (\_ n -> n)
     in M.fromList $ zip names vals
-val2Record _ _ e = error $ "Compile2IR.val2Record " ++ show e
+val2Record _ _ _ e = error $ "Compile2IR.val2Record " ++ show e
 
 
