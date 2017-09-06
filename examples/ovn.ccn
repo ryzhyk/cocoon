@@ -16,79 +16,43 @@ function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
 function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
 function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
-typedef Packet = Packet {
- *   - NXM_OF_IN_PORT
- *   - NXM_OF_ETH_DST
- *   - NXM_OF_ETH_SRC
- *   - NXM_OF_ETH_TYPE
- *   - NXM_OF_VLAN_TCI
- *   - NXM_OF_IP_TOS
- *   - NXM_OF_IP_PROTO
- *   - NXM_OF_IP_SRC
- *   - NXM_OF_IP_DST
- *   - NXM_OF_TCP_SRC
- *   - NXM_OF_TCP_DST
- *   - NXM_OF_UDP_SRC
- *   - NXM_OF_UDP_DST
- *   - NXM_OF_ICMP_TYPE
- *   - NXM_OF_ICMP_CODE
- *   - NXM_OF_ARP_OP
- *   - NXM_OF_ARP_SPA
- *   - NXM_OF_ARP_TPA
- *   - NXM_NX_TUN_ID
- *   - NXM_NX_ARP_SHA
- *   - NXM_NX_ARP_THA
- *   - NXM_NX_ICMPV6_TYPE
- *   - NXM_NX_ICMPV6_CODE
- *   - NXM_NX_ND_SLL
- *   - NXM_NX_ND_TLL
- *   - NXM_NX_REG(idx) for idx in the switch's accepted range.
- *   - NXM_NX_PKT_MARK
- *   - NXM_NX_TUN_IPV4_SRC
- *   - NXM_NX_TUN_IPV4_DST
+typedef Packet = eth_pkt_t
 
-}
+typedef eth_pkt_t = EthPacket { portnum : bit<16>
+                              , src     : mac_addr_t
+                              , dst     : mac_addr_t
+                              , vlan    : vlan_t
+                              , payload : eth_payload_t}
 
-enum eth_pkt_t:bit<16> = EtherPacket { portnum : bit<16>
-                                     , src     : mac_addr_t
-                                     , dst     : mac_addr_t
-                                     , vlan    : vlan_t
-                                     , l3      : l3_pkt_t}
-
-typedef vlan_t = VLANNone
-               | VLAN { pcp : bit<3>
-                      , dei : bit<1>
+typedef vlan_t = VLAN { pcp : bit<3>
+                      //, dei : bit<1> not supported by OVS
                       , vid : bit<12>}
 
-#
-typedef l3_pkt_t = L3PktIP4   { ip4 : ip4_pkt_t
-                              , l4  : l4_pkt_t}
-                 | L3PktIP6   { ip6 : ip6_pkt_t
-                              , l4  : l4_pkt_t}
-                 | L3PktARP   { arp : arp_pkt_t}
-                 | L3PktOther { ethertype : bit<16>}
+typedef eth_payload_t = EthIP4   {ip4 : ip4_pkt_t}
+                      | EthIP6   {ip6 : ip6_pkt_t}
+                      | EthARP   {arp : arp_pkt_t}
+                      //| EthOther {ethertype : bit<16>}
 
-typedef ip4_pkt_t = IP4Pkt { dscp  : bit<6>
-                           , ecn   : bit<2>
-                           , ttl   : bit<8>
-                           , frag  : bit<13>
-                           , mf    : bool
-                           , proto : bit<8>
-                           , src   : ip4_addr_t
-                           , dst   : ip4_addr_t}
+typedef ip4_pkt_t = IP4Pkt { dscp    : bit<6>
+                           , ecn     : bit<2>
+                           , ttl     : bit<8>
+                           , proto   : bit<8>
+                           , src     : ip4_addr_t
+                           , dst     : ip4_addr_t
+                           , payload : ip_payload_t}
 
-typedef ip6_pkt_t = IP6Pkt { dscp  : bit<6>
-                           , ecn   : bit<2>
-                           , ttl   : bit<8>
-                           , frag  : bit<13>
-                           , mf    : bool
-                           , label : bit<20>
-                           , proto : bit<8>
-                           , src   : ip6_addr_t
-                           , dst   : ip6_addr_t}
+typedef ip6_pkt_t = IP6Pkt { dscp    : bit<6>
+                           , ecn     : bit<2>
+                           , ttl     : bit<8>
+                           , label   : bit<20>
+                           , proto   : bit<8>
+                           , src     : ip6_addr_t
+                           , dst     : ip6_addr_t
+                           , payload : ip_payload_t}
 
 typedef arp_op_t = ARPRequest 
                  | ARPReply
+                 //| ARPOther {opcode : bit<16>}
 
 typedef arp_pkt_t = ARPPkt { op  : arp_op_t
                            , spa : ip4_addr_t
@@ -96,11 +60,11 @@ typedef arp_pkt_t = ARPPkt { op  : arp_op_t
                            , sha : mac_addr_t
                            , tha : mac_addr_t}
 
-typedef l4_pkt_t = L4PktTCP   { tcp : tcp_pkt_t}
-                 | L4PktUDP   { udp : udp_pkt_t}
-                 | L4PktICMP4 { icmp4 : icmp4_pkt_t}
-                 | L4PktICMP6 { icmp6 : icmp6_pkt_t}
-                 | L4PktOther { protocol : bit<8>}
+typedef ip_payload_t = IPTCP   { tcp : tcp_pkt_t}
+                     | IPUDP   { udp : udp_pkt_t}
+                     | IPICMP4 { icmp4 : icmp4_pkt_t}
+                     | IPICMP6 { icmp6 : icmp6_pkt_t}
+                     //| IPOther { protocol : bit<8>}
 
 typedef tcp_pkt_t = TCPPkt { src   : bit<16>
                            , dst   : bit<16>
@@ -123,6 +87,7 @@ table LocalNetwork( name: uuid_t
 
 #switch
 table LogicalSwitch( uuid : uuid_t
+                   , failed : bool
                    //, name : string
                    , primary key (uuid))
 
@@ -371,22 +336,22 @@ table ACLFrom ( srcAddr : ip_addr_masked_t
 function aclFrom ( switch_id : uuid_t
                  , port      : port_id_t
                  , packet    : Packet) : acl_action_t =
-    match (packet.l3) {
-        L3PktIP4{ip4, l4} -> the (rule in ACLFrom | ip4.proto == rule.proto and 
-                                                    port_match(l4_src_port(l4), rule.srcPort) and 
-                                                    port_match(l4_dst_port(l4), rule.dstPort) and 
-                                                    ip4_match(ip4.src, rule.srcAddr) and
-                                                    ip4_match(ip4.dst, rule.dstAddr)) {
-                                 rule.action
-                             },
-        L3PktIP6{ip6, l4} -> the (rule in ACLFrom | ip6.proto == rule.proto and
-                                                    port_match(l4_src_port(l4), rule.srcPort) and 
-                                                    port_match(l4_dst_port(l4), rule.dstPort) and 
-                                                    ip6_match(ip6.src, rule.srcAddr) and
-                                                    ip6_match(ip6.dst, rule.dstAddr)) {
-                                 rule.action
-                             },
-        _                 -> ActionAllow
+    match (packet.payload) {
+        EthIP4{ip4} -> the (rule in ACLFrom | ip4.proto == rule.proto and 
+                                              port_match(l4_src_port(ip4.payload), rule.srcPort) and 
+                                              port_match(l4_dst_port(ip4.payload), rule.dstPort) and 
+                                              ip4_match(ip4.src, rule.srcAddr) and
+                                              ip4_match(ip4.dst, rule.dstAddr)) {
+                            rule.action
+                        },
+        EthIP6{ip6} -> the (rule in ACLFrom | ip6.proto == rule.proto and
+                                              port_match(l4_src_port(ip6.payload), rule.srcPort) and 
+                                              port_match(l4_dst_port(ip6.payload), rule.dstPort) and 
+                                              ip6_match(ip6.src, rule.srcAddr) and
+                                              ip6_match(ip6.dst, rule.dstAddr)) {
+                           rule.action
+                       },
+        _           -> ActionAllow
     }
 
 function ip4_match(addr: ip4_addr_t, mask: ip_addr_masked_t): bool =
@@ -401,18 +366,18 @@ function ip6_match(addr: ip6_addr_t, mask: ip_addr_masked_t): bool =
         _                  -> false
     }
  
-function l4_src_port(l4: l4_pkt_t): bit<16> = 
+function l4_src_port(l4: ip_payload_t): bit<16> = 
     match (l4) { 
-        L4PktTCP{tcp} -> tcp.src,
-        L4PktUDP{udp} -> udp.src,
-        _             -> 16'd0
+        IPTCP{tcp} -> tcp.src,
+        IPUDP{udp} -> udp.src,
+        _          -> 16'd0
     }
 
-function l4_dst_port(l4: l4_pkt_t): bit<16> = 
+function l4_dst_port(l4: ip_payload_t): bit<16> = 
     match (l4) { 
-        L4PktTCP{tcp} -> tcp.dst,
-        L4PktUDP{udp} -> udp.dst,
-        _             -> 16'd0
+        IPTCP{tcp} -> tcp.dst,
+        IPUDP{udp} -> udp.dst,
+        _          -> 16'd0
     }
 
 function port_match(port: bit<16>, mask: port_masked_t): bool = mask.port == port
@@ -436,13 +401,13 @@ function aclTo ( switch_id : uuid_t
 procedure sourcePort(port: LogicalSwitchPort): LogicalPort =
     // trunk port?
     the (tport in TrunkPort | tport.port == port.name) {
-        if (pkt.vlan == VLANNone) drop;
+        if (pkt.vlan.vid == 12'd0) drop;
         var sport = the (x in LogicalPort | x.nested == NestedPort{port.name, pkt.vlan.vid}) x;
-        pkt.vlan = VLANNone;
+        pkt.vlan.vid = 12'd0;
         sport
     } default {
         // drop packets the VLAN tags or multicast Ethernet source addresses
-        if (pkt.vlan != VLANNone) drop;
+        if (pkt.vlan.vid != 12'd0) drop;
         the (x in LogicalPort | x.name == port.name) x
     }
 

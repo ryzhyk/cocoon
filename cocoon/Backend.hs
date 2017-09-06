@@ -25,11 +25,6 @@ import Syntax
 import qualified IR.IR as IR
 import qualified Datalog.Datalog as DL
 
-newtype FName = FName String deriving (Eq, Ord)
-
--- Map IR field names to names known to the backend
-type FieldMap = M.Map String FName
-
 -- reifyWidth - Number of bits to represent tags of tagged union (struct) types,
 -- reifyCons  - Backend-specific encoding of constructor values 
 data StructReify = StructReify { reifyWidth :: M.Map String Int

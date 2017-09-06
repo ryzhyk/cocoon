@@ -4,3 +4,4 @@
 -- (i.e, no strings or int's)
 -- Switch type must contain OpenFlow channel info: (protocol/host/port, bridge name)
 -- Packet type matches the OpenFlow packet type
+-- Roles should not write to TCP flags

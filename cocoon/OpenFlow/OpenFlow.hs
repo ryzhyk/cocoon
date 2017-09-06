@@ -26,7 +26,6 @@ import Text.PrettyPrint
 import Util
 import Name
 import PP
-import Backend
 
 type Mask = Value
 
@@ -40,12 +39,12 @@ data Value = Value { valWidth :: Int
 instance Show Value where
     show (Value _ v) = showHex v ""
 
-data Field = Field { fieldName  :: FName
+data Field = Field { fieldName  :: String
                    , fieldWidth :: Int}
                    deriving (Eq)
 
 instance WithName Field where
-    name (Field (FName n) _) = n
+    name = fieldName
 
 instance PP Field where
     pp = pp . name
