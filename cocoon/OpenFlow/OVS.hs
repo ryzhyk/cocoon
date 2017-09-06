@@ -69,11 +69,10 @@ ovsUpdateSwitch workdir r f@(DL.Fact rname _) ir delta = do
     sendCmds workdir rname swid swaddr swname cmds
 
 ovsResetSwitch :: FilePath -> Refine -> DL.Fact -> IO ()
-ovsResetSwitch workdir r f@(DL.Fact rname _) = do
-    let swid = DL.factSwitchId r rname f
-        E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
+ovsResetSwitch _ r f = do
+    let E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-    reset workdir rname swid swaddr swname
+    reset swaddr swname
 
 ovsRegFile :: RegisterFile
 ovsRegFile = RegisterFile $
@@ -364,9 +363,12 @@ matchAttributes = M.fromList
 -- add_or_mod, delete, insert_bucket, or remove_bucket, of which the 
 -- add is assumed if a bare group is given.
 
-reset :: FilePath -> String -> Integer -> String -> String -> IO ()
-reset _ _ _ _ _ = undefined
-
+reset :: String -> String -> IO ()
+reset swaddr swname = do
+   (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" [swaddr, "del-flowzbundle", swname] ""
+   when (code /= ExitSuccess) $ error $ "ovs-ofctl del-flows failed with exit code " ++ show code ++ 
+                                        "\noutput: " ++ stdo ++
+                                        "\nstd error: " ++ stde
 data Format = Hex
             | Dec
             | IP4
