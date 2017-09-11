@@ -548,7 +548,7 @@ procedure deliver(port: LogicalPort, fromport: port_id_t): sink =
     match (port.nested) {
         NestedPortNone         -> lportSendOut(port),
         NestedPort{pport, tag} -> {
-            pkt.vlan = VLAN{0, 0, tag};
+            pkt.vlan = VLAN{0, tag};
             the (outport in LogicalPort | outport.name == pport)
                 lportSendOut(outport)
         }

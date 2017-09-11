@@ -51,12 +51,13 @@ data CCNAction = ActionSQL
                | ActionDL
                | ActionController
                | ActionCLI
+               | ActionCommand
                | ActionNone
                deriving Eq
 
 options :: [OptDescr TOption]
 options = [ Option ['i'] []             (ReqArg CCN "FILE")            "input Cocoon file"
-          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, dl, controller, cli"
+          , Option []    ["action"]     (ReqArg Action "ACTION")       "action: one of sql, dl, controller, cli, cmd"
           , Option ['b'] ["bound"]      (ReqArg Bound "BOUND")         "integer bound on the number of hops"
           , Option []    ["boogie"]     (NoArg DoBoogie)               "enable Boogie backend"
           , Option []    ["1refinement"](NoArg Do1Refinement)          "generate Boogie encoding of one big refinement"
@@ -92,6 +93,7 @@ addOption config (Action a)     = do a' <- case a of
                                                 "sql"        -> return ActionSQL
                                                 "controller" -> return ActionController
                                                 "cli"        -> return ActionCLI
+                                                "cmd"        -> return ActionCommand
                                                 "dl"         -> return ActionDL
                                                 _            -> error "invalid action"
                                      return config{confAction = a'}
@@ -112,7 +114,7 @@ validateConfig :: Config -> IO ()
 validateConfig Config{..} = do
     when (confAction == ActionNone)
          $ error "action not specified"
-    when ((confAction /= ActionCLI) && (confCCNFile == ""))
+    when ((confAction /= ActionCLI) && (confAction /= ActionCommand) && (confCCNFile == ""))
          $ error "input file not specified"
 
 main = do
@@ -134,6 +136,10 @@ main = do
         histfile = workdir </> addExtension basename "history"
     case confAction config of
          ActionCLI -> controllerCLI histfile (confCtlPort config)
+         ActionCommand -> do 
+             cmd <- getContents
+             resp <- executeCmd (confCtlPort config) cmd
+             putStrLn resp
          ActionSQL -> do 
              combined <- readValidateAddDelta fname workdir
              let schema = mkSchema basename combined

@@ -16,7 +16,8 @@ limitations under the License.
 
 {-# LANGUAGE RecordWildCards, LambdaCase, ScopedTypeVariables, ImplicitParams, OverloadedStrings, PackageImports #-}
 
-module CLI (controllerCLI) where
+module CLI ( controllerCLI
+           , executeCmd) where
 
 import "daemons" System.Daemon
 import qualified Data.ByteString.Char8 as BS
@@ -32,10 +33,13 @@ controllerCLI hist port = runInputT defaultSettings{historyFile = Just hist} loo
               case minput of
                    Nothing     -> loop
                    Just "exit" -> return ()
-                   Just cmd    -> do
-                       resp::(Maybe BS.ByteString) <- lift $ runClient "localhost" port (BS.pack cmd)
-                       case resp of
-                            Nothing -> do outputStrLn $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
-                                          return ()
-                            Just r  -> do outputStrLn $ BS.unpack r 
-                                          loop
+                   Just cmd    -> do res <- lift $ executeCmd port cmd
+                                     outputStrLn res
+                                     loop
+
+executeCmd :: Int -> String -> IO String
+executeCmd port cmd = do 
+    resp::(Maybe BS.ByteString) <- runClient "localhost" port (BS.pack cmd)
+    case resp of
+         Nothing -> error $ "Unable to connect to cocoon controller.  Is the controller running on port " ++ show port ++ "?"
+         Just r  -> return $ BS.unpack r
