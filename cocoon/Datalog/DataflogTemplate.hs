@@ -378,9 +378,6 @@ version = "0.1.0"
 [dependencies.graph_map]
 git="https://github.com/frankmcsherry/graph-map.git"
 
-[dependencies.timely]
-git="https://github.com/frankmcsherry/timely-dataflow"
-
 [dependencies.differential-dataflow]
 git="https://github.com/frankmcsherry/differential-dataflow.git"
 
@@ -392,14 +389,15 @@ byteorder="0.4.2"
 itertools="^0.6"
 
 [dependencies]
-abomonation="0.4.4"
+abomonation="0.4.6"
 timely_sort="0.1.6"
-timely_communication="0.1.5"
+timely_communication="0.1.8"
+timely="0.3.0"
 fnv="1.0.2"
-num = "0.1"
-serde = "1.0"
-serde_derive = "1.0"
-serde_json = "1.0.2"
+num = "0.1.40"
+serde = "1.0.14"
+serde_derive = "1.0.14"
+serde_json = "1.0.3"
 
 [features]
 default = []
