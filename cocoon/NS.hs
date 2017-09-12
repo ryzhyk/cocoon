@@ -31,6 +31,7 @@ module NS(lookupType, checkType, getType,
 import Data.List
 import Control.Monad.Except
 import Data.Maybe
+import Debug.Trace
 
 import Syntax
 import Name
@@ -128,7 +129,8 @@ ctxAllVars r ctx = let (lvs, rvs) = ctxVars r ctx in lvs ++ rvs
 
 ctxVars :: Refine -> ECtx -> ([Field], [Field])
 ctxVars r ctx = let (lvs, rvs) = ctxMVars r ctx in
-                (map (\(n, Just t) -> Field nopos n t) lvs, map (\(n, Just t) -> Field nopos n t) rvs)
+                (map (\(n, mt) -> (Field nopos n $ maybe (error $ "variable " ++ n ++ " has unknown type") id mt)) lvs, 
+                 map (\(n, mt) -> (Field nopos n $ maybe (error $ "variable " ++ n ++ " has unknown type") id mt)) rvs)
 
 ctxMVars :: Refine -> ECtx -> ([MField], [MField])
 ctxMVars r ctx = 
@@ -150,7 +152,7 @@ ctxMVars r ctx =
                                      frel = getRelation r fname in
                                  ([], map f2mf $ relArgs frel)
          CtxCheck rel         -> ([], map f2mf $ relArgs rel)
-         CtxRuleL _ rl _      -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
+         CtxRuleL rel rl _    -> ([], vartypes $ concatMap (exprVars (CtxRuleR rel rl)) $ filter exprIsRelPred $ ruleRHS rl)
          CtxRuleR _ rl        -> ([], vartypes $ concatMap (exprVars ctx) $ filter exprIsRelPred $ ruleRHS rl)
          CtxBuiltin _ _ _     -> ([], plvars ++ prvars) -- disallow assignments inside func & builtin args, cause we care about correctness
          CtxApply _ _ _       -> ([], plvars ++ prvars)
