@@ -697,7 +697,7 @@ instance PP ECtx where
                     CtxCheck{..}      -> "CtxCheck     " <+> relname
                     CtxRuleL{..}      -> "CtxRuleL     " <+> relname <+> rule <+> pp ctxIdx
                     CtxRuleR{..}      -> "CtxRuleR     " <+> relname <+> rule
-                    CtxFunc{..}       -> "CtxFunc      " <+> relname <+> (pp $ name ctxFunc)
+                    CtxFunc{..}       -> "CtxFunc      " <+> (pp $ name ctxFunc)
                     CtxApply{..}      -> "CtxApply     " <+> epar <+> pp ctxIdx
                     CtxBuiltin{..}    -> "CtxBuiltin   " <+> epar <+> pp ctxIdx
                     CtxField{..}      -> "CtxField     " <+> epar
