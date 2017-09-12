@@ -38,6 +38,7 @@ data Type = TBool
           | TString
           | TBit Int
           | TStruct String
+          | TTuple [Type]
           | TArray Type Int
           deriving (Eq)
 
@@ -47,6 +48,7 @@ instance Show Type where
     show TInt         = "int"
     show TString      = "string"
     show (TStruct n)  = n
+    show (TTuple ts)  = "(" ++ (intercalate ", " $ map show ts) ++ ")"
     show (TArray t l) = "[" ++ show t ++ "; " ++ show l ++ "]"
 
 data Constructor = Constructor { consName :: String 
@@ -93,6 +95,7 @@ data Expr = EVar        String
           | EInt        Integer
           | EString     String
           | EStruct     String [Expr]
+          | ETuple      [Expr]
           | EIsInstance String Expr
           | EBinOp      BOp Expr Expr
           | EUnOp       UOp Expr 
@@ -112,6 +115,7 @@ instance PP Expr where
     pp (EInt i)          = pp i
     pp (EString s)       = "\"" <> pp s <> "\""
     pp (EStruct c as)    = pp c <> "{" <> (hsep $ punctuate comma $ map pp as)  <> "}"
+    pp (ETuple as)       = "(" <> (hsep $ punctuate comma $ map pp as)  <> ")"
     pp (EIsInstance c e) = "is_" <> pp c <> parens (pp e)
     pp (EBinOp op l r)   = parens $ pp l <+> pp op <+> pp r
     pp (EUnOp op e)      = parens $ pp op <+> pp e 
@@ -149,6 +153,7 @@ exprMap g e@(EBit _ _)        = g e
 exprMap g e@(EInt _)          = g e
 exprMap g e@(EString _)       = g e
 exprMap g   (EStruct c fs)    = g $ EStruct c $ map (exprMap g) fs
+exprMap g   (ETuple as)       = g $ ETuple $ map (exprMap g) as
 exprMap g   (EIsInstance c e) = g $ EIsInstance c $ exprMap g e
 exprMap g   (EBinOp op e1 e2) = g $ EBinOp op (exprMap g e1) (exprMap g e2)
 exprMap g   (EUnOp op e1)     = g $ EUnOp op $ exprMap g e1
@@ -160,6 +165,7 @@ exprCollect :: (Expr -> [a]) -> Expr -> [a]
 exprCollect f e@(EApply _ as)     = (concatMap (exprCollect f) as) ++ f e
 exprCollect f e@(EField _ s _)    = (exprCollect f s) ++ f e
 exprCollect f e@(EStruct _ as)    = (concatMap (exprCollect f) as) ++ f e
+exprCollect f e@(ETuple as)       = (concatMap (exprCollect f) as) ++ f e
 exprCollect f e@(EIsInstance _ a) = (exprCollect f a) ++ f e
 exprCollect f e@(EBinOp _ e1 e2)  = (exprCollect f e1) ++ (exprCollect f e2) ++ f e
 exprCollect f e@(EUnOp _ a)       = (exprCollect f a) ++ f e
@@ -204,6 +210,7 @@ typ _ _  (EBit w _)        = TBit w
 typ _ _  (EInt _)          = TInt
 typ _ _  (EString _)       = TString
 typ q _  (EStruct c _)     = TStruct $ structName $ getConsStruct q c
+typ q mf (ETuple as)       = TTuple $ map (typ q mf) as
 typ _ _  (EIsInstance _ _) = TBool
 typ q mf (EBinOp op e1 _)  | elem op [Eq, Lt, Gt, Lte, Gte, And, Or] = TBool
                            | elem op [Plus, Minus, Mod] = typ q mf e1
@@ -249,6 +256,9 @@ allValues q (TStruct n) = concatMap (map (EStruct n) . allvals . consArgs) cs
     where Struct _ cs = fromJust $ find ((==n) . name) $ smtStructs q
           allvals []          = [[]]
           allvals (f:fs') = concatMap (\v -> map (v:) $ allvals fs') $ allValues q $ varType f
+allValues q (TTuple ts) = map ETuple $ allvals $ ts
+    where allvals []      = [[]]
+          allvals (t:ts') = concatMap (\v -> map (v:) $ allvals ts') $ allValues q t
 allValues _ t           = error $ "Not implemented SMTSolver.allValues " ++ show t
 
 allSolutionsVar :: SMTSolver -> SMTQuery -> String -> [Expr]
@@ -270,6 +280,7 @@ solToArray (EBool True)   = [1]
 solToArray (EBool False)  = [0]
 solToArray (EBit _ i)     = [i]
 solToArray (EStruct _ es) = concatMap solToArray es
+solToArray (ETuple as)    = concatMap solToArray as
 solToArray e              = error $ "SMTSolver.solToArray " ++ show e
 
 

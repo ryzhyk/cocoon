@@ -81,14 +81,15 @@ func2SMT f@Function{..} = SMT.Function funcName
 
 typ2SMT :: (?r::Refine, WithType a) => a -> SMT.Type
 typ2SMT x = case typ' ?r x of
-                 TBool _      -> SMT.TBool
-                 TInt _       -> SMT.TInt
-                 TString _    -> SMT.TString
-                 TBit _ w     -> SMT.TBit w
-                 t@TStruct{}  -> SMT.TStruct $ name $ structTypeDef ?r t
-                 TArray _ t l -> SMT.TArray (typ2SMT t) l
-                 TLocation _  -> SMT.TBit 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
-                 t            -> error $ "SMT.typ2SMT " ++ show t
+                 TBool _       -> SMT.TBool
+                 TInt _        -> SMT.TInt
+                 TString _     -> SMT.TString
+                 TBit _ w      -> SMT.TBit w
+                 t@TStruct{}   -> SMT.TStruct $ name $ structTypeDef ?r t
+                 (TTuple _ ts) -> SMT.TTuple $ map typ2SMT ts
+                 TArray _ t l  -> SMT.TArray (typ2SMT t) l
+                 TLocation _   -> SMT.TBit 32 -- TODO: properly encode location to SMT as ADT with multiple constructors
+                 t             -> error $ "SMT.typ2SMT " ++ show t
 
 -- TODO: preprocess expression, substituting variables in the action
 -- clauses of match expressions
@@ -125,6 +126,8 @@ expr2SMT' ctx (EStruct _ c fs) | ctxInMatchPat ctx = let -- inside match case - 
                                                          c' = SMT.EIsInstance c $ ctx2Field e' ctx
                                                      in SMT.conj $ c' : (map snd fs)
                                | otherwise         = SMT.EStruct c $ map snd fs
+expr2SMT' ctx (ETuple _ as)    | ctxInMatchPat ctx = SMT.EBool True
+                               | otherwise         = SMT.ETuple $ map snd as
 expr2SMT' _   (EBinOp _ op (_,e1) (_, e2))         = SMT.EBinOp op e1 e2
 expr2SMT' _   (EUnOp _ op (_, e1))                 = SMT.EUnOp op e1
 expr2SMT' _   (EITE _ (_,i) (_,t) (Just (_,e)))    = SMT.ECond [(i, t)] e

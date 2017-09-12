@@ -96,6 +96,7 @@ instance SMTPP Type where
     smtpp _ (TBit w)     = pp $ "(_ BitVec " ++ show w ++ ")"
     smtpp _ (TStruct n)  = pp n
     smtpp q (TArray t _) = parens $ "Array" <+> "Int" <+> smtpp q t
+    smtpp _ (TTuple _)   = error $ "SMTLib2.smtpp: tuple types support not implemented"
 
 instance SMTPP Struct where
     smtpp q (Struct n cs) = parens $ "declare-datatypes ()" 
@@ -114,6 +115,7 @@ smtppExpr _ _  (EString s)        = pp $ "\"" ++ s ++ "\""
 smtppExpr q mf (EIsInstance c e)  = parens $ "is-" <> pp c <+> smtppExpr q mf e
 smtppExpr _ _  (EStruct c [])     = pp c
 smtppExpr q mf (EStruct c fs)     = parens (pp c <+> (hsep $ map (smtppExpr q mf) fs))
+smtppExpr _ _  (ETuple _)         = error "SMTLib2.smtppExpr: tuple types support not implemented"
 smtppExpr q mf (EBinOp Neq e1 e2) = smtppExpr q mf $ EUnOp Not $ EBinOp Eq e1 e2
 smtppExpr q mf (EBinOp op e1 e2)  = parens $ smtppBOp q mf op e1 <+> smtppExpr q mf e1 <+> smtppExpr q mf e2
 smtppExpr q mf (EUnOp op e)       = parens $ smtpp q op <+> smtppExpr q mf e

@@ -257,6 +257,7 @@ mkType (TBit w) | w <= 8    = "u8"
                 | w <= 64   = "u64"
                 | otherwise = "Uint"
 mkType (TStruct s)          = pp s
+mkType (TTuple ts)          = parens $ commaSep $ map mkType ts
 mkType TArray{}             = error "not implemented: Dataflog.mkType TArray"
 
 mkStruct :: Struct -> Doc
@@ -440,6 +441,7 @@ mkExpr p     (EStruct c as)       = (pp $ name s) <> "::" <> pp c <> "{"  <>
                                     (commaSep $ map (\(arg, a) -> (pp $ name arg) <> ":" <+> mkExpr p a) $ zip args as) <> "}"
     where s = getConsStruct ?q c
           args = consArgs $ getConstructor ?q c
+mkExpr p     (ETuple as)       = "(" <> (commaSep $ map (mkExpr p) as) <> ")"
 mkExpr _     EIsInstance{}        = error "not implemented: Dataflog.mkExpr EIsInstance"
 mkExpr p     (EBinOp op e1 e2)    = 
     case op of

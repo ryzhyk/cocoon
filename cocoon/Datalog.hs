@@ -127,16 +127,12 @@ uniqueConstr i rel fs = [fst $ rel2DL rel']
           relname = name rel ++ "_unique_" ++ show i ++ "_" ++ (replace "." "_" $ intercalate "_" $ map show fs)
           neq = disj $ map (\(f1, f2) -> eNot $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
           rename suff = exprVarRename (++suff)
-          eq  = conj $ map (\f -> eBinOp Eq (rename "1" f) (rename "2" f)
-                                  {-let fcond = fieldCond (CtxRelKey rel) f
-                                      fcond1 = rename "1" fcond
-                                      fcond2 = rename "2" fcond
-                                  in conj [fcond1, fcond2, eBinOp Eq (rename "1" f) (rename "2" f)]-}) fs
-          rel' = Relation nopos False relname (as1 ++ as2) [] Nothing 
-                          $ Just [Rule nopos (map (eVar . name) $ as1 ++ as2) 
-                                              [ eRelPred (name rel) (map (eVar . name) as1)
-                                              , eRelPred (name rel) (map (eVar . name) as2)
-                                              , neq, eq]]
+          eq  = conj $ map (\f -> eBinOp Eq (rename "1" f) (rename "2" f)) fs
+          rel' = Relation nopos False relname [Field nopos "r1" $ tTuple $ map typ as1, Field nopos "r2" $ tTuple $ map typ as2] [] Nothing 
+                          $ Just [Rule nopos [eTuple $ map (eVar . name) as1, eTuple $ map (eVar . name) as2]
+                                             [ eRelPred (name rel) (map (eVar . name) as1)
+                                             , eRelPred (name rel) (map (eVar . name) as2)
+                                             , neq, eq]]
 
 fieldCond :: (?r::Refine) => ECtx -> Expr -> Expr
 fieldCond ctx e = conj $ execState (exprTraverseCtxM (fieldCond' ?r) ctx e) []
