@@ -93,6 +93,6 @@ refineRelsUsedInRoles r = nub $ concatMap (roleUsesRels r) $ refineRoles r
 refineAddDelta :: Refine -> Refine
 refineAddDelta r = foldl' (\r' rname -> let (realized, delta) = relMkDelta $ getRelation r' rname
                                         in r'{refineRels = refineRels r' ++ [realized,delta]}) 
-                   r $ refineRelsUsedInRoles r
+                   r $ nub $ refineRelsUsedInRoles r ++ (map name $ refineSwitchRels r)
 
 
