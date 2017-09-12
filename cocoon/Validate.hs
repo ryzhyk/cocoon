@@ -290,8 +290,8 @@ ruleValidate :: (MonadError String me) => Refine -> Relation -> Rule -> me ()
 ruleValidate r rel@Relation{..} rl@Rule{..} = do
     assertR r (length ruleLHS == length relArgs) (pos rl)
             $ "Number of arguments in the left-hand-side of the rule does not match the number of fields in relation " ++ name rel
-    mapIdxM_ (\e i -> exprValidate r (CtxRuleL rel rl i) e) ruleLHS
     mapM_ (exprValidate r (CtxRuleR rel rl)) ruleRHS
+    mapIdxM_ (\e i -> exprValidate r (CtxRuleL rel rl i) e) ruleLHS
 
 
 stateValidate :: (MonadError String me) => Refine -> Field -> me ()
