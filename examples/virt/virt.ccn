@@ -1,0 +1,104 @@
+typedef mac_addr_t = bit<48>
+typedef ip4_addr_t = bit<32>
+typedef ip6_addr_t = bit<128>
+typedef ip_addr_t  = IPAddr4 {addr4 : ip4_addr_t}
+                   | IPAddr6 {addr6 : ip6_addr_t}
+
+function ethUnicastAddr(addr: mac_addr_t): bool   = addr[0:0] == 0
+function ethMulticastAddr(addr: mac_addr_t): bool = addr[0:0] == 1
+function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
+
+typedef Packet = eth_pkt_t
+
+typedef eth_pkt_t = EthPacket { portnum : bit<16>
+                              , src     : mac_addr_t
+                              , dst     : mac_addr_t
+                              , vlan    : vlan_t
+                              , payload : eth_payload_t}
+
+typedef vlan_t = VLAN { pcp : bit<3>
+                      //, dei : bit<1> not supported by OVS
+                      , vid : bit<12>}
+
+typedef eth_payload_t = EthIP4   {ip4 : ip4_pkt_t}
+                      | EthIP6   {ip6 : ip6_pkt_t}
+                      | EthARP   {arp : arp_pkt_t}
+                      //| EthOther {ethertype : bit<16>}
+
+typedef ip4_pkt_t = IP4Pkt { dscp    : bit<6>
+                           , ecn     : bit<2>
+                           , ttl     : bit<8>
+                           , proto   : bit<8>
+                           , src     : ip4_addr_t
+                           , dst     : ip4_addr_t
+                           , payload : ip_payload_t}
+
+typedef ip6_pkt_t = IP6Pkt { dscp    : bit<6>
+                           , ecn     : bit<2>
+                           , ttl     : bit<8>
+                           , label   : bit<20>
+                           , proto   : bit<8>
+                           , src     : ip6_addr_t
+                           , dst     : ip6_addr_t
+                           , payload : ip_payload_t}
+
+typedef arp_op_t = ARPRequest 
+                 | ARPReply
+                 //| ARPOther {opcode : bit<16>}
+
+typedef arp_pkt_t = ARPPkt { op  : arp_op_t
+                           , spa : ip4_addr_t
+                           , tpa : ip4_addr_t
+                           , sha : mac_addr_t
+                           , tha : mac_addr_t}
+
+typedef ip_payload_t = IPTCP   { tcp : tcp_pkt_t}
+                     | IPUDP   { udp : udp_pkt_t}
+                     | IPICMP4 { icmp4 : icmp4_pkt_t}
+                     | IPICMP6 { icmp6 : icmp6_pkt_t}
+                     //| IPOther { protocol : bit<8>}
+
+typedef tcp_pkt_t = TCPPkt { src   : bit<16>
+                           , dst   : bit<16>
+                           , flags : bit<9> }
+
+typedef udp_pkt_t = UDPPkt { src   : bit<16>
+                           , dst   : bit<16> }
+
+typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
+                               , code : bit<8> }
+
+typedef switch_id_t = bit<32>
+typedef port_id_t   = bit<32>
+
+#switch
+table LogicalSwitch( id      : switch_id_t
+                   , failed  : bool
+                   , name    : string
+                   , address : string
+                   , primary key (id))
+
+#switch_port(LogicalPortIn, LogicalPortOut)
+table LogicalPort( id        : port_id_t
+                 , portnum   : bit<16>
+                 , switch    : switch_id_t
+                 , primary key (id)
+                 , foreign key (switch) references LogicalSwitch(id)
+                 , unique (switch, portnum))
+
+table LogicalPortAddress( port: port_id_t
+                        , addr: mac_addr_t
+                        , foreign key (port) references LogicalPort(id))
+
+role LogicalPortIn[port in LogicalPort] = 
+    the (pa in LogicalPortAddress | pa.addr == pkt.dst) {
+        var dport = the (p in LogicalPort | p.id == pa.port) p;
+        send LogicalPortOut[dport]
+    } default {
+        drop
+    }
+
+role LogicalPortOut[port in LogicalPort] = drop
