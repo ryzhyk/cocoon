@@ -357,7 +357,7 @@ sync = do
               $ mapM (\rel -> mapM (\f -> let swid = DL.factSwitchId ctlRefine (name rel) f in
                                           (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine f ctlIR reldb
                                               return ((name rel, swid), True))
-                                          `catch` (\(SomeException _) -> do putStrLn $ "Failed to initialize switch " ++ name rel ++ "(switch id:" ++ show swid ++ ")" 
+                                          `catch` (\(SomeException e) -> do putStrLn $ "Failed to initialize switch " ++ name rel ++ "(switch id:" ++ show swid ++ "): " ++ show e
                                                                             return ((name rel, swid), False)))
                               $ filter (not . DL.factSwitchFailed ctlRefine)
                               $ map snd $ filter fst

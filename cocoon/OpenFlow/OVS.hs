@@ -26,6 +26,7 @@ import System.Process
 import System.Exit
 import Control.Monad
 import Control.Monad.Except
+import Data.List
 
 import Util
 import PP
@@ -365,8 +366,10 @@ matchAttributes = M.fromList
 
 reset :: String -> String -> IO ()
 reset swaddr swname = do
-   (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" [swaddr, "del-flowzbundle", swname] ""
+   let args = [swaddr, "del-flows", swname]
+   (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" args ""
    when (code /= ExitSuccess) $ error $ "ovs-ofctl del-flows failed with exit code " ++ show code ++ 
+                                        "\ncommand line: ovs-ofctl " ++ (intercalate " " args) ++
                                         "\noutput: " ++ stdo ++
                                         "\nstd error: " ++ stde
 data Format = Hex
@@ -386,8 +389,10 @@ sendCmds workdir swrel swid swaddr swname cmds = do
        f = workdir </> addExtension fname "of"
    -- write commands to file
    writeFile f ofcmds
-   (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" [swaddr, "bundle", swname, fname] ""
+   let args = [swaddr, "bundle", swname, fname]
+   (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" args ""
    when (code /= ExitSuccess) $ error $ "ovs-ofctl failed with exit code " ++ show code ++ 
+                                        "\ncommand line: ovs-ofctl " ++ (intercalate " " args) ++
                                         "\noutput: " ++ stdo ++
                                         "\nstd error: " ++ stde
 
