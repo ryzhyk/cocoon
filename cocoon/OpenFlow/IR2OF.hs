@@ -106,13 +106,14 @@ updateSwitch :: C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
 updateSwitch r ports swid db = portcmds ++ nodecmds
     where
     -- update table0 if ports have been added or removed
-    portcmds = concatMap (\(prel, pl) -> updatePort (prel,pl) swid db) ports
+    portcmds = concatMap (\(prole, pl) -> updatePort r (prole,pl) swid db) ports
     -- update pipeline nodes
     nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl) $ G.labNodes $ I.plCFG pl) ports
 
-updatePort :: (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
-updatePort (prel, pl) i db = delcmd ++ addcmd
+updatePort :: C.Refine -> (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
+updatePort r (prole, pl) i db = delcmd ++ addcmd
     where
+    prel = name $ C.roleTable $ C.getRole r prole
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
     match f = let pnum = f M.! "portnum" in
              mkSimpleCond M.empty $ I.EBinOp Eq (I.EPktField "portnum" $ I.TBit $ I.exprWidth pnum) pnum

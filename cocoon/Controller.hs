@@ -266,7 +266,8 @@ _commit s = do
 _commitNotify :: ControllerState p -> IO ([DL.Fact], [DL.Fact])
 _commitNotify s = do
     (ins, dels) <- _commit s
-    when ((not $ null ins) || (not $ null dels)) $ do _ <- MV.tryPutMVar (ctlSyncSem s) MsgSync
+    when ((not $ null ins) || (not $ null dels)) $ do putStrLn "Waking up sync thread"
+                                                      _ <- MV.tryPutMVar (ctlSyncSem s) MsgSync
                                                       return ()
     return (ins, dels)
 
@@ -325,6 +326,7 @@ syncThread s = do
     
 sync :: (?s::ControllerState p) => IO ()
 sync = do
+    putStrLn "Synchronizing"
     let ControllerConnected{..} = ?s
     _start ?s
     (delta, dlfacts) <- readDelta
@@ -334,11 +336,11 @@ sync = do
                       mapM_ (\(_,f) -> ((backendResetSwitch ctlBackend) ctlWorkDir ctlRefine f `catch` (\(SomeException _) -> return ()))) deleted)
           $ refineSwitchRels ctlRefine
     -- relations for which switches have been enabled or created
-    let newSwRels = filter (not . null . (delta M.!) . name)
+    let newSwRels = filter (not . null . (dlfacts M.!) . name)
                     $ refineSwitchRels ctlRefine
     -- read realized tables needed to initialize new switches
     let realized = nub
-                   $ concatMap (\rel -> if null $ filter fst $ delta M.! name rel
+                   $ concatMap (\rel -> if null $ filter fst $ dlfacts M.! name rel
                                            then []
                                            else let ports = relSwitchPorts ctlRefine rel in
                                                 concatMap (roleUsesRels ctlRefine . getRole ctlRefine . fst . annotRoles . fromJust . relAnnotation) ports)
@@ -355,7 +357,8 @@ sync = do
               $ mapM (\rel -> mapM (\f -> let swid = DL.factSwitchId ctlRefine (name rel) f in
                                           (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine f ctlIR reldb
                                               return ((name rel, swid), True))
-                                          `catch` (\(SomeException _) -> return ((name rel, swid), False)))
+                                          `catch` (\(SomeException _) -> do putStrLn $ "Failed to initialize switch " ++ name rel ++ "(switch id:" ++ show swid ++ ")" 
+                                                                            return ((name rel, swid), False)))
                               $ filter (not . DL.factSwitchFailed ctlRefine)
                               $ map snd $ filter fst
                               $ dlfacts M.! (name rel))
@@ -368,12 +371,13 @@ sync = do
                                   let swfacts' = filter (\(swid, _) -> isNothing $ find (==(name rel, swid)) failed) swfacts
                                   mapM (\(swid, f) -> do (backendUpdateSwitch ctlBackend) ctlWorkDir ctlRefine f ctlIR delta
                                                          return ((name rel, swid), True)
-                                                      `catch` (\(SomeException _) -> return ((name rel,swid), False)))
+                                                      `catch` (\(SomeException e) -> do putStrLn $ "Failed to update switch " ++ name rel ++ " (switch id:" ++ show swid ++ "): " ++ show e
+                                                                                        return ((name rel,swid), False)))
                                         swfacts')
                $ refineSwitchRels ctlRefine
     -- Reconfiguration finished; update the DB (in one transaction):
     --  * add Delta to realized
-    --  * mark failed switches as disabled in desired (note: only
+    --  * mark failed switches in desired (note: only
     --  switches that are still in the desired configuration will be
     --  marked; some of the failed switches may have been deleted by the user)
     _start ?s
@@ -383,12 +387,13 @@ sync = do
           $ concat $ M.elems dlfacts
     mapM_ (\rel -> do switches <- DL.enumRelation ctlDL (name rel)
                       mapM (\f -> let swid = DL.factSwitchId ctlRefine (name rel) f
-                                      f' = DL.factSetSwitchFailed ctlRefine (name rel) f False in
+                                      f' = DL.factSetSwitchFailed ctlRefine (name rel) f True in
                                   when (elem (name rel, swid) failed') $ do {DL.removeFact ctlDL f; DL.addFact ctlDL f'}) switches)
           $ refineSwitchRels ctlRefine
     _ <- _commit ?s
     if not $ null failed'
-       then sync
+       then do putStrLn $ "failed': " ++ show failed'
+               sync
        else return ()
 
 -- read Delta; convert relations used in roles to IR (returns normal relation names)
@@ -403,6 +408,9 @@ readDelta = do
    let irdelta = M.mapWithKey (\rname facts -> 
                                 map (mapSnd $ (IR.val2Record ctlRefine (backendStructs ctlBackend) rname) . eStruct rname . map SMT.exprFromSMT . DL.factArgs) facts) 
                  $ M.restrictKeys ofdelta $ S.fromList used
+   putStrLn $ "Delta:\n  " ++ 
+              (intercalate "\n  " $ map (\(rel, fs) -> rel ++ ":" ++ 
+                                                       (intercalate ("\n    ") $ map show fs)) $ M.toList ofdelta)
    return (irdelta, ofdelta)
 
 -- read specified realized relations; convert to IR

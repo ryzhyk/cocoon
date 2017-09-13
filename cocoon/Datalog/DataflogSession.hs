@@ -74,6 +74,7 @@ valFromJSON (TBit w)    (J.String s)    = case reads $ unpack s of
 valFromJSON (TBit w)    (J.Number n)    = case floatingOrInteger n of
                                                Left (_::Double) -> err $ "not an integral value " ++ show n
                                                Right i          -> return $ EBit w i
+valFromJSON (TTuple ts) (J.Array vals)  = (fmap ETuple) $ mapM (\(t,v) -> valFromJSON t v) $ zip ts (V.toList vals)
 valFromJSON (TStruct s) jv              = do
     (c, x) <- case jv of
                    J.Object o  -> return $ head $ H.toList o

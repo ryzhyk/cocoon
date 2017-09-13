@@ -66,7 +66,7 @@ ovsUpdateSwitch workdir r f@(DL.Fact rname _) ir delta = do
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
         cmds = OF.updateSwitch r (ir M.! rname) swid delta
-    sendCmds workdir rname swid swaddr swname cmds
+    when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
 
 ovsResetSwitch :: FilePath -> Refine -> DL.Fact -> IO ()
 ovsResetSwitch _ r f = do
