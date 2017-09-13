@@ -20,7 +20,6 @@ set +e
 killall -qw -9 cocoon
 set -e
 
-# create SQL and Datalog scripts
 (set +x; echo Generating  SQL schema)
 $COCOON_PATH -i $1 --action=sql
 
@@ -34,3 +33,8 @@ psql -f $workdir/$specname.schema
 pushd $workdir
 cargo build
 pushd $popd
+
+(set +x; echo Starting Cocoon controller)
+$COCOON_PATH -i $1 --action=controller +RTS -xc -RTS
+
+
