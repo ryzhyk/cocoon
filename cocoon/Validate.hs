@@ -373,7 +373,8 @@ checkLinkExpr' e = exprTraverseM (\e' -> case e' of
 -}
 
 exprValidate :: (MonadError String me) => Refine -> ECtx -> Expr -> me ()
-exprValidate r ctx e = do exprTraverseCtxM (exprValidate1 r) ctx e
+exprValidate r ctx e = --trace ("exprValidate " ++ show e ++ " in \n" ++ show ctx) $ 
+                       do exprTraverseCtxM (exprValidate1 r) ctx e
                           exprTraverseTypeME r (exprValidate2 r) ctx e
 
 exprTraverseTypeME :: (MonadError String me) => Refine -> (ECtx -> ExprNode Type -> me ()) -> ECtx -> Expr -> me ()
@@ -446,7 +447,7 @@ exprValidate1 r ctx (EAny  p v t _ _ _) = do ctxCheckSideEffects p r ctx
                                              return ()
 exprValidate1 _ _   (EPHolder _)        = return ()
 exprValidate1 r ctx (EAnon p)           = assertR r (isJust $ ctxInDelete ctx) p "\"?\" only allowed in lambda-expressions"
-exprValidate1 _ _   (ETyped _ _ _)      = return ()
+exprValidate1 r _   (ETyped _ _ t)      = typeValidate r t
 exprValidate1 r ctx (ERelPred p rel as) = do ctxCheckRelPred p r ctx
                                              rel' <- checkRelation p r ctx rel
                                              assertR r (length as == length (relArgs rel')) p

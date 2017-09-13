@@ -36,7 +36,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import qualified Data.Graph.Inductive as G
 import {-# SOURCE #-} Builtins
-import Debug.Trace
+--import Debug.Trace
 
 import Util
 import Expr
