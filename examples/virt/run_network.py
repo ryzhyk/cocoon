@@ -22,6 +22,7 @@ from mininet.log import setLogLevel, info
 from mininet.cli import CLI
 from mininet.link import TCLink
 from mininet.node import Node
+from mininet.node import OVSKernelSwitch
 import json
 
 import argparse
@@ -32,7 +33,11 @@ import subprocess
 import time
 import sys
 
-_THIS_DIR = os.path.dirname(os.path.realpath(__file__))
+#_THIS_DIR = os.path.dirname(os.path.realpath(__file__))
+
+#print os.environ
+
+cocoon_path = os.environ["COCOON_PATH"]
 
 parser = argparse.ArgumentParser(description='Mininet demo')
 parser.add_argument('--topology', help='MiniEdit topology file',
@@ -52,22 +57,22 @@ class LinuxRouter( Node ):
         self.cmd( 'sysctl net.ipv4.ip_forward=0' )
         super( LinuxRouter, self ).terminate()
 
-class MyTopo(Topo):
-    def __init__(self, topology, **opts):
-        # Initialize topology and default options
-        Topo.__init__(self, **opts)
-
-        router = LinuxRouter( Node )
-
-        for sw in topology['switches']:
-            hostname = sw['opts']['hostname']
-            switch = self.addSwitch(hostname)
-
-        for h in topology['hosts']:
-            host = self.addHost(h['opts']['hostname'])
-
-        for link in topology['links']:
-            self.addLink(link['src'], link['dest'], port1 = link['srcport'], port2 = link['destport'])
+#class MyTopo(Topo):
+#    def __init__(self, topology, **opts):
+#        # Initialize topology and default options
+#        Topo.__init__(self, **opts)
+#
+#        router = LinuxRouter( Node )
+#
+#        for sw in topology['switches']:
+#            hostname = sw['opts']['hostname']
+#            switch = self.addSwitch(hostname)
+#
+#        for h in topology['hosts']:
+#            host = self.addHost(h['opts']['hostname'])
+#
+#        for link in topology['links']:
+#            self.addLink(link['src'], link['dest'], port1 = link['srcport'], port2 = link['destport'])
 
 #def updateConfig(cocoon, loadedTopology):
 #    # send signal to the cocoon process
@@ -106,16 +111,51 @@ class MyTopo(Topo):
 #    sleep(1)
 
 
-class VNet (Mininet):
-    time_to_exit = False
+def cocoon(cmd):
+    ccn_cmd = [cocoon_path, "-i", "virt.ccn", "--action=cmd"]
+    print " ".join(ccn_cmd) + " " + cmd
+    try:
+        p = subprocess.Popen(ccn_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output, err = p.communicate(cmd)
+        print output
+    except subprocess.CalledProcessError as e:
+        print e
+        print e.output
 
-    def addVSwitch(self, hostid, hostip):
+
+class VNet (Mininet):
+
+    def addHV(self, hostid, hostip):
+        hostname = "h" + str(hostid)
+        s = self.addSwitch(hostname)
+        s.start([])
+        cocoon("Hypervisor.put(Hypervisor{" + str(hostid) + ", false, \"" + hostname + "\", \"\"})")
         return
 
     def delHost(self, hostid):
         return
 
-    def addVM(self, vmid, host, mac, ip):
+    def addVM(self, vmid, host, portnum, mac, ip):
+        vmname = "vm" + str(vmid)
+        hostname = "h" + str(host)
+        h = self.addHost(vmname)
+        self.addLink(vmname, hostname, port1 = 0, port2 = portnum)
+        for off in ["rx", "tx", "sg"]:
+            cmd = "/sbin/ethtool --offload eth0 %s off" % off
+            print cmd
+            h.cmd(cmd)
+        print hostname + ": set IP address " + ip
+        h.cmd("ifconfig eth0 " + ip)
+        print hostname + ": set MAC address " + mac
+        h.cmd("sudo ifconfig eth0 hw ether " + mac)
+        print "disable ipv6"
+        h.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
+        h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
+        h.cmd("sysctl -w net.ipv6.conf.lo.disable_ipv6=1")
+        h.cmd("sysctl -w net.ipv4.tcp_congestion_control=reno")
+        h.cmd("ifconfig eth0 promisc")
+        h.cmd("iptables -I OUTPUT -p icmp --icmp-type destination-unreachable -j DROP")
+        cocoon("HypervisorPort.put(HypervisorPort{" + vmid + "," + portnum + "," + host + "})")
         return
 
     def delVM(self, vmid):
@@ -123,6 +163,7 @@ class VNet (Mininet):
 
 def main():
 
+    cocoon(":connect")
     # Create empty topology with Linux router
     topo = Topo()
     router = topo.addNode('r0', cls=LinuxRouter)
