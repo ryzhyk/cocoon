@@ -366,7 +366,7 @@ matchAttributes = M.fromList
 
 reset :: String -> String -> IO ()
 reset swaddr swname = do
-   let args = [swaddr, "del-flows", swname]
+   let args = ["del-flows"] ++ (if swaddr == "" then [] else [swaddr]) ++ [swname]
    (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" args ""
    when (code /= ExitSuccess) $ error $ "ovs-ofctl del-flows failed with exit code " ++ show code ++ 
                                         "\ncommand line: ovs-ofctl " ++ (intercalate " " args) ++
@@ -389,7 +389,7 @@ sendCmds workdir swrel swid swaddr swname cmds = do
        f = workdir </> addExtension fname "of"
    -- write commands to file
    writeFile f ofcmds
-   let args = [swaddr, "bundle", swname, fname]
+   let args = ["bundle"] ++ (if swaddr == "" then [] else [swaddr]) ++ [swname, f]
    (code, stdo, stde) <- readProcessWithExitCode "ovs-ofctl" args ""
    when (code /= ExitSuccess) $ error $ "ovs-ofctl failed with exit code " ++ show code ++ 
                                         "\ncommand line: ovs-ofctl " ++ (intercalate " " args) ++
