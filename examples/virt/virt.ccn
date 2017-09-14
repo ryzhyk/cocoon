@@ -71,34 +71,61 @@ typedef icmp4_pkt_t = ICMP4Pkt { type : bit<8>
 typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
                                , code : bit<8> }
 
-typedef switch_id_t = bit<32>
-typedef port_id_t   = bit<32>
+
+typedef hyperv_id_t = bit<32>
+typedef hport_id_t  = bit<32>
+
+
+typedef lswitch_id_t = bit<32>
+typedef lport_id_t   = bit<32>
 
 #switch
-table LogicalSwitch( id      : switch_id_t
-                   , failed  : bool
-                   , name    : string
-                   , address : string
+table Hypervisor( id      : hyperv_id_t
+                , failed  : bool
+                , name    : string
+                , address : string
+                , primary key (id))
+
+
+#switch_port(HypervisorPortIn, HypervisorPortOut)
+table HypervisorPort( id        : hport_id_t
+                    , portnum   : bit<16>
+                    , switch    : hyperv_id_t
+                    , primary key (id)
+                    , foreign key (switch) references Hypervisor(id)
+                    , unique (switch, portnum))
+
+table LogicalSwitch( id      : lswitch_id_t
                    , primary key (id))
 
-#switch_port(LogicalPortIn, LogicalPortOut)
-table LogicalPort( id        : port_id_t
-                 , portnum   : bit<16>
-                 , switch    : switch_id_t
+table LogicalPort( id       : lport_id_t
+                 , lswitch  : lswitch_id_t
+                 , hport    : hport_id_t
+                 , mac      : mac_addr_t
                  , primary key (id)
-                 , foreign key (switch) references LogicalSwitch(id)
-                 , unique (switch, portnum))
+                 , foreign key (lswitch) references LogicalSwitch(id)
+                 , unique(hport))
 
-table LogicalPortAddress( port: port_id_t
-                        , addr: mac_addr_t
-                        , foreign key (port) references LogicalPort(id))
+role HypervisorPortIn[port in HypervisorPort] = {
+    var lport: LogicalPort;
+    the (lp in LogicalPort | lp.hport == port.id) {
+        lport = lp
+    } default {
+        drop
+    };
 
-role LogicalPortIn[port in LogicalPort] = 
-    the (pa in LogicalPortAddress | pa.addr == pkt.dst) {
-        var dport = the (p in LogicalPort | p.id == pa.port) p;
-        send LogicalPortOut[dport]
+    var dstlport: LogicalPort;
+    the (lp in LogicalPort | lp.lswitch == lport.lswitch and lp.mac == pkt.dst) {
+        dstlport = lp
+    } default {
+        drop
+    };
+
+    the (hp in HypervisorPort | dstlport.hport == hp.id and hp.switch == port.switch) {
+        send HypervisorPortOut[hp]
     } default {
         drop
     }
+}
 
-role LogicalPortOut[port in LogicalPort] = drop
+role HypervisorPortOut[port in HypervisorPort] = drop
