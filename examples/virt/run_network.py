@@ -129,6 +129,7 @@ class VNet (Mininet):
         hostname = "h" + str(hostid)
         s = self.addSwitch(hostname)
         s.start([])
+        subprocess.check_call(["ovs-vsctl", "set", "bridge", hostname, "protocols=OpenFlow15"])
         cocoon("Hypervisor.put(Hypervisor{" + str(hostid) + ", false, \"" + hostname + "\", \"\"})")
         return
 
