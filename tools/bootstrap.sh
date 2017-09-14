@@ -4,6 +4,7 @@
 
 set -x
 set -e
+
 THIS_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
 source $THIS_DIR/../env.sh
@@ -15,26 +16,33 @@ workdir=$dir/$specname
 
 echo "Compiling $specname"
 
-# kill cocoon controller and CLI (if any)
-set +e
-killall -qw -9 cocoon
-set -e
-
 (set +x; echo Generating  SQL schema)
 $COCOON_PATH -i $1 --action=sql
 
 (set +x; echo Generating Datalog rules)
 $COCOON_PATH -i $1 --action=dl
 
-(set +x; echo Initializing SQL DB)
-psql -f $workdir/$specname.schema
+if (( $# > 1 )) && [ $2 = "nodl" ];
+then
+    (set +x; echo Skipping Datalog compilation)
+else
+    (set +x; echo Compiling Datalog rules)
+    pushd $workdir
+    cargo build
+    pushd $popd
+fi
 
-(set +x; echo Compiling Datalog rules)
-pushd $workdir
-cargo build
-pushd $popd
+# kill cocoon controller and CLI (if any)
+set +e
+sudo killall -qw -9 cocoon
+set -e
+
+(set +x; echo Initializing SQL DB)
+set +e
+sudo sudo -u postgres createuser -d root
+set -e
+
+sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-$COCOON_PATH -i $1 --action=controller +RTS -xc -RTS
-
-
+sudo $COCOON_PATH -i $1 --action=controller
