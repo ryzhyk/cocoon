@@ -250,7 +250,7 @@ instance Show Node where
 instance G.Labellable Node where
     toLabelValue = G.toLabelValue . show
 
-data Edge = Edge deriving (Eq)
+data Edge = Edge deriving (Eq, Show)
 
 instance G.Labellable Edge where
     toLabelValue _ = G.toLabelValue $ (""::String)

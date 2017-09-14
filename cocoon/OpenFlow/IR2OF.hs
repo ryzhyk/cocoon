@@ -68,6 +68,8 @@ precompile structs workdir r rfile = do
                                                     trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
                                                  `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name rel ++ ":" ++ e)) ir
                         let (ntables, ir'') = assignTables ir'
+                        mapM_ (\(n, pl) -> do let dotname = workdir </> addExtension (addExtension n "of") "dot"
+                                              trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl) dotname; return ""}) $ return ()) ir''
                         when (ntables > maxOFTables) 
                             $ throwError $ name rel ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
                         return (name rel, ir'')) swrels
@@ -84,12 +86,13 @@ assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel 
         rename nd = (fromJust $ findIndex (nd==) ordered) + start
         bbrename (I.BB as (I.Goto nd)) = I.BB as $ I.Goto $ rename nd
         bbrename bb                    = bb
-        cfg' = G.gmap (\(pre, nd, node, suc) -> let pre'  = map (mapSnd rename) pre
-                                                    suc'  = map (mapSnd rename) suc
-                                                    nd'   = rename nd 
-                                                    node' = I.mapBB bbrename node
-                                                in (pre', nd', node', suc')) 
-                      $ I.plCFG pl
+        cfg' = G.buildGr
+               $ G.ufold (\(pre, nd, node, suc) cs -> let pre'  = map (mapSnd rename) pre
+                                                          suc'  = map (mapSnd rename) suc
+                                                          nd'   = rename nd 
+                                                          node' = I.mapBB bbrename node
+                                                      in (pre', nd', node', suc'):cs) 
+                 [] (I.plCFG pl)
 
 -- New switch event
 --   Store the list of tables this switch depends on
