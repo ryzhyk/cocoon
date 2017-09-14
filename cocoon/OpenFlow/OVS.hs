@@ -449,7 +449,7 @@ mkExprA (OF.EField f msl) = pp f' <> sl'
                Just (h,l) -> "[" <> pp l <> ".." <> pp h <> "]"
 
 mkAction :: OF.Action -> Doc
-mkAction (OF.ActionOutput p)          = "output:" <> pp p
+mkAction (OF.ActionOutput p)          = "output:" <> mkExprA p
 mkAction (OF.ActionGroup  g)          = "group:" <> pp g
 mkAction OF.ActionDrop                = "drop"
 mkAction (OF.ActionSet l r@OF.EVal{}) = "load:" <> mkExprA r <> "->" <> mkExprA l
