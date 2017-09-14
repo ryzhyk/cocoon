@@ -155,7 +155,7 @@ main = do
                  cargo = DL.cargoTemplate basename
                  rsfile = workdir </> addExtension basename "rs"
                  cargofile = workdir </> "Cargo.toml"
-             mapM_ (putStrLn . show) rules
+             --mapM_ (putStrLn . show) rules
              writeFile rsfile $ render rust
              writeFile cargofile $ render cargo
              putStrLn $ "Datalog program written to file " ++ rsfile
