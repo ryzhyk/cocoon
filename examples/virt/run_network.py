@@ -156,7 +156,7 @@ class VNet (Mininet):
         h.cmd("sysctl -w net.ipv4.tcp_congestion_control=reno")
         h.cmd("ifconfig eth0 promisc")
         h.cmd("iptables -I OUTPUT -p icmp --icmp-type destination-unreachable -j DROP")
-        cocoon("HypervisorPort.put(HypervisorPort{" + vmid + "," + portnum + "," + host + "})")
+        cocoon("HypervisorPort.put(HypervisorPort{" + str(vmid) + "," + str(portnum) + "," + str(host) + "})")
         return
 
     def delVM(self, vmid):
