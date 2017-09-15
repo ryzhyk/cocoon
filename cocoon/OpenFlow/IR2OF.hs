@@ -224,11 +224,11 @@ isbool _                       = False
 -- TODO: use BDDs to encode arbitrary pipelines
 mkPLMatch :: I.Pipeline -> I.Record -> [[O.Match]]
 mkPLMatch I.Pipeline{..} val = 
-    if G.size plCFG == 2 
+    if G.order plCFG == 2 
        then case G.lab plCFG plEntryNode of
                  Just (I.Cond cs) -> mkSimpleCond val $ cs2expr cs
-                 _                -> error "IR2OF.mkPLMatch: CFG too complicated"
-       else error "IR2OF.mkPLMatch: CFG too complicated (<> 2 nodes)"
+                 _                -> error $ "IR2OF.mkPLMatch: CFG too complicated:\n" ++ I.cfgToDot plCFG
+       else error $ "IR2OF.mkPLMatch: CFG too complicated (" ++ show (G.size plCFG) ++ " nodes):\n" ++ I.cfgToDot plCFG
     -- IR compiler encodes lookup conditions with satisfying branches terminating in Drop
     where
     cs2expr ((c, I.BB [] I.Drop):cs) = I.EBinOp Or c $ cs2expr cs

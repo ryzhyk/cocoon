@@ -24,7 +24,7 @@ import qualified Data.Map             as M
 import qualified Data.Graph.Inductive as G 
 import qualified Data.GraphViz        as G
 import Text.PrettyPrint
-import Data.Text.Lazy(Text, unpack)
+import Data.Text.Lazy(unpack)
 import Data.List
 import Data.Maybe
 import Control.Monad
@@ -266,11 +266,11 @@ data Pipeline = Pipeline {plVars :: Vars, plCFG :: CFG, plEntryNode :: NodeId}
 
 type Vars = M.Map VarName Type
 
-cfgToDot :: CFG -> Text
-cfgToDot cfg = G.printDotGraph $ G.graphToDot G.quickParams cfg
+cfgToDot :: CFG -> String
+cfgToDot cfg = unpack $ G.printDotGraph $ G.graphToDot G.quickParams cfg
 
 cfgDump :: CFG -> FilePath -> IO ()
-cfgDump cfg f = writeFile f $ unpack $ cfgToDot cfg
+cfgDump cfg f = writeFile f $ cfgToDot cfg
 
 -- CFG context identifies location within a CFG
 data CFGCtx = CtxNode          {ctxNode :: NodeId}
