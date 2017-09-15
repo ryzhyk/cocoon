@@ -77,7 +77,7 @@ precompile structs workdir r rfile = do
 -- Relabel port CFGs into openflow table numbers
 assignTables :: IRSwitch -> (Int, IRSwitch)
 assignTables pls = foldl' (\(start, pls') (n,pl) -> let (start', pl') = relabel start pl
-                                                    in (start', pls' ++ [(n, pl')])) (1, pls) pls
+                                                    in (start', pls' ++ [(n, pl')])) (1, []) pls
     where 
     relabel :: Int -> I.Pipeline -> (Int, I.Pipeline)
     relabel start pl = (start + length ordered, pl{I.plCFG = cfg', I.plEntryNode = start})
