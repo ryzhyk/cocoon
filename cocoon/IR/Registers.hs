@@ -190,20 +190,22 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
-                         Fork t vs pl' b       -> Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f h $ plCFG pl'}) b
-                         Lookup t vs pl' th el -> Lookup t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f h $ plCFG pl'}) th el
+                         Fork t vs pl' b       -> let cfg = plCFG pl' in
+                                                  Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) b
+                         Lookup t vs pl' th el -> let cfg = plCFG pl' in
+                                                  Lookup t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g (f cfg) (h cfg) cfg}) th el
                          Cond cs               -> Cond $ map (mapFst rename) cs
                          Par bs                -> Par bs
-        f :: CFGCtx -> Maybe Action
-        f ctx = case ctxAction (plCFG pl) ctx of
-                     ASet    l r  -> Just $ ASet (rename l) (rename r)
-                     APut    t as -> Just $ APut t (map rename as)
-                     ADelete t c  -> Just $ ADelete t (rename c)
-        h :: CFGCtx -> Next
-        h ctx = case bbNext $ ctxGetBB (plCFG pl) ctx of
-                     Send x -> Send $ rename x
-                     n      -> n
-    let cfg' = cfgMapCtx g f h $ plCFG pl
+        f :: CFG -> CFGCtx -> Maybe Action
+        f cfg ctx = case ctxAction cfg ctx of
+                         ASet    l r  -> Just $ ASet (rename l) (rename r)
+                         APut    t as -> Just $ APut t (map rename as)
+                         ADelete t c  -> Just $ ADelete t (rename c)
+        h :: CFG -> CFGCtx -> Next
+        h cfg ctx = case bbNext $ ctxGetBB cfg ctx of
+                         Send x -> Send $ rename x
+                         n      -> n
+    let cfg' = cfgMapCtx g (f $ plCFG pl) (h $ plCFG pl) $ plCFG pl
     return {-$ trace ("register allocation:\n" ++ 
                     (concatMap (\(v,t) -> v ++ ": " ++ show t ++ " -> " ++ show (rename $ EVar v) ++ "\n") $ M.toList $ plVars pl))-}
            $ pl{plVars = mkvars $ plVars pl, plCFG = cfg'}
