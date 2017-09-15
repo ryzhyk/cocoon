@@ -100,7 +100,7 @@ compilePort' role@Role{..} = do
     (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
     pl <- get
     let c = eBinOp Eq (eField (eVar roleKey) "portnum") (eField ePacket "portnum")
-    let (cdeps, cpl) = exprDeps vars (CtxRole role) rel roleKey c pl
+    let (cdeps, cpl) = exprDeps vars (CtxRole role) rel (vnameAt roleKey entrynd) c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
@@ -164,7 +164,7 @@ compileExprAt vars ctx entrynd Nothing (E e@(EFork _ v t c b)) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel v c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxForkCond e ctx) rel (vnameAt v entrynd) c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxForkBody e ctx) Nothing b'
     updateNode entrynd (I.Fork t cdeps' cpl $ I.BB asns $ I.Goto entryndb) [entryndb]
@@ -176,7 +176,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EWith _ v t c b md)) = do
     plvars <- gets (M.keys . I.plVars)
     (vars', asns) <- declAsnVar vars v (relRecordType rel) entrynd cols
     pl <- get
-    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel v c pl
+    let (cdeps, cpl) = exprDeps vars' (CtxWithCond e ctx) rel (vnameAt v entrynd) c pl
         cdeps' = cdeps `intersect` plvars
     (entryndb, _) <- compileExpr vars' (CtxWithBody e ctx) exitnd b
     case md of
