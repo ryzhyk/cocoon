@@ -102,7 +102,7 @@ optUnusedAssigns pl = do
                   abort ctx' = ctxAssignsFullVar (plCFG pl) v ctx'
                   used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
         f' _ a                              = return $ Just a
-    cfg' <- cfgMapCtxM (\_ node -> return node) f (plCFG pl)
+    cfg' <- cfgMapCtxM (\_ node -> return node) f (return . bbNext . ctxGetBB (plCFG pl)) (plCFG pl)
     return pl{plCFG = cfg'}
 
 -- Remove unused variables
@@ -122,7 +122,7 @@ removeVar pl v = pl{plVars = M.delete v (plVars pl)}
 -- Substitute variable values
 optVarSubstitute :: Pipeline -> State Bool Pipeline
 optVarSubstitute pl@Pipeline{..} = do
-    cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) plCFG
+    cfg' <- cfgMapCtxM (varSubstNode plCFG) (varSubstAction plCFG) (varSubstNext plCFG) plCFG
     return pl{plCFG = cfg'}
 
 varSubstNode :: CFG -> NodeId -> Node -> State Bool Node
@@ -162,6 +162,23 @@ varSubstAction cfg ctx = do
     when (not $ null substs) $ put True
     return $ Just act'
 
+varSubstNext :: CFG -> CFGCtx -> State Bool Next
+varSubstNext cfg ctx = do
+    let nxt = bbNext $ ctxGetBB cfg ctx
+        vars = case nxt of
+                    Send x -> exprVars x
+                    _      -> []
+        substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) vars
+        -- apply substitutions
+        nxt' = foldl' (\nxt_ (v, e) -> 
+                        --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         in action " ++ show act) $
+                        case nxt_ of
+                             Send x -> Send $ exprSubstVar v e x
+                             _      -> nxt_)
+                       nxt substs
+    when (not $ null substs) $ put True
+    return nxt'
+
 findSubstitution :: CFG -> CFGCtx -> String -> Maybe Expr
 findSubstitution cfg ctx v = 
     -- first pass search for a unique predecessor node that assigns v
@@ -186,9 +203,11 @@ findSubstitution cfg ctx v =
     abort1 _ = False
 
     match2 _  CtxNode{} = False
-    match2 as ctx_ = case ctxAction cfg ctx_ of
-                          ASet l _ | (not $ null $ exprAtoms l `intersect` as) -> True
-                          _                    -> False
+    match2 as ctx_ | isActCtx ctx_ = 
+        case ctxAction cfg ctx_ of
+             ASet l _ | (not $ null $ exprAtoms l `intersect` as) -> True
+             _                                                    -> False
+    match2 _ _ = False
     abort2 ctx' ctx_ = ctx' == ctx_
 
 -- Merge cascades of cond nodes

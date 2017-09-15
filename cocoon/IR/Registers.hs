@@ -75,11 +75,13 @@ allocRegisters pl@Pipeline{..} (RegisterFile regs) =
          _             -> return allocation
     where 
     -- for each location, determine the set of variables live at this location
-    livesets = execState (cfgMapCtxM g f plCFG) []
-        where g nd node = do modify $ ((ctxLiveVars pl $ CtxNode nd): )
-                             return node
-              f ctx     = do modify $ ((ctxLiveVars pl ctx):)
-                             return $ Just $ ctxAction plCFG ctx
+    livesets = execState (cfgMapCtxM g f h plCFG) []
+        where g nd node  = do modify $ ((ctxLiveVars pl $ CtxNode nd): )
+                              return node
+              f ctx      = do modify $ ((ctxLiveVars pl ctx):)
+                              return $ Just $ ctxAction plCFG ctx
+              h ctx      = do modify $ ((ctxLiveVars pl ctx):)
+                              return $ bbNext $ ctxGetBB plCFG ctx
     -- pairs of simultaneously live variables
     pairs = nub $ concatMap (\vs -> filter (\(v1,v2) -> v1 > v2) -- remove symmetric and redundant pairs
                                     $ (,) <$> vs <*> vs) livesets
@@ -188,8 +190,8 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename' e = e
     let g :: NodeId -> Node -> Node
         g _  node = case node of
-                         Fork t vs pl' b       -> Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f $ plCFG pl'}) b
-                         Lookup t vs pl' th el -> Lookup t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f $ plCFG pl'}) th el
+                         Fork t vs pl' b       -> Fork t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f h $ plCFG pl'}) b
+                         Lookup t vs pl' th el -> Lookup t (vars2fnames vs) (pl'{plVars = mkvars $ plVars pl', plCFG = cfgMapCtx g f h $ plCFG pl'}) th el
                          Cond cs               -> Cond $ map (mapFst rename) cs
                          Par bs                -> Par bs
         f :: CFGCtx -> Maybe Action
@@ -197,7 +199,11 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                      ASet    l r  -> Just $ ASet (rename l) (rename r)
                      APut    t as -> Just $ APut t (map rename as)
                      ADelete t c  -> Just $ ADelete t (rename c)
-    let cfg' = cfgMapCtx g f $ plCFG pl
+        h :: CFGCtx -> Next
+        h ctx = case bbNext $ ctxGetBB (plCFG pl) ctx of
+                     Send x -> Send $ rename x
+                     n      -> n
+    let cfg' = cfgMapCtx g f h $ plCFG pl
     return {-$ trace ("register allocation:\n" ++ 
                     (concatMap (\(v,t) -> v ++ ": " ++ show t ++ " -> " ++ show (rename $ EVar v) ++ "\n") $ M.toList $ plVars pl))-}
            $ pl{plVars = mkvars $ plVars pl, plCFG = cfg'}
