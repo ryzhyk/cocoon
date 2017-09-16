@@ -431,10 +431,10 @@ mkMatch OF.Match{..} = map (\m -> pp n <> "=" <> mkVal attrFormat matchVal <> m)
                    Just x  -> x
           Attributes{..} = matchAttributes M.! n
           masks = case matchMask of
-                       Nothing                  -> [empty]
-                       Just m | OF.isFullMask m -> [empty]
-                              | attrMaskable    -> ["/" <> mkMask attrFormat m]
-                              | otherwise       -> error $ "OVS.mkMatch: wildcards not allowed for field " ++ show matchField
+                       Nothing                             -> [empty]
+                       Just m | OF.isFullMask matchField m -> [empty]
+                              | attrMaskable               -> ["/" <> mkMask attrFormat m]
+                              | otherwise                  -> error $ "OVS.mkMatch: wildcards not allowed for field " ++ show matchField
 
 mkExprA :: OF.Expr -> Doc
 mkExprA (OF.EVal v)       = pp $ OF.valVal v
@@ -462,16 +462,16 @@ mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid
 
 pprintf x y = text $ printf x y
 
-mkVal :: Format -> OF.Value -> Doc
-mkVal Hex (OF.Value _ v) = "0x" <> (pp $ showHex v "")
-mkVal Dec (OF.Value _ v) = pp v
-mkVal IP4 (OF.Value _ v) = (pp $ bitSlice v 31 24) <> "." <> (pp $ bitSlice v 23 16) <> "." <> (pp $ bitSlice v 15 8) <> "." <> (pp $ bitSlice v 7 0)
-mkVal IP6 (OF.Value _ v) = (pprintf "%04x" $ bitSlice v 127 112) <> ":" <> (pprintf "%04x" $ bitSlice v 111 96) <> ":" <> 
-                           (pprintf "%04x" $ bitSlice v 95 80) <> ":" <> (pprintf "%04x" $ bitSlice v 79 64) <> ":" <>
-                           (pprintf "%04x" $ bitSlice v 63 48) <> ":" <> (pprintf "%04x" $ bitSlice v 47 32) <> ":" <> 
-                           (pprintf "%04x" $ bitSlice v 31 16) <> ":" <> (pprintf "%04x" $ bitSlice v 15 0)
-mkVal MAC (OF.Value _ v) = (pprintf "%02x" $ bitSlice v 47 40) <> ":" <> (pprintf "%02x" $ bitSlice v 39 32) <> ":" <> (pprintf "%02x" $ bitSlice v 31 24) <> ":" <> 
-                           (pprintf "%02x" $ bitSlice v 23 16) <> ":" <> (pprintf "%02x" $ bitSlice v 15 8) <> ":" <> (pprintf "%02x" $ bitSlice v 7 0)
+mkVal :: Format -> Integer -> Doc
+mkVal Hex v = "0x" <> (pp $ showHex v "")
+mkVal Dec v = pp v
+mkVal IP4 v = (pp $ bitSlice v 31 24) <> "." <> (pp $ bitSlice v 23 16) <> "." <> (pp $ bitSlice v 15 8) <> "." <> (pp $ bitSlice v 7 0)
+mkVal IP6 v = (pprintf "%04x" $ bitSlice v 127 112) <> ":" <> (pprintf "%04x" $ bitSlice v 111 96) <> ":" <> 
+              (pprintf "%04x" $ bitSlice v 95 80) <> ":" <> (pprintf "%04x" $ bitSlice v 79 64) <> ":" <>
+              (pprintf "%04x" $ bitSlice v 63 48) <> ":" <> (pprintf "%04x" $ bitSlice v 47 32) <> ":" <> 
+              (pprintf "%04x" $ bitSlice v 31 16) <> ":" <> (pprintf "%04x" $ bitSlice v 15 0)
+mkVal MAC v = (pprintf "%02x" $ bitSlice v 47 40) <> ":" <> (pprintf "%02x" $ bitSlice v 39 32) <> ":" <> (pprintf "%02x" $ bitSlice v 31 24) <> ":" <> 
+              (pprintf "%02x" $ bitSlice v 23 16) <> ":" <> (pprintf "%02x" $ bitSlice v 15 8) <> ":" <> (pprintf "%02x" $ bitSlice v 7 0)
 
 mkMask :: Format -> OF.Mask -> Doc
-mkMask f v = mkVal f v
+mkMask f m = mkVal f m

@@ -258,24 +258,20 @@ concatMatches m1 m2 = foldM (\ms m@(O.Match f msk v) ->
                                                  return $ (take i ms) ++ [m'] ++ (drop (i+1) ms)
                                    Nothing -> return $ ms ++ [m]) m1 m2 
 
-combineMatches :: O.Field -> (Maybe O.Mask, O.Value) -> (Maybe O.Mask, O.Value) -> Maybe O.Match
-combineMatches f (mm1, O.Value w v1) (mm2, O.Value _ v2) = if v1' == v2' then Just (O.Match f m' $ O.Value w v') else Nothing
-    where m1 = case mm1 of
-                    Nothing            -> -1
-                    Just (O.Value _ m) -> m
-          m2 = case mm2 of
-                    Nothing            -> -1
-                    Just (O.Value _ m) -> m
+combineMatches :: O.Field -> (Maybe O.Mask, Integer) -> (Maybe O.Mask, Integer) -> Maybe O.Match
+combineMatches f (mm1, v1) (mm2, v2) = if v1' == v2' then Just (O.Match f m' v') else Nothing
+    where m1 = maybe (-1) id mm1
+          m2 = maybe (-1) id mm2
           v1' = v1 .&. m1 .&. m2
           v2' = v2 .&. m1 .&. m2
-          m' = if m1 .|. m2 == -1 then Nothing else Just (O.Value w $ m1 .|. m2)
+          m' = if m1 .|. m2 == -1 then Nothing else Just (m1 .|. m2)
           v' = (v1 .&. m1) .|. (v2 .&. m2)
 
 mkMatch :: O.Expr -> O.Expr -> [[O.Match]]
 mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
               | const1 && const2 && v1 /= v2 = []
               | const1                       = mkMatch e2 e1
-              | const2                       = [[O.Match f (slice2mask f sl) v2]]
+              | const2                       = [[O.Match f (slice2mask f sl) (O.valVal v2 `shiftL` l)]]
               | otherwise                    = error $ "IR2OF.mkMatch: cannot match two variables: " ++ show e1 ++ " " ++ show e2
     where
     const1 = O.exprIsConst e1
@@ -283,8 +279,9 @@ mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
     (O.EVal v1) = e1
     (O.EVal v2) = e2
     (O.EField f sl) = e1
+    l = maybe 0 snd sl
     slice2mask :: O.Field -> Maybe (Int, Int) -> Maybe O.Mask
-    slice2mask fl msl = fmap (O.Value (O.fieldWidth fl) . uncurry bitRange) msl
+    slice2mask fl msl = fmap (uncurry bitRange) msl
 
 mkNext :: I.Pipeline -> I.Record -> I.Next -> O.Action
 mkNext pl _ (I.Goto nd) = mkGoto pl nd

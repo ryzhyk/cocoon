@@ -27,10 +27,10 @@ import Util
 import Name
 import PP
 
-type Mask = Value
+type Mask = Integer
 
-isFullMask :: Mask -> Bool
-isFullMask (Value w v) = v == bitRange (w-1) 0
+isFullMask :: Field -> Mask -> Bool
+isFullMask f v = v == bitRange (fieldWidth f -1) 0
 
 data Value = Value { valWidth :: Int
                    , valVal   :: Integer}
@@ -54,7 +54,7 @@ instance Show Field where
 
 data Match = Match { matchField :: Field
                    , matchMask  :: Maybe Mask
-                   , matchVal   :: Value
+                   , matchVal   :: Integer
                    }
 
 data Expr = EField Field (Maybe (Int, Int))
