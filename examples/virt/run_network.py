@@ -129,18 +129,21 @@ class VNet (Mininet):
         hostname = "h" + str(hostid)
         s = self.addSwitch(hostname)
         s.start([])
-        subprocess.check_call(["ovs-vsctl", "set", "bridge", hostname, "protocols=OpenFlow15"])
+        s.cmd(["ovs-vsctl", "set", "bridge", hostname, "protocols=OpenFlow15"])
         cocoon("Hypervisor.put(Hypervisor{" + str(hostid) + ", false, \"" + hostname + "\", \"\"})")
         return
 
     def delHost(self, hostid):
         return
 
-    def addVM(self, vmid, host, portnum, mac, ip):
+    def addVM(self, vmid, host, mac, ip):
         vmname = "vm" + str(vmid)
         hostname = "h" + str(host)
         h = self.addHost(vmname)
-        self.addLink(vmname, hostname, port1 = 0, port2 = portnum)
+        ifname = hostname + "-" + vmname
+        self.addLink(vmname, hostname, intfName2=ifname)
+        self.get(hostname).attach(ifname)
+        portnum = self.get(hostname).cmd(["ovs-vsctl", "get", "Interface", ifname, "ofport"])
         for off in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload eth0 %s off" % off
             print cmd
