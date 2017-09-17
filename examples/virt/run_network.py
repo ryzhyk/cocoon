@@ -175,9 +175,14 @@ def main():
     net = VNet(topo=topo, controller = None)
     net.start()
 
+    cocoon("LogicalSwitch.put(LogicalSwitch{0})")
     net.addHV(1, "10.10.10.101")
+
     net.addVM(1, 1, '00:00:c6:e2:a3:01', "192.168.0.1")
+    cocoon("LogicalPort.put(LogicalPort{0,0,1,48'h112233445566})")
+
     net.addVM(2, 1, '00:00:c6:e2:a3:02', "192.168.0.2")
+    cocoon("LogicalPort.put(LogicalPort{1,0,2,48'h112233445577})")
 
     CLI(net)
 
