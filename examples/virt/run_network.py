@@ -141,17 +141,18 @@ class VNet (Mininet):
         hostname = "h" + str(host)
         h = self.addHost(vmname)
         ifname = hostname + "-" + vmname
-        self.addLink(vmname, hostname, intfName2=ifname)
+        self.addLink(vmname, hostname, intfName1='eth0',intfName2=ifname)
         self.get(hostname).attach(ifname)
         portnum = self.get(hostname).cmd(["ovs-vsctl", "get", "Interface", ifname, "ofport"])
         for off in ["rx", "tx", "sg"]:
             cmd = "/sbin/ethtool --offload eth0 %s off" % off
             print cmd
             h.cmd(cmd)
-        print hostname + ": set IP address " + ip
+        print vmname + ": set IP address " + ip
         h.cmd("ifconfig eth0 " + ip)
-        print hostname + ": set MAC address " + mac
+        print vmname + ": set MAC address " + mac
         h.cmd("sudo ifconfig eth0 hw ether " + mac)
+        h.cmd("sudo ifconfig lo up")
         print "disable ipv6"
         h.cmd("sysctl -w net.ipv6.conf.all.disable_ipv6=1")
         h.cmd("sysctl -w net.ipv6.conf.default.disable_ipv6=1")
@@ -173,6 +174,10 @@ def main():
     router = topo.addNode('r0', cls=LinuxRouter)
     net = VNet(topo=topo, controller = None)
     net.start()
+
+    net.addHV(1, "10.10.10.101")
+    net.addVM(1, 1, '00:00:c6:e2:a3:01', "192.168.0.1")
+    net.addVM(2, 1, '00:00:c6:e2:a3:02', "192.168.0.2")
 
     CLI(net)
 
