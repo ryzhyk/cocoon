@@ -33,7 +33,6 @@ import Data.Maybe
 import GHC.Exts
 --import Debug.Trace
 
-import Ops
 import Util
 import IR.IR
 import qualified SMT.SMTSolver as S
@@ -175,7 +174,6 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
         rename = exprMap rename'
         rename' :: Expr -> Expr
         rename' (EVar v t) | isNothing (M.lookup v allocation) = EVar v t
-                           | t == TBool                        = EBinOp Eq e (EBit 1 1)
                            | otherwise                         = e
             where (rid, off) = allocation M.! v
                   w = typeWidth t

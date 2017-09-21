@@ -66,9 +66,9 @@ instance Show Var where
 
 -- data Relation = Relation RelName [Var]
 
-data Expr = EPktField {exprFieldName :: FieldName, exprType :: Type}
-          | EVar      {exprVarName :: VarName, exprType :: Type}
-          | ECol      {exprColName :: ColName, exprType :: Type}
+data Expr = EPktField {exprFieldName :: FieldName, exprT :: Type}
+          | EVar      {exprVarName :: VarName, exprT :: Type}
+          | ECol      {exprColName :: ColName, exprT :: Type}
           | ESlice    {exprArg :: Expr, exprH :: Int, exprL :: Int}
           | EBool     {exprBoolVal :: Bool}
           | EBit      {exprWidth :: Int, exprIntVal :: Integer}
@@ -89,6 +89,34 @@ instance PP Expr where
 
 instance Show Expr where
     show = render . pp
+
+exprType :: Expr -> Type
+exprType (EPktField _ t)   = t
+exprType (EVar _ t)        = t      
+exprType (ECol _ t)        = t
+exprType (ESlice _ h l)    = TBit (h-l+1)
+exprType (EBool _)         = TBool   
+exprType (EBit w _)        = TBit w
+exprType (EBinOp op e1 e2) = case op of
+                             Eq         -> TBool
+                             Neq        -> TBool
+                             Lt         -> TBool
+                             Gt         -> TBool
+                             Lte        -> TBool
+                             Gte        -> TBool
+                             And        -> TBool
+                             Or         -> TBool
+                             Impl       -> TBool
+                             Plus       -> exprType e1
+                             Minus      -> exprType e1
+                             Mod        -> exprType e2
+                             ShiftR     -> exprType e1
+                             ShiftL     -> exprType e1
+                             Concat     -> TBit $ (typeWidth $ exprType e1) + (typeWidth $ exprType e2)
+exprType (EUnOp Not _)     = TBool
+
+exprIsBool :: Expr -> Bool
+exprIsBool e = exprType e == TBool
 
 exprMap :: (Expr -> Expr) -> Expr -> Expr
 exprMap f e@EPktField{}       = f e

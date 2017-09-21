@@ -183,6 +183,8 @@ mkExpr val e =
                                    Just v  -> mkExpr val v
          I.ESlice    x h l -> slice (mkExpr val x) h l
          I.EBit      w v   -> O.EVal $ O.Value w v
+         I.EBool     True  -> O.EVal $ O.Value 1 1
+         I.EBool     False -> O.EVal $ O.Value 1 0
          _                 -> error $ "Not implemented: IR2OF.mkExpr " ++ show e
 
 slice :: O.Expr -> Int -> Int -> O.Expr
@@ -201,9 +203,10 @@ mkCond []          = [([], [O.ActionDrop])]
 mkCond ((c, a):cs) = mkCond' c [([], a)] $ mkCond cs
 
 mkCond' :: I.Expr -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])] -> [([O.Match], [O.Action])]
-mkCond' c yes no = 
+mkCond' c yes no =
     case c of
-         I.EBinOp Eq e1 e2 | isbool e1 -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
+         I.EBinOp Eq e1 e2 | I.exprIsBool e1 
+                                       -> mkCond' e1 (mkCond' e2 yes no) (mkCond' e2 no yes)
                            | otherwise -> let cs' = mkMatch (mkExpr M.empty e1) (mkExpr M.empty e2)
                                           in concatMap (\c' -> mapMaybe (\(m,a) -> fmap (,a) (concatMatches c' m)) yes) cs' ++ no
          I.EBinOp Neq e1 e2            -> mkCond' (I.EUnOp Not (I.EBinOp Eq e1 e2)) yes no
@@ -211,15 +214,10 @@ mkCond' c yes no =
          I.EUnOp Not e                 -> mkCond' e no yes
          I.EBinOp Or e1 e2             -> mkCond' e1 yes (mkCond' e2 yes no)
          I.EBinOp And e1 e2            -> mkCond' e1 (mkCond' e2 yes no) no
+         I.EBool True                  -> yes
+         I.EBool False                 -> no
+         e  | I.exprType e == I.TBit 1 -> mkCond' (I.EBinOp Eq e (I.EBit 1 1)) yes no
          _                             -> error $ "IR2OF.mkCond': expression is not supported: " ++ show c
-
-isbool :: I.Expr -> Bool
-isbool I.EBool{}               = True
-isbool (I.ECol _ I.TBool)      = True
-isbool (I.EPktField _ I.TBool) = True
-isbool (I.EBinOp op _ _)       = bopReturnsBool op
-isbool (I.EUnOp Not _)         = True
-isbool _                       = False
 
 -- TODO: use BDDs to encode arbitrary pipelines
 mkPLMatch :: I.Pipeline -> I.Record -> [[O.Match]]
@@ -238,7 +236,7 @@ mkPLMatch I.Pipeline{..} val =
 mkSimpleCond :: I.Record -> I.Expr -> [[O.Match]]
 mkSimpleCond val c = 
     case c of
-         I.EBinOp Eq e1 e2 | not (isbool e1) 
+         I.EBinOp Eq e1 e2 | not (I.exprIsBool e1) 
                                      -> mkMatch (mkExpr val e1) (mkExpr val e2)
          I.EBinOp Neq e1 e2          -> mkSimpleCond val (I.EUnOp Not (I.EBinOp Eq e1 e2))
          I.EBinOp Impl e1 e2         -> mkSimpleCond val (I.EBinOp Or (I.EUnOp Not e1) e2)
@@ -271,7 +269,7 @@ mkMatch :: O.Expr -> O.Expr -> [[O.Match]]
 mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
               | const1 && const2 && v1 /= v2 = []
               | const1                       = mkMatch e2 e1
-              | const2                       = [[O.Match f (slice2mask f sl) (O.valVal v2 `shiftL` l)]]
+              | const2                       = [[O.Match f (slice2mask sl) (O.valVal v2 `shiftL` l)]]
               | otherwise                    = error $ "IR2OF.mkMatch: cannot match two variables: " ++ show e1 ++ " " ++ show e2
     where
     const1 = O.exprIsConst e1
@@ -280,8 +278,8 @@ mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
     (O.EVal v2) = e2
     (O.EField f sl) = e1
     l = maybe 0 snd sl
-    slice2mask :: O.Field -> Maybe (Int, Int) -> Maybe O.Mask
-    slice2mask fl msl = fmap (uncurry bitRange) msl
+    slice2mask :: Maybe (Int, Int) -> Maybe O.Mask
+    slice2mask msl = fmap (uncurry bitRange) msl
 
 mkNext :: I.Pipeline -> I.Record -> I.Next -> O.Action
 mkNext pl _ (I.Goto nd) = mkGoto pl nd
