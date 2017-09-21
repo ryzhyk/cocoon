@@ -119,7 +119,7 @@ def main():
 
     cocoon(":connect")
 
-    subprocess.check_call(["rmmod", "dummy"])
+    subprocess.call(["rmmod", "dummy"])
     subprocess.check_call(["sudo", "modprobe", "dummy", "numdummies=10"])
 
     topo = Topo()
