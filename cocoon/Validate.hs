@@ -33,7 +33,7 @@ import Name
 import Expr
 import Refine
 import Relation
-import SQL
+--import SQL
 import Role
 import {-# SOURCE #-} Builtins
 
@@ -497,9 +497,9 @@ exprValidate2 r _   (EBinOp p op e1 e2) = do case op of
                                                   ShiftL -> do {isint1; isint2}
                                                   Mod    -> do {isint1; isint2}
                                                   Concat -> do {isbit1; isbit2}
-                                             when (elem op [Lt, Gt, Lte, Gte, Plus, Minus, Mod] && isBit r e1) $
-                                                  assertR r ((typeWidth $ typ' r e1) <= sqlMaxIntWidth) p 
-                                                           $ "Cannot perform arithmetic operations on bit vectors wider than " ++ show sqlMaxIntWidth ++ " bits"
+                                             --when (elem op [Lt, Gt, Lte, Gte, Plus, Minus, Mod] && isBit r e1) $
+                                             --     assertR r ((typeWidth $ typ' r e1) <= sqlMaxIntWidth) p 
+                                             --              $ "Cannot perform arithmetic operations on bit vectors wider than " ++ show sqlMaxIntWidth ++ " bits"
     where m = matchType p r e1 e2
           isint1 = assertR r (isInt r e1 || isBit r e1) (pos e1) $ "Not an integer"
           isint2 = assertR r (isInt r e2 || isBit r e2) (pos e2) $ "Not an integer"
