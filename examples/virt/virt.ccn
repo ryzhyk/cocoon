@@ -10,11 +10,15 @@ function ethBroadcastAddr(addr: mac_addr_t): bool = addr == 48'hffffffffffff
 
 typedef Packet = eth_pkt_t
 
-typedef eth_pkt_t = EthPacket { portnum : bit<16>
+typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
+                              , portnum : bit<16>
                               , src     : mac_addr_t
                               , dst     : mac_addr_t
                               , vlan    : vlan_t
                               , payload : eth_payload_t}
+
+typedef vxlan_t = VXLAN { tun_dst : ip4_addr_t
+                        , tun_id  : bit<24>}
 
 typedef vlan_t = VLAN { pcp : bit<3>
                       //, dei : bit<1> not supported by OVS
@@ -72,11 +76,12 @@ typedef icmp6_pkt_t = ICMP6Pkt { type : bit<8>
                                , code : bit<8> }
 
 
-typedef hyperv_id_t = bit<32>
-typedef hport_id_t  = bit<32>
+typedef hyperv_id_t   = bit<32>
+typedef hport_id_t    = bit<32>
+typedef htunport_id_t = bit<32>
 
 
-typedef lswitch_id_t = bit<32>
+typedef lswitch_id_t = bit<24>
 typedef lport_id_t   = bit<32>
 
 #switch
@@ -95,6 +100,16 @@ table HypervisorPort( id        : hport_id_t
                     , foreign key (switch) references Hypervisor(id)
                     , unique (switch, portnum))
 
+#switch_port(HypervisorTunPortIn, HypervisorTunPortOut)
+table HypervisorTunPort( id         : htunport_id_t
+                       , portnum    : bit<16>
+                       , switch     : hyperv_id_t
+                       , externalip : ip4_addr_t
+                       , primary key (id)
+                       , foreign key (switch) references Hypervisor(id)
+                       , unique (switch)
+                       , unique (switch, portnum))
+
 table LogicalSwitch( id      : lswitch_id_t
                    , primary key (id))
 
@@ -106,26 +121,87 @@ table LogicalPort( id       : lport_id_t
                  , foreign key (lswitch) references LogicalSwitch(id)
                  , unique(hport))
 
+// Map source port and destination MAC to vxlan tunnel
+view HPortTun( srchport : hport_id_t
+             , dstmac   : mac_addr_t
+             , lswitch  : lswitch_id_t
+             , tun      : bool
+             , dsthport : hport_id_t
+             , dsttunip : ip4_addr_t) 
+
+HPortTun(srchport, dstmac, lsw, true, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
+                                                           , LogicalPort      (srclport, lsw, srchport, _)
+                                                           , LogicalPort      (dstlport, lsw, _, dstmac)
+                                                           , HypervisorPort   (dsthport, _, dsthv)
+                                                           , HypervisorTunPort(_, _, dsthv, dsttunip)
+                                                           , dsthv != srchv
+
+HPortTun(srchport, dstmac, lsw, false, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
+                                                            , LogicalPort      (srclport, lsw, srchport, _)
+                                                            , LogicalPort      (dstlport, lsw, _, dstmac)
+                                                            , HypervisorPort   (dsthport, _, dsthv)
+                                                            , HypervisorTunPort(_, _, dsthv, dsttunip)
+                                                            , dsthv == srchv
+
 role HypervisorPortIn[port in HypervisorPort] = {
-    var lport: LogicalPort;
-    the (lp in LogicalPort | lp.hport == port.id) {
-        lport = lp
-    } default {
-        drop
-    };
-
-    var dstlport: LogicalPort;
-    the (lp in LogicalPort | lp.lswitch == lport.lswitch and lp.mac == pkt.dst) {
-        dstlport = lp
-    } default {
-        drop
-    };
-
-    the (hp in HypervisorPort | dstlport.hport == hp.id and hp.switch == port.switch) {
-        send HypervisorPortOut[hp]
+    the (tun in HPortTun | tun.srchport == port.id and tun.dstmac == pkt.dst) {
+        if (not tun.tun) {
+            the (hp in HypervisorPort | hp.id == tun.dsthport) {
+                send HypervisorPortOut[hp]
+            }
+        } else {
+            pkt.vxlan.tun_dst = tun.dsttunip;
+            pkt.vxlan.tun_id  = tun.lswitch;
+            the (tp in HypervisorTunPort | tp.switch == port.switch) {
+                send HypervisorTunPortOut[tp]
+            }
+        }
     } default {
         drop
     }
 }
 
+//    var lport: LogicalPort;
+//    the (lp in LogicalPort | lp.hport == port.id) {
+//        lport = lp
+//    } default {
+//        drop
+//    };
+//
+//    var dstlport: LogicalPort;
+//    the (lp in LogicalPort | lp.lswitch == lport.lswitch and lp.mac == pkt.dst) {
+//        dstlport = lp
+//    } default {
+//        drop
+//    };
+//
+//    var dsthp: HypervisorPort;
+//    the (hp in HypervisorPort | dstlport.hport == hp.id) {
+//        dsthp = hp
+//    } default {
+//        drop
+//    }
+//
+//    if dsthp.switch == port.switch {
+//        send HypervisorPortOut[dsthp]
+//    } else {
+//        pkt.tun_dst = dsthp.addr;
+//        pkt.tun_id  = lport.switch;
+//        the (tp in HypervisorTunPort | tp.switch == port.switch) {
+//            send HypervisorTunPortOut[tp]
+//        }
+//    }
+
 role HypervisorPortOut[port in HypervisorPort] = drop
+
+role HypervisorTunPortIn[port in HypervisorTunPort] = {
+    the (lp in LogicalPort | lp.lswitch == pkt.vxlan.tun_id and lp.mac == pkt.dst) {
+        the (hp in HypervisorPort | hp.id == lp.hport) {
+            send HypervisorPortOut[hp]
+        }
+    } default {
+        drop
+    }
+}
+
+role HypervisorTunPortOut[port in HypervisorTunPort] = drop
