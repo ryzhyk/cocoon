@@ -18,7 +18,7 @@ typedef eth_pkt_t = EthPacket { vxlan   : vxlan_t
                               , payload : eth_payload_t}
 
 typedef vxlan_t = VXLAN { tun_dst : ip4_addr_t
-                        , tun_id  : bit<24>}
+                        , tun_id  : bit<64>}
 
 typedef vlan_t = VLAN { pcp : bit<3>
                       //, dei : bit<1> not supported by OVS
@@ -81,7 +81,7 @@ typedef hport_id_t    = bit<32>
 typedef htunport_id_t = bit<32>
 
 
-typedef lswitch_id_t = bit<24>
+typedef lswitch_id_t = bit<64>
 typedef lport_id_t   = bit<32>
 
 #switch
@@ -111,7 +111,8 @@ table HypervisorTunPort( id         : htunport_id_t
                        , unique (switch, portnum))
 
 table LogicalSwitch( id      : lswitch_id_t
-                   , primary key (id))
+                   , primary key (id)
+                   , check ((id <= 64'hffffff) and (id > 0)))
 
 table LogicalPort( id       : lport_id_t
                  , lswitch  : lswitch_id_t
