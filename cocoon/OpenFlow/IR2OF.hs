@@ -111,7 +111,7 @@ updateSwitch r ports swid db = portcmds ++ nodecmds
     -- update table0 if ports have been added or removed
     portcmds = concatMap (\(prole, pl) -> updatePort r (prole,pl) swid db) ports
     -- update pipeline nodes
-    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl) $ G.labNodes $ I.plCFG pl) ports
+    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl swid) $ G.labNodes $ I.plCFG pl) ports
 
 updatePort :: C.Refine -> (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
 updatePort r (prole, pl) i db = delcmd ++ addcmd
@@ -132,12 +132,15 @@ mkNode pl (nd, node) =
          I.Lookup _ _ _ _ el -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pl el]
          I.Fork{}            -> [O.AddGroup $ O.Group nd O.GroupAll []]
 
-updateNode :: C.Refine -> I.Delta -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
-updateNode r db portpl (nd, node) = 
+updateNode :: C.Refine -> I.Delta -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> [O.Command]
+updateNode r db portpl swid (nd, node) = 
     case node of
          I.Par _              -> []
          I.Cond _             -> []
-         I.Lookup t _ pl th _ -> let (add, del) = partition fst (db M.! t) 
+         I.Lookup t _ pl th _ -> let -- First node of the pipeline? Ignore entries that do not belong to swid
+                                     (add, del) = if null $ G.pre (I.plCFG portpl) nd
+                                                     then partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == swid) $ (db M.! t)
+                                                     else partition fst (db M.! t) 
                                      delcmd = concatMap (\(_,f) -> map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch) 
                                                                        $ mkLookupFlow portpl f pl th) del
                                      addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow portpl f pl th) add
