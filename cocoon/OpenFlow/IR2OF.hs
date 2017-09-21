@@ -138,6 +138,7 @@ updateNode r db portpl swid (nd, node) =
          I.Par _              -> []
          I.Cond _             -> []
          I.Lookup t _ pl th _ -> let -- First node of the pipeline? Ignore entries that do not belong to swid
+                                     -- TODO: hack; remove when proper table slicing is implemented
                                      (add, del) = if null $ G.pre (I.plCFG portpl) nd
                                                      then partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == swid) $ (db M.! t)
                                                      else partition fst (db M.! t) 
