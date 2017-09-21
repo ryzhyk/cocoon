@@ -33,6 +33,7 @@ import qualified Data.ByteString as BSS
 import Data.Text (Text, pack, unpack)
 import Data.Maybe
 import Data.List
+import qualified Control.Concurrent.Lock as L
 
 
 import SMT.SMTSolver
@@ -124,6 +125,7 @@ data DFSession = DFSession { dfQ     :: SMTQuery
                            , dfHTo   :: Handle
                            , dfHFrom :: Handle
                            , dfHP    :: ProcessHandle
+                           , dfLock  :: L.Lock
                            }
 
 data Request = ReqStart
@@ -159,11 +161,13 @@ newSession path structs funs rels = do
                               , std_in  = CreatePipe
                               , std_err = UseHandle hremote}
     (Just hin, _, _, ph) <- createProcess cproc
+    lock <- L.new
     let df = DFSession { dfQ     = SMTQuery structs [] funs [] []
                        , dfRels  = rels
                        , dfHTo   = hin
                        , dfHFrom = hlocal
                        , dfHP    = ph
+                       , dfLock  = lock
                        }
     checkph df
     return $ Session { start            = dfStart            df
@@ -206,7 +210,7 @@ hGetSome' h i = do
     return s
 
 dfAddFact :: DFSession -> Fact -> IO ()
-dfAddFact df fact = do
+dfAddFact df fact = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON $ ReqAdd fact
     resp <- req df json
@@ -214,7 +218,7 @@ dfAddFact df fact = do
     return ()
 
 dfRemoveFact :: DFSession -> Fact -> IO ()
-dfRemoveFact df fact = do
+dfRemoveFact df fact = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON $ ReqRemove fact
     resp <- req df json
@@ -222,7 +226,7 @@ dfRemoveFact df fact = do
     return ()
 
 dfCheckRelationSAT :: DFSession -> String -> IO Bool
-dfCheckRelationSAT df rel = do 
+dfCheckRelationSAT df rel = L.with (dfLock df) $ do 
     let ?q = dfQ df
     let json = requestToJSON $ ReqCheck rel
     resp <- req df json
@@ -232,7 +236,7 @@ dfCheckRelationSAT df rel = do
          _        -> err $ "Dataflog returned invalid status: " ++ show status
 
 dfEnumRelation :: DFSession -> String -> IO [Fact]
-dfEnumRelation df rel = do
+dfEnumRelation df rel = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON $ ReqEnum rel
     resp <- req df json
@@ -242,13 +246,13 @@ dfEnumRelation df rel = do
          _             -> err $ "Dataflog enum returned invalid value: " ++ show res
 
 dfCloseSession :: DFSession -> IO ()
-dfCloseSession df = do
+dfCloseSession df = L.with (dfLock df) $ do
    terminateProcess $ dfHP df
    _ <- waitForProcess $ dfHP df
    return () 
 
 dfStart :: DFSession -> IO ()
-dfStart df = do
+dfStart df = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON ReqStart
     resp <- req df json
@@ -256,7 +260,7 @@ dfStart df = do
     return ()
 
 dfRollback :: DFSession -> IO ()
-dfRollback df = do
+dfRollback df = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON ReqRollback
     resp <- req df json
@@ -264,7 +268,7 @@ dfRollback df = do
     return ()
 
 dfCommit :: DFSession -> IO [(Fact, Bool)]
-dfCommit df = do
+dfCommit df = L.with (dfLock df) $ do
     let ?q = dfQ df
     let json = requestToJSON ReqCommit
     resp <- req df json
