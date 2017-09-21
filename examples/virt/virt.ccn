@@ -130,19 +130,12 @@ view HPortTun( srchport : hport_id_t
              , dsthport : hport_id_t
              , dsttunip : ip4_addr_t) 
 
-HPortTun(srchport, dstmac, lsw, true, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
-                                                           , LogicalPort      (srclport, lsw, srchport, _)
-                                                           , LogicalPort      (dstlport, lsw, dsthport, dstmac)
-                                                           , HypervisorPort   (dsthport, _, dsthv)
-                                                           , HypervisorTunPort(_, _, dsthv, dsttunip)
-                                                           , dsthv != srchv
-
-HPortTun(srchport, dstmac, lsw, false, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
-                                                            , LogicalPort      (srclport, lsw, srchport, _)
-                                                            , LogicalPort      (dstlport, lsw, dsthport, dstmac)
-                                                            , HypervisorPort   (dsthport, _, dsthv)
-                                                            , HypervisorTunPort(_, _, dsthv, dsttunip)
-                                                            , dsthv == srchv
+HPortTun(srchport, dstmac, lsw, dsthv != srchv, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
+                                                                     , LogicalPort      (srclport, lsw, srchport, _)
+                                                                     , LogicalPort      (dstlport, lsw, dsthport, dstmac)
+                                                                     , HypervisorPort   (dsthport, _, dsthv)
+                                                                     , HypervisorTunPort(_, _, dsthv, dsttunip)
+                                                                     , dsthv != srchv
 
 role HypervisorPortIn[port in HypervisorPort] = {
     the (tun in HPortTun | tun.srchport == port.id and tun.dstmac == pkt.dst) {
