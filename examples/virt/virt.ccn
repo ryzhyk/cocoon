@@ -132,14 +132,14 @@ view HPortTun( srchport : hport_id_t
 
 HPortTun(srchport, dstmac, lsw, true, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
                                                            , LogicalPort      (srclport, lsw, srchport, _)
-                                                           , LogicalPort      (dstlport, lsw, _, dstmac)
+                                                           , LogicalPort      (dstlport, lsw, dsthport, dstmac)
                                                            , HypervisorPort   (dsthport, _, dsthv)
                                                            , HypervisorTunPort(_, _, dsthv, dsttunip)
                                                            , dsthv != srchv
 
 HPortTun(srchport, dstmac, lsw, false, dsthport, dsttunip) :- HypervisorPort   (srchport, _, srchv)
                                                             , LogicalPort      (srclport, lsw, srchport, _)
-                                                            , LogicalPort      (dstlport, lsw, _, dstmac)
+                                                            , LogicalPort      (dstlport, lsw, dsthport, dstmac)
                                                             , HypervisorPort   (dsthport, _, dsthv)
                                                             , HypervisorTunPort(_, _, dsthv, dsttunip)
                                                             , dsthv == srchv
