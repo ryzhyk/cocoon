@@ -141,6 +141,7 @@ def main():
 
     CLI(net)
 
+    subprocess.call(["rmmod", "dummy"])
     net.stop()
 
 
