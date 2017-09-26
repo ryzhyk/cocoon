@@ -155,6 +155,8 @@ role HypervisorPortIn[port in HypervisorPort] = {
     }
 }
 
+
+//role HypervisorPortIn[port in HypervisorPort] = {
 //    var lport: LogicalPort;
 //    the (lp in LogicalPort | lp.hport == port.id) {
 //        lport = lp
@@ -185,6 +187,7 @@ role HypervisorPortIn[port in HypervisorPort] = {
 //            send HypervisorTunPortOut[tp]
 //        }
 //    }
+//}
 
 role HypervisorPortOut[port in HypervisorPort] = drop
 
