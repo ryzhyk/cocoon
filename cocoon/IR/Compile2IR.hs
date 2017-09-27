@@ -41,7 +41,7 @@ import Expr
 import Name
 import Type
 import Validate
-import Role
+import Port
 import Backend
 import qualified IR.IR       as I
 import qualified IR.Optimize as I
@@ -68,41 +68,43 @@ updateNode nid n suc = modify $ \(I.Pipeline vs cfg end) -> let (to, _, _, from)
                                                                 cfg'' = foldl' (\_cfg s -> G.insEdge (nid, s, I.Edge) _cfg) cfg' suc
                                                             in I.Pipeline vs cfg'' end
 
-compileSwitch :: StructReify -> FilePath -> Refine -> Relation -> [(String, I.Pipeline)]
-compileSwitch structs workdir r rel = map (\port -> (name port, compilePort structs workdir r port)) ports
+compileSwitch :: StructReify -> FilePath -> Refine -> Switch -> [(String, I.Pipeline)]
+compileSwitch structs workdir r sw = map (\port -> (name port, compilePort structs workdir r port)) ports
     where
-    ports = filter (\role -> roleIsInPort r (name role) && portRoleSwitch r role == name rel) 
-                   $ refineRoles r
+    ports = filter ((== switchRel sw) . portSwitchRel r) 
+                   $ refinePorts r
 
-compilePort :: StructReify -> FilePath -> Refine -> Role -> I.Pipeline
-compilePort structs workdir r role =
+compilePort :: StructReify -> FilePath -> Refine -> SwitchPort -> I.Pipeline
+compilePort structs workdir r port =
     let ?r = r in 
     let ?s = structs in
-    let compiled = execState (compilePort' role) (I.Pipeline M.empty G.empty 0)
-        dotname = workdir </> addExtension (name role) "dot"
-        odotname = workdir </> addExtension (addExtension (name role) "opt") "dot"
+    let compiled = execState (compilePort' port) (I.Pipeline M.empty G.empty 0)
+        dotname = workdir </> addExtension (name port) "dot"
+        odotname = workdir </> addExtension (addExtension (name port) "opt") "dot"
         optimized = trace (unsafePerformIO $ do {I.cfgDump (I.plCFG compiled) dotname; return ""}) 
                     $ I.optimize 0 compiled 
     in trace (unsafePerformIO $ do {I.cfgDump (I.plCFG optimized) odotname; return ""}) optimized
 
-compilePort' :: (?s::StructReify, ?r::Refine) => Role -> CompileState ()
-compilePort' role@Role{..} = do 
+compilePort' :: (?s::StructReify, ?r::Refine) => SwitchPort -> CompileState ()
+compilePort' SwitchPort{..} = do 
     entrynd <- allocNode
     setEntryNode entrynd
-    let inlined = exprInline ?r (CtxRole role) roleBody
-    let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxRole role) inlined) 0
-    case exprValidate ?r (CtxRole role) e of
+    let f@Function{..} = getFunc ?r portIn
+    let key = name $ head funcArgs
+    let inlined = exprInline ?r (CtxFunc f CtxRefine) $ fromJust funcDef
+    let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxFunc f CtxRefine) inlined) 0
+    case exprValidate ?r (CtxFunc f CtxRefine) e of
          Left er  -> error $ "Compile2IR.compilePort': failed to validate transformed expression: " ++ er
          Right _  -> return ()
 
-    let rel = getRelation ?r roleTable
+    let rel = getRelation ?r portRel
     plvars <- gets (M.keys . I.plVars)
-    (vars, asns) <- declAsnVar M.empty roleKey (relRecordType rel) entrynd $ relCols rel
+    (vars, asns) <- declAsnVar M.empty key (relRecordType rel) entrynd $ relCols rel
     pl <- get
-    let c = eBinOp Eq (eField (eVar roleKey) "portnum") (eField ePacket "portnum")
-    let (cdeps, cpl) = exprDeps vars (CtxRole role) rel (vnameAt roleKey entrynd) c pl
+    let c = eBinOp Eq (eField (eVar key) "portnum") (eField ePacket "portnum")
+    let (cdeps, cpl) = exprDeps vars (CtxFunc f CtxRefine) rel (vnameAt key entrynd) c pl
         cdeps' = cdeps `intersect` plvars
-    (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxRole role) Nothing e
+    (entryndb, _) <- {-trace ("port statement:\n\n" ++ show e) $-} compileExpr vars (CtxFunc f CtxRefine) Nothing e
     updateNode entrynd (I.Lookup (name rel) cdeps' cpl (I.BB asns $ I.Goto entryndb) (I.BB [] I.Drop)) [entryndb]
 
 compileExpr :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> Maybe I.NodeId -> Expr -> CompileState (I.NodeId, VMap)
@@ -147,7 +149,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(ESet _ e1 e2)) = do
     updateNode entrynd (I.Par [I.BB asns $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
     return vars
 
-compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x)))) = do
+compileExprAt vars ctx entrynd Nothing (E e@(ESend _ (E el@(ELocation _ _ x _)))) = do
     let port = mkScalarExpr vars (CtxLocation el (CtxSend e ctx)) $ eField x "portnum"
     updateNode entrynd (I.Par [I.BB [] $ I.Send port]) []
     return vars

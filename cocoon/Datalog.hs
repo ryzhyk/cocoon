@@ -94,14 +94,14 @@ constr2DL rel (Unique _ fs)     i            = uniqueConstr i rel fs
 constr2DL rel (Check _ e)       i            = [fst $ rel2DL rel']
     where relname = name rel ++ "_check_" ++ show i
           as = relArgs rel
-          rel' = Relation nopos False relname as [] Nothing 
+          rel' = Relation nopos False relname as []
                           $ Just [Rule nopos (map (eVar . name) as) 
                                        [eRelPred (name rel) (map (eVar . name) as), eNot e]]
 constr2DL rel (ForeignKey _ fs rrel _) i     = [fst $ rel2DL rel']
     where -- R_foreign_i <- RRel(x,_), not RR_primary()
           relname = name rel ++ "_foreign_" ++ show i
           as = relArgs rel
-          rel' = Relation nopos False relname as [] Nothing
+          rel' = Relation nopos False relname as []
                           $ Just [Rule nopos (map (eVar . name) as) 
                                        [ eRelPred (name rel) (map (eVar . name) as)
                                        , eNot $ eRelPred (primaryIdxName rrel) fs ]]
@@ -115,7 +115,7 @@ pkeyIndex rel fs = [fst $ rel2DL rel']
           relname = primaryIdxName $ name rel
           as = relArgs rel
           keys = mapIdx (\f i -> Field nopos ("col" ++ show i) $ exprType ?r (CtxRelKey rel) f) fs
-          rel' = Relation nopos False relname keys [] Nothing
+          rel' = Relation nopos False relname keys []
                           $ Just [Rule nopos fs [eRelPred (name rel) (map (eVar . name) as)]]
 
 
@@ -128,7 +128,7 @@ uniqueConstr i rel fs = [fst $ rel2DL rel']
           neq = disj $ map (\(f1, f2) -> eNot $ eBinOp Eq (eVar $ name f1) (eVar $ name f2)) $ zip as1 as2 
           rename suff = exprVarRename (++suff)
           eq  = conj $ map (\f -> eBinOp Eq (rename "1" f) (rename "2" f)) fs
-          rel' = Relation nopos False relname [Field nopos "r1" $ tTuple $ map typ as1, Field nopos "r2" $ tTuple $ map typ as2] [] Nothing 
+          rel' = Relation nopos False relname [Field nopos "r1" $ tTuple $ map typ as1, Field nopos "r2" $ tTuple $ map typ as2] []
                           $ Just [Rule nopos [eTuple $ map (eVar . name) as1, eTuple $ map (eVar . name) as2]
                                              [ eRelPred (name rel) (map (eVar . name) as1)
                                              , eRelPred (name rel) (map (eVar . name) as2)

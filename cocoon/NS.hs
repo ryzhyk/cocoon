@@ -19,7 +19,9 @@ limitations under the License.
 module NS(lookupType, checkType, getType,
           lookupFunc, checkFunc, getFunc,
           lookupVar, checkVar, getVar,
-          lookupRole, checkRole, getRole,
+          lookupSwitch, checkSwitch, getSwitch,
+          lookupPort, checkPort, getPort,
+          getPortDef,
           lookupConstructor, checkConstructor, getConstructor,
           lookupRelation, checkRelation, getRelation,
           ctxMVars, ctxVars, ctxAllVars, 
@@ -31,7 +33,7 @@ module NS(lookupType, checkType, getType,
 import Data.List
 import Control.Monad.Except
 import Data.Maybe
-import Debug.Trace
+--import Debug.Trace
 
 import Syntax
 import Name
@@ -68,16 +70,31 @@ getFunc :: Refine -> String -> Function
 getFunc r n = fromJust $ lookupFunc r n
 
 
-lookupRole :: Refine -> String -> Maybe Role
-lookupRole Refine{..} n = find ((==n) . name) refineRoles
+lookupSwitch :: Refine -> String -> Maybe Switch
+lookupSwitch Refine{..} n = find ((==n) . name) refineSwitches
 
-checkRole :: (MonadError String me) => Pos -> Refine -> String -> me Role
-checkRole p r n = case lookupRole r n of
-                       Nothing -> errR r p $ "Unknown role: " ++ n
-                       Just rl -> return rl
+checkSwitch :: (MonadError String me) => Pos -> Refine -> String -> me Switch
+checkSwitch p r n = case lookupSwitch r n of
+                       Nothing -> errR r p $ "Unknown switch: " ++ n
+                       Just s  -> return s
 
-getRole :: Refine -> String -> Role
-getRole r n = fromJust $ lookupRole r n
+getSwitch :: Refine -> String -> Switch
+getSwitch r n = fromJust $ lookupSwitch r n
+
+lookupPort :: Refine -> String -> Maybe SwitchPort
+lookupPort Refine{..} n = find ((==n) . name) refinePorts
+
+checkPort :: (MonadError String me) => Pos -> Refine -> String -> me SwitchPort
+checkPort p r n = case lookupPort r n of
+                       Nothing -> errR r p $ "Unknown port: " ++ n
+                       Just pr -> return pr
+
+getPort :: Refine -> String -> SwitchPort
+getPort r n = fromJust $ lookupPort r n
+
+getPortDef :: Refine -> DirPort -> Maybe Function
+getPortDef r (DirPort n DirIn) = Just $ getFunc r $ portIn $ getPort r n
+getPortDef r (DirPort n DirOut) = fmap (getFunc r) $ portOut $ getPort r n
 
 lookupVar :: Refine -> ECtx -> String -> Maybe Field
 lookupVar r ctx n = find ((==n) . name) $ ctxAllVars r ctx
@@ -137,10 +154,6 @@ ctxMVars r ctx =
     case ctx of
          CtxRefine            -> (map f2mf $ refineState r, [])
          CtxCLI               -> (plvars, prvars)
-         CtxRole rl           -> (plvars, (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl) : prvars)
-         CtxRoleGuard rl      -> ([], [(roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl)])
-         CtxPktGuard rl       -> ([], [ (pktVar, Just $ tUser packetTypeName)
-                                      , (roleKey rl, Just $ relRecordType $ getRelation r $ roleTable rl)])
          CtxFunc f _          -> let plvars' = filter (isGlobalVar r . fst) plvars 
                                      prvars' = filter (isGlobalVar r . fst) prvars in
                                  if funcPure f    
@@ -209,8 +222,6 @@ ctxRels :: Refine -> ECtx -> ([Relation], [Relation])
 ctxRels r ctx = 
     case ctx of
          CtxRefine         -> partition relMutable $ refineRels r
-         CtxRoleGuard _    -> ([],[])
-         CtxPktGuard _     -> ([],[])
          CtxRelKey _       -> ([],[])
          CtxRelForeign _ _ -> ([],[])
          CtxCheck _        -> ([],[])
@@ -224,7 +235,6 @@ ctxRels r ctx =
          CtxAnyBody _ _    -> ({-del (exprTable e)-} plrels, {-del (exprTable e)-} prrels)
          _                 -> (plrels, prrels)
     where (plrels, prrels) = ctxRels r $ ctxParent ctx
-          --del t rels = filter ((/=t) . name) rels
 
 
 lookupBuiltin :: String -> Maybe Builtin

@@ -29,6 +29,7 @@ import Control.Monad.Except
 import Data.List
 
 import Util
+import Name
 import PP
 import Backend
 import Numeric
@@ -52,25 +53,25 @@ ovsBackend = Backend { backendStructs      = ovsStructReify
 ovsPrecompile :: (MonadError String me) => FilePath -> Refine -> me OF.IRSwitches
 ovsPrecompile workdir r = OF.precompile ovsStructReify workdir r ovsRegFile
 
-ovsBuildSwitch :: FilePath -> Refine -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
-ovsBuildSwitch workdir r f@(DL.Fact rname _) ir db = do
+ovsBuildSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.DB -> IO ()
+ovsBuildSwitch workdir r sw f@(DL.Fact rname _) ir db = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.buildSwitch r (ir M.! rname) db swid
-    ovsResetSwitch workdir r f
+        cmds = OF.buildSwitch r (ir M.! name sw) db swid
+    ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
 
-ovsUpdateSwitch :: FilePath -> Refine -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
-ovsUpdateSwitch workdir r f@(DL.Fact rname _) ir delta = do
+ovsUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
+ovsUpdateSwitch workdir r sw f@(DL.Fact rname _) ir delta = do
     let swid = DL.factSwitchId r rname f
         E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
-        cmds = OF.updateSwitch r (ir M.! rname) swid delta
+        cmds = OF.updateSwitch r (ir M.! name sw) swid delta
     when (not $ null cmds) $ sendCmds workdir rname swid swaddr swname cmds
 
-ovsResetSwitch :: FilePath -> Refine -> DL.Fact -> IO ()
-ovsResetSwitch _ r f = do
+ovsResetSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()
+ovsResetSwitch _ r _ f = do
     let E (EString _ swaddr) = DL.factField r f (\v -> eField v "address")
         E (EString _ swname) = DL.factField r f (\v -> eField v "name")
     reset swaddr swname

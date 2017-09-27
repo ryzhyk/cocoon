@@ -198,12 +198,12 @@ readValidateAddDelta fname workdir = do
     spec <- case parse cocoonGrammar fname fdata of
                  Left  e    -> error $ "Failed to parse input file: " ++ show e
                  Right spec -> return spec
-    combined <- case validate spec of
-                     Left e   -> error $ "Validation error: " ++ e
-                     Right rs -> return rs
+    case validate spec of
+         Left e  -> error $ "Validation error: " ++ e
+         Right _ -> return ()
 --    --mapM_ (putStrLn . ("\n" ++)  . render . pp) combined 
     putStrLn "Validation complete"
-    let withdelta = refineAddDelta $ head combined
+    let withdelta = refineAddDelta spec
     return withdelta
 --
 --    let ps = pairs combined

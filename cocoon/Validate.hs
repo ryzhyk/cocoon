@@ -34,9 +34,10 @@ import Expr
 import Refine
 import Relation
 --import SQL
-import Role
+import Port
 import {-# SOURCE #-} Builtins
 
+{-
 -- Validate spec.  Constructs a series of contexts, sequentially applying 
 -- refinements from the spec, and validates each context separately.
 validate :: (MonadError String me) => Spec -> me [Refine]
@@ -46,22 +47,6 @@ validate (Spec (r:rs)) = do
     mapM_ validate1 combined
     validateFinal $ last combined
     return combined
-
--- Validate final refinement before generating topology from it
-validateFinal :: (MonadError String me) => Refine -> me ()
-validateFinal r = do
-    {-mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
-                        $ exprFuncsRec r roleKeyRange)
-          $ refineRoles r-}
-    case grCycle (funcGraph r) of
-         Nothing -> return ()
-         Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
-    mapM_ (roleValidateFinal r) $ refineRoles r
-    --mapM_ (nodeValidateFinal r) $ refineNodes r
---    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 
---                  $ statFuncsRec r $ roleBody rl)
---          $ concatMap (map (getRole r . snd) . nodePorts) 
---          $ refineNodes r
 
 -- Apply definitions in new on top of prev.
 combine :: (MonadError String me) => Refine -> Refine -> me Refine
@@ -78,7 +63,7 @@ combine prev new = do
                                           $ "Role " ++ role ++ " is re-defined with a different guard"
                                   assertR r ((rolePktGuard $ getRole prev role) == (rolePktGuard $ getRole new role)) (pos new) 
                                           $ "Role " ++ role ++ " is re-defined with a different packet guard"
-                                  return r{refineRoles = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
+                                  return r{refinePorts = filter ((/=role) . roleName) $ refineRoles r}) prev (refineTarget new)
     let types   = refineTypes prev'     ++ refineTypes new
         roles   = refineRoles prev'     ++ refineRoles new
         assumes = refineAssumes prev'   ++ refineAssumes new 
@@ -101,11 +86,13 @@ checkFRefinement f f' = do
     assert (funcArgs f == funcArgs f') (pos f') $ "Arguments of " ++ name f' ++ " do not match previous definition at " ++ spos f
     assert (funcType f == funcType f') (pos f') $ "Type of " ++ name f' ++ " do not match previous definition at " ++ spos f
     assert (isNothing $ funcDef f) (pos f') $ "Cannot re-define function " ++ name f' ++ " previously defined at " ++ spos f
+-}
 
 -- Validate refinement with previous definitions inlined
-validate1 :: (MonadError String me) => Refine -> me ()
-validate1 r@Refine{..} = do
-    uniqNames (\n -> "Multiple definitions of role " ++ n) refineRoles
+validate :: (MonadError String me) => Refine -> me ()
+validate r@Refine{..} = do
+    uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
+    uniqNames (\n -> "Multiple definitions of port " ++ n) refinePorts
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
@@ -123,13 +110,31 @@ validate1 r@Refine{..} = do
           $ (grCycle $ relGraph r)
     mapM_ (stateValidate r)  refineState
     mapM_ (funcValidate2 r)  refineFuncs
-    mapM_ (roleValidate r)   refineRoles
+    mapM_ (switchValidate r) refineSwitches
+    mapM_ (portValidate r)   refinePorts
     mapM_ (assumeValidate r) refineAssumes
     mapM_ (relValidate3 r)   refineRels
     -- TODO: check for cycles in the locations graph
-    mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
-                                "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
-          refineRoles
+    --mapM_ (\rl -> assertR r ((not $ refineIsMulticast Nothing r (name rl)) || refineIsDeterministic Nothing r (name rl)) (pos r) $
+    --                            "Role " ++ name rl ++ " is both non-deterministic and multicast.  This is not supported at the moment.")
+    --      refineRoles
+    validateFinal r
+
+-- Validate final refinement before generating topology from it
+validateFinal :: (MonadError String me) => Refine -> me ()
+validateFinal r = do
+    {-mapM_ (\Role{..} -> mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos roleKeyRange) $ "Key range expression depends on undefined function " ++ f) 
+                        $ exprFuncsRec r roleKeyRange)
+          $ refineRoles r-}
+    case grCycle (funcGraph r) of
+         Nothing -> return ()
+         Just t  -> err (pos $ getFunc r $ snd $ head t) $ "Recursive function definition: " ++ (intercalate "->" $ map (name . snd) t)
+    mapM_ (portValidateFinal r) $ refinePorts r
+    --mapM_ (nodeValidateFinal r) $ refineNodes r
+--    mapM_ (\rl -> (mapM_ (\f -> assertR r (isJust $ funcDef $ getFunc r f) (pos rl) $ "Output port behavior depends on undefined function " ++ f)) 
+--                  $ statFuncsRec r $ roleBody rl)
+--          $ concatMap (map (getRole r . snd) . nodePorts) 
+--          $ refineNodes r
 
 
 typeValidate :: (MonadError String me) => Refine -> Type -> me ()
@@ -175,52 +180,82 @@ relValidate r Relation{..} = do
     mapM_ (typeValidate r . fieldType) relArgs
 
 relValidate2 :: (MonadError String me) => Refine -> Relation -> me ()
-relValidate2 r rel@Relation{relAnnotation=annot, ..} = do 
+relValidate2 r rel@Relation{..} = do 
     assertR r ((length $ filter isPrimaryKey relConstraints) <= 1) relPos $ "Multiple primary keys are not allowed"
     mapM_ (constraintValidate r rel) relConstraints
     maybe (return ()) (mapM_ (ruleValidate r rel)) relDef
     maybe (return ()) (\rules -> assertR r (any (not . ruleIsRecursive rel) rules) relPos 
                                          "View must have at least one non-recursive rule") relDef
-    case annot of
-         Nothing                      -> return ()
-         Just (RelSwitch p)           -> do
-             assertR r (isJust $ relPrimaryKey rel) p $ "Relation with #switch annotation must have a primary key" 
-             assertR r ((length $ fromJust $ relPrimaryKey rel) == 1) p 
-                       $ "Relation with #switch annotation must have a primary key with a single column" 
-             assertR r (isBit r $ exprType' r (CtxRelKey rel) $ head $ fromJust $ relPrimaryKey rel) p 
-                       $ "Relation with #switch annotation must have a primary key of type bit<N>" 
-             assertR r (case find ((== "failed") . name) relArgs of
-                             Nothing -> False
-                             Just f  -> isBool r f) p $ "Relation with #switch annotation must have a Boolean field named \"failed\"" 
-         Just (RelPort p (inp, outp)) -> do
-             inrole  <- checkRole p r inp
-             outrole <- checkRole p r outp
-             assertR r (roleTable inrole == relName) p $ "Role " ++ inp ++ " is not indexed by the " ++ relName ++ " relation" 
-             assertR r (roleTable outrole == relName) p $ "Role " ++ outp ++ " is not indexed by the " ++ relName ++ " relation" 
-             assertR r (roleCond inrole == eTrue) p 
-                     $ "Role " ++ inp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
-             assertR r (roleCond outrole == eTrue) p 
-                     $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
-             assertR r (isJust $ find ((== "switch") . name) relArgs) p 
-                     "Relation with #switch_port annotation must have a column named \"switch\""
-             maybe (errR r p "The \"switch\" column must be declared as foreign key")
-                   (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
-                                                 assertR r (case relAnnotation rel' of
-                                                                    Just (RelSwitch _) -> True
-                                                                    _                  -> False) p' 
-                                                         "The \"switch\" column must refer to a table with \"#switch\" annotation")
-                   $ find (\case 
-                            ForeignKey _ [f] _ _ -> f == eVar "switch"
-                            _                    -> False) relConstraints
-             portnum <- maybe (errR r p "Relation with #switch_port annotation must have a column named \"portnum\"")
-                              return
-                              (find ((== "portnum") . name) relArgs) 
-             assertR r (isBit r portnum) p "The portnum column must be of type bit<N>"
-             assertR r (isJust $ find (\case
-                                        Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
-                                        _                -> False) relConstraints) p
-                       "The following constraint is required in a #switch_port table: unique (switch,portnum)"
-                 
+
+switchValidate :: (MonadError String me) => Refine -> Switch -> me ()
+switchValidate r Switch{..} = do
+    rel@Relation{..} <- checkRelation switchPos r CtxRefine switchRel
+    assertR r (isJust $ relPrimaryKey rel) switchPos $ "Switch relation " ++ switchName ++ " must have a primary key" 
+    assertR r ((length $ fromJust $ relPrimaryKey rel) == 1) switchPos
+              $ "Switch relation " ++ switchName ++ " must have a primary key with a single column" 
+    assertR r (isBit r $ exprType' r (CtxRelKey rel) $ head $ fromJust $ relPrimaryKey rel) switchPos
+              $ "Switch relation " ++ switchName ++ " must have a primary key of type bit<N>" 
+    assertR r (case find ((== "failed") . name) relArgs of
+                    Nothing -> False
+                    Just f  -> isBool r f) switchPos $ "Switch relation " ++ switchName ++ " must have a Boolean field named \"failed\"" 
+
+portValidate :: (MonadError String me) => Refine -> SwitchPort -> me ()
+portValidate r SwitchPort{..} = do 
+     rel@Relation{..} <- checkRelation portPos r CtxRefine portRel
+     infunc  <- checkFunc portPos r portIn
+     moutfunc <- maybe (return Nothing) (liftM Just . checkFunc portPos r) portOut
+
+     assertR r (isJust $ funcDef infunc) portPos 
+               $ "Method " ++ name infunc ++ " used as input port handler must be defined"
+     maybe (return())
+           (\f -> assertR r (isJust $ funcDef f) portPos 
+                          $ "Method " ++ name f ++ " used as output port handler must be defined")
+           moutfunc
+
+     assertR r (not $ funcPure infunc) portPos 
+               $ "Method " ++ name infunc ++ " used as input port handler must be declared as procedure"
+     maybe (return ())
+           (\f -> assertR r (not $ funcPure f) portPos 
+                          $ "Method " ++ name f ++ " used as output port handler must be declared as procedure")
+           moutfunc
+     assertR r ((1 == length (funcArgs infunc)) && 
+                (relRecordType rel == (fieldType $ head (funcArgs infunc)))) portPos 
+               $ "Method " ++ name infunc ++ " must take a single argument of type " ++ show (relRecordType rel)
+     maybe (return ())
+           (\f -> assertR r ((1 == length (funcArgs f)) && 
+                             (relRecordType rel == (fieldType $ head (funcArgs f)))) portPos 
+                            $ "Method " ++ name f ++ " must take a single argument of type " ++ show (relRecordType rel))
+           moutfunc
+     assertR r (tSink == funcType infunc) portPos 
+               $ "Method " ++ name infunc ++ " used as input port handler must be declared as sink"
+     maybe (return ())
+           (\f -> assertR r (tSink == funcType f) portPos 
+                          $ "Method " ++ name f ++ " used as output port handler must be declared as sink")
+           moutfunc
+     --assertR r (roleTable inrole == relName) p $ "Role " ++ inp ++ " is not indexed by the " ++ relName ++ " relation" 
+     --assertR r (roleTable outrole == relName) p $ "Role " ++ outp ++ " is not indexed by the " ++ relName ++ " relation" 
+     --assertR r (roleCond inrole == eTrue) p 
+     --        $ "Role " ++ inp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
+     --assertR r (roleCond outrole == eTrue) p 
+     --        $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
+     assertR r (isJust $ find ((== "switch") . name) relArgs) relPos
+             $ "Port relation " ++ relName ++ " must have a column named \"switch\""
+     maybe (errR r relPos "The \"switch\" column must be declared as foreign key")
+           (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
+                                         assertR r (relIsSwitch r rel') p' 
+                                                 "The \"switch\" column must refer to a switch relation")
+           $ find (\case 
+                    ForeignKey _ [f] _ _ -> f == eVar "switch"
+                    _                    -> False) relConstraints
+     portnum <- maybe (errR r relPos $ "Port relation " ++ relName ++ " must have a column named \"portnum\"")
+                      return
+                      (find ((== "portnum") . name) relArgs) 
+     assertR r (isBit r portnum) relPos "The portnum column must be of type bit<N>"
+     assertR r (isJust $ find (\case
+                                Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
+                                _                -> False) relConstraints) relPos
+               $ "The following constraint is required in port relation " ++ relName ++ " unique (switch,portnum)"
+    
 relTypeValidate :: (MonadError String me) => Refine -> Relation -> Pos -> Type -> me ()
 relTypeValidate r rel p   TArray{}  = errR r p $ "Arrays are not allowed in relations (in relation " ++ name rel ++ ")"
 relTypeValidate r rel p   TTuple{}  = errR r p $ "Tuples are not allowed in relations (in relation " ++ name rel ++ ")"
@@ -297,6 +332,7 @@ ruleValidate r rel@Relation{..} rl@Rule{..} = do
 stateValidate :: (MonadError String me) => Refine -> Field -> me ()
 stateValidate r = typeValidate r . fieldType
 
+{-
 roleValidate :: (MonadError String me) => Refine -> Role -> me ()
 roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
                                 rel <- checkRelation rolePos r (CtxRole rl) roleTable
@@ -305,18 +341,25 @@ roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
                                 exprValidate r (CtxRoleGuard rl) roleCond
                                 exprValidate r (CtxPktGuard rl) rolePktGuard
                                 exprValidate r (CtxRole rl) roleBody
+-}
 
-roleValidateFinal :: (MonadError String me) => Refine -> Role -> me ()
-roleValidateFinal r rl@Role{..} = do
-    assert (exprIsDeterministic r roleBody) (pos roleBody) "Cannot synthesize non-deterministic behavior"
-    when (roleIsInPort r roleName) $ do
-        mapM_ (\rl' -> do assertR r (roleIsOutPort r rl') rolePos $ "Input port " ++ roleName ++ " sends to role " ++ rl' ++ ", which is not an output port"
-                          assertR r (portRoleSwitch r (getRole r rl') == portRoleSwitch r rl) rolePos $ "Input port " ++ roleName ++ " sends to output port " ++ rl' ++ ", which belongs to a different switch")
-             $ exprSendsToRoles r roleBody 
-    when (roleIsOutPort r roleName) $ do
-        mapM_ (\rl' -> do assertR r (roleIsInPort r $ name rl') rolePos $ "Output port " ++ roleName ++ " sends to role " ++ name rl' ++ ", which is not an input port")
-              $ exprSendsToRoles r roleBody 
+
+portValidateFinal :: (MonadError String me) => Refine -> SwitchPort -> me ()
+portValidateFinal r port@SwitchPort{..} = do
+    let def = fromJust $ funcDef $ getFunc r portIn
+    assert (exprIsDeterministic r def) (pos def) "Cannot synthesize non-deterministic behavior"
+    mapM_ (\dp@(DirPort p dir) -> do 
+             assertR r (dir == DirOut) portPos $ "Input port " ++ portName ++ " sends to another input port " ++ show dp
+             assertR r (portSwitchRel r (getPort r p) == portSwitchRel r port) portPos 
+                     $ "Input port " ++ portName ++ " sends to output port " ++ p ++ ", which belongs to a different switch")
+          $ exprSendsToPorts r def
+    maybe (return ())
+          (\pout -> do let def' = fromJust $ funcDef $ getFunc r pout
+                       mapM_ (\dp@(DirPort _ dir) -> do assertR r (dir == DirIn) portPos $ "Output port function " ++ name pout ++ " sends to another outputport " ++ show dp)
+                             $ exprSendsToPorts r def')
+        portOut
     return ()
+
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
 assumeValidate r a@Assume{..} = exprValidate r (CtxAssume a) assExpr
@@ -405,7 +448,7 @@ exprValidate1 r ctx (EApply p f as)     = do fun <- checkFunc p r f
                                                   -- make sure the procedure respects constraints on global variables and relations visibility
                                                   exprTraverseCtxM (exprValidate1 r) (CtxFunc fun ctx) $ fromJust $ funcDef fun
 exprValidate1 _ _   (EField _ _ _)      = return ()
-exprValidate1 r _   (ELocation p rl _)  = do _ <- checkRole p r rl
+exprValidate1 r _   (ELocation p pr _ _)= do _ <- checkPort p r pr
                                              return ()
 exprValidate1 _ _   (EBool _ _)         = return ()
 exprValidate1 _ _   (EInt _ _)          = return ()
@@ -518,13 +561,12 @@ checkLExpr r ctx e = assertR r (isLExpr r ctx e) (pos e) $ "Expression " ++ show
 
 ctxCheckNotDataplane :: (MonadError String me) => Pos -> ECtx -> me ()
 ctxCheckNotDataplane p ctx = do
-    when (ctxInRole ctx) $ err p "loops are not allowed inside roles"
+    when (not $ ctxInCLI ctx) $ err p "loops can only be executed from command line"
     return ()
 
 ctxCheckSideEffects :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckSideEffects p r ctx =
     case ctx of 
-         CtxRole _         -> return ()
          CtxCLI            -> return ()
          CtxFunc f _       -> when (funcPure f) complain
          CtxBuiltin _ _ _  -> complain
@@ -550,7 +592,6 @@ ctxCheckSideEffects p r ctx =
 ctxCheckPkt :: (MonadError String me) => Pos -> Refine -> ECtx -> me ()
 ctxCheckPkt p r ctx =
     case ctx of 
-         CtxRole _         -> return ()
          CtxFunc f _       -> when (funcPure f) complain
          CtxRelPred _ _ _  -> complain
          CtxRefine         -> complain

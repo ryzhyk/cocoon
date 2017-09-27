@@ -26,7 +26,7 @@ module Relation (relRecordType,
                  relRealizedName,   
                  relDeltaName,
                  relMkDelta,
-                 relSwitchPorts) where
+                 ) where
 
 import qualified Data.Graph.Inductive as G
 import Data.List
@@ -89,10 +89,8 @@ relFuncTypes r rel = nub
                      $ map (getFunc r) 
                      $ relFuncsRec r rel
 
-relIsSwitch :: Relation -> Bool
-relIsSwitch Relation{..} = case relAnnotation of
-                                Just RelSwitch{} -> True
-                                _                -> False
+relIsSwitch :: Refine -> Relation -> Bool
+relIsSwitch r Relation{..} = isJust $ find ((== relName) . switchRel) $ refineSwitches r
 
 relPrimaryKey :: Relation -> Maybe [Expr]
 relPrimaryKey Relation{..} = fmap constrFields $ find isPrimaryKey relConstraints
@@ -111,27 +109,15 @@ relMkDelta rel = (realized, delta)
     realized = rel { relMutable     = False
                    , relName        = relRealizedName $ name rel
                    , relConstraints = []
-                   , relAnnotation  = Nothing
                    , relDef         = Nothing
                    }
     delta    = rel { relMutable     = False
                    , relName        = relDeltaName $ name rel
                    , relConstraints = []
                    , relArgs        = Field nopos "_polarity" tBool : relArgs rel
-                   , relAnnotation  = Nothing
                    , relDef         = Just [plus, minus]
                    }
     des = eRelPred (name rel) argvs
     rea = eRelPred (relRealizedName $ name rel) argvs
     plus  = Rule nopos (eBool True : map (eVar . name) args) [des, eNot rea]
     minus = Rule nopos (eBool False: map (eVar . name) args) [eNot des, rea]
-
-
-relSwitchPorts :: Refine -> Relation -> [Relation]
-relSwitchPorts r rel = 
-    filter (\rel' -> case relAnnotation rel' of
-                          Just RelPort{} -> let swrole = constrForeign $ head 
-                                                         $ filter ((== [eVar "switch"]) . constrFields) 
-                                                         $ filter isForeignKey $ relConstraints rel'
-                                            in name rel == swrole
-                          _              -> False) $ refineRels r

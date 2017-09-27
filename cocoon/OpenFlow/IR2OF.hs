@@ -60,19 +60,18 @@ maxOFTables = 255
 --  Compute and compile all port roles, perform register and OF table allocation
 precompile :: (MonadError String me) => B.StructReify -> FilePath -> C.Refine -> I.RegisterFile -> me IRSwitches
 precompile structs workdir r rfile = do
-    let swrels = filter C.relIsSwitch $ C.refineRels r
     (liftM M.fromList) 
-     $ mapM (\rel -> do let ir = I.compileSwitch structs workdir r rel
-                        ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
-                                                    let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
-                                                    trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
-                                                 `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name rel ++ ":" ++ e)) ir
-                        let (ntables, ir'') = assignTables ir'
-                        mapM_ (\(n, pl) -> do let dotname = workdir </> addExtension (addExtension n "of") "dot"
-                                              trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl) dotname; return ""}) $ return ()) ir''
-                        when (ntables > maxOFTables) 
-                            $ throwError $ name rel ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
-                        return (name rel, ir'')) swrels
+     $ mapM (\sw -> do let ir = I.compileSwitch structs workdir r sw
+                       ir' <- mapM (\(n, pl) -> do pl' <- I.allocVarsToRegisters pl rfile
+                                                   let rdotname = workdir </> addExtension (addExtension n "reg") "dot"
+                                                   trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl') rdotname; return ""}) $ return (n, pl')
+                                                `catchError` (\e -> throwError $ "Compiling port " ++ n ++ " of " ++ name sw ++ ":" ++ e)) ir
+                       let (ntables, ir'') = assignTables ir'
+                       mapM_ (\(n, pl) -> do let dotname = workdir </> addExtension (addExtension n "of") "dot"
+                                             trace (unsafePerformIO $ do {I.cfgDump (I.plCFG pl) dotname; return ""}) $ return ()) ir''
+                       when (ntables > maxOFTables) 
+                           $ throwError $ name sw ++ " requires " ++ show ntables ++ " OpenFlow tables, but only " ++ show maxOFTables ++ " tables are available"
+                       return (name sw, ir'')) $ C.refineSwitches r
 
 -- Relabel port CFGs into openflow table numbers
 assignTables :: IRSwitch -> (Int, IRSwitch)
@@ -109,14 +108,14 @@ updateSwitch :: C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
 updateSwitch r ports swid db = portcmds ++ nodecmds
     where
     -- update table0 if ports have been added or removed
-    portcmds = concatMap (\(prole, pl) -> updatePort r (prole,pl) swid db) ports
+    portcmds = concatMap (\(pname, pl) -> updatePort r (pname,pl) swid db) ports
     -- update pipeline nodes
     nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl swid) $ G.labNodes $ I.plCFG pl) ports
 
 updatePort :: C.Refine -> (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
-updatePort r (prole, pl) i db = delcmd ++ addcmd
+updatePort r (pname, pl) i db = delcmd ++ addcmd
     where
-    prel = name $ C.roleTable $ C.getRole r prole
+    prel = name $ C.portRel $ C.getPort r pname
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
     match f = let pnum = f M.! "portnum" in
              mkSimpleCond M.empty $ I.EBinOp Eq (I.EPktField "portnum" $ I.TBit $ I.exprWidth pnum) pnum

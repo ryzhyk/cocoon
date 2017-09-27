@@ -84,7 +84,6 @@ typedef htunport_id_t = bit<32>
 typedef lswitch_id_t = bit<64>
 typedef lport_id_t   = bit<32>
 
-#switch
 table Hypervisor( id      : hyperv_id_t
                 , failed  : bool
                 , name    : string
@@ -92,7 +91,6 @@ table Hypervisor( id      : hyperv_id_t
                 , primary key (id))
 
 
-#switch_port(HypervisorPortIn, HypervisorPortOut)
 table HypervisorPort( id        : hport_id_t
                     , portnum   : bit<16>
                     , switch    : hyperv_id_t
@@ -100,7 +98,6 @@ table HypervisorPort( id        : hport_id_t
                     , foreign key (switch) references Hypervisor(id)
                     , unique (switch, portnum))
 
-#switch_port(HypervisorTunPortIn, HypervisorTunPortOut)
 table HypervisorTunPort( id         : htunport_id_t
                        , portnum    : bit<16>
                        , switch     : hyperv_id_t
@@ -137,17 +134,17 @@ HPortTun(srchport, dstmac, lsw, dsthv != srchv, dsthport, dsttunip) :- Hyperviso
                                                                      , HypervisorTunPort(_, _, dsthv, dsttunip)
                                                                      , dsthv != srchv
 
-role HypervisorPortIn[port in HypervisorPort] = {
+procedure hypervisorPortIn(port: HypervisorPort): sink = {
     the (tun in HPortTun | tun.srchport == port.id and tun.dstmac == pkt.dst) {
         if (not tun.tun) {
             the (hp in HypervisorPort | hp.id == tun.dsthport) {
-                send HypervisorPortOut[hp]
+                send PHypervisorPort[hp].out
             }
         } else {
             pkt.vxlan.tun_dst = tun.dsttunip;
             pkt.vxlan.tun_id  = tun.lswitch;
             the (tp in HypervisorTunPort | tp.switch == port.switch) {
-                send HypervisorTunPortOut[tp]
+                send PHypervisorTunPort[tp].out
             }
         }
     } default {
@@ -189,16 +186,28 @@ role HypervisorPortIn[port in HypervisorPort] = {
 //    }
 //}
 
-role HypervisorPortOut[port in HypervisorPort] = drop
+//role HypervisorPortOut[port in HypervisorPort] = drop
 
-role HypervisorTunPortIn[port in HypervisorTunPort] = {
+
+procedure hypervisorTunPortIn(port: HypervisorTunPort): sink = {
     the (lp in LogicalPort | lp.lswitch == pkt.vxlan.tun_id and lp.mac == pkt.dst) {
         the (hp in HypervisorPort | hp.id == lp.hport) {
-            send HypervisorPortOut[hp]
+            send PHypervisorPort[hp].out
         }
     } default {
         drop
     }
 }
 
-role HypervisorTunPortOut[port in HypervisorTunPort] = drop
+//role HypervisorTunPortOut[port in HypervisorTunPort] = drop
+
+switch SHypervisor[Hypervisor] 
+
+port PHypervisorTunPort[HypervisorTunPort](hypervisorTunPortIn, sink)
+
+port PHypervisorPort[HypervisorPort](source hypervisorPortIn, sink)
+
+
+//task Advertise[Router](advertise) @ 120 ms
+
+//procedure advertise(router: Router): sink

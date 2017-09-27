@@ -81,7 +81,7 @@ exprNodeType' r _   (EField _ e f)        = case e of
                                                  Nothing -> Nothing
                                                  Just e' -> let TStruct _ cs = typ' r e' in
                                                             fmap fieldType $ find ((==f) . name) $ concatMap consArgs cs
-exprNodeType' _ _   (ELocation _ _ _)     = Just tLocation
+exprNodeType' _ _   (ELocation _ _ _ _)   = Just tLocation
 exprNodeType' _ _   (EBool _ _)           = Just tBool
 exprNodeType' r ctx (EInt _ _)            = case fmap (typ' r) $ ctxExpectType r ctx of
                                                  t@(Just (TBit _ _)) -> t
@@ -273,93 +273,93 @@ typeEnumerate r t =
 
 -- Infer expected type from context
 ctxExpectType :: Refine -> ECtx -> Maybe Type
-ctxExpectType _ CtxRefine                          = Nothing
-ctxExpectType _ CtxCLI                             = Nothing
-ctxExpectType _ (CtxRoleGuard _)                   = Just tBool
-ctxExpectType _ (CtxPktGuard _)                    = Just tBool
-ctxExpectType _ (CtxRole _)                        = Just tSink
-ctxExpectType _ (CtxFunc f _)                      = Just $ funcType f
-ctxExpectType _ (CtxAssume _)                      = Just tBool
-ctxExpectType _ (CtxRelKey _)                      = Nothing
-ctxExpectType _ (CtxRelForeign _ _)                = Nothing
-ctxExpectType _ (CtxCheck _)                       = Just tBool
-ctxExpectType _ (CtxRuleL rel _ i)                 = let args = relArgs rel in
-                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
-ctxExpectType _ (CtxRuleR _ _)                     = Just tBool
-ctxExpectType _ (CtxBuiltin _ _ _)                 = Nothing -- TODO: add expectType hook to Builtins
-ctxExpectType r (CtxApply (EApply _ f _) _ i)      = let args = funcArgs $ getFunc r f in
-                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
-ctxExpectType _ (CtxField (EField _ _ _) _)        = Nothing
-ctxExpectType r (CtxLocation (ELocation _ rl _) _) = Just $ relRecordType $ getRelation r $ roleTable $ getRole r rl
-ctxExpectType r (CtxStruct (EStruct _ c _) _ i)    = let args = consArgs $ getConstructor r c in
-                                                     if' (i < length args) (Just $ typ $ args !! i) Nothing
-ctxExpectType r (CtxTuple _ ctx i)                 = case ctxExpectType r ctx of 
-                                                          Just t -> case typ' r t of
-                                                                         TTuple _ fs -> if' (i < length fs) (Just $ fs !! i) Nothing
-                                                                         _           -> Nothing
-                                                          Nothing -> Nothing
-ctxExpectType _ (CtxSlice _ _)                     = Nothing
-ctxExpectType _ (CtxMatchExpr _ _)                 = Nothing
-ctxExpectType r (CtxMatchPat e ctx _)              = exprTypeMaybe r (CtxMatchExpr e ctx) $ exprMatchExpr e
-ctxExpectType r (CtxMatchVal _ ctx _)              = ctxExpectType r ctx
-ctxExpectType _ (CtxSeq1 _ _)                      = Nothing
-ctxExpectType r (CtxSeq2 _ ctx)                    = ctxExpectType r ctx
-ctxExpectType _ (CtxPar1 _ _)                      = Just tSink
-ctxExpectType _ (CtxPar2 _ _)                      = Just tSink
-ctxExpectType _ (CtxITEIf _ _)                     = Just tBool
-ctxExpectType r (CtxITEThen _ ctx)                 = ctxExpectType r ctx
-ctxExpectType r (CtxITEElse _ ctx)                 = ctxExpectType r ctx
-ctxExpectType r (CtxSetL e@(ESet _ _ rhs) ctx)     = exprTypeMaybe r (CtxSetR e ctx) rhs
-ctxExpectType r (CtxSetR (ESet _ lhs _) ctx)       = exprTypeMaybe r ctx lhs -- avoid infinite recursion by evaluating lhs standalone
-ctxExpectType _ (CtxSend _ _)                      = Just $ tLocation
-ctxExpectType r (CtxBinOpL e ctx)                  = case exprBOp e of
-                                                          Eq     -> trhs
-                                                          Neq    -> trhs
-                                                          Lt     -> trhs
-                                                          Gt     -> trhs
-                                                          Lte    -> trhs
-                                                          Gte    -> trhs
-                                                          And    -> Just tBool
-                                                          Or     -> Just tBool
-                                                          Impl   -> Just tBool
-                                                          Plus   -> trhs
-                                                          Minus  -> trhs
-                                                          ShiftR -> Nothing
-                                                          ShiftL -> Nothing
-                                                          Mod    -> Nothing
-                                                          Concat -> Nothing
+ctxExpectType _ CtxRefine                            = Nothing
+ctxExpectType _ CtxCLI                               = Nothing
+--ctxExpectType _ (CtxRoleGuard _)                     = Just tBool
+--ctxExpectType _ (CtxPktGuard _)                      = Just tBool
+--ctxExpectType _ (CtxRole _)                          = Just tSink
+ctxExpectType _ (CtxFunc f _)                        = Just $ funcType f
+ctxExpectType _ (CtxAssume _)                        = Just tBool
+ctxExpectType _ (CtxRelKey _)                        = Nothing
+ctxExpectType _ (CtxRelForeign _ _)                  = Nothing
+ctxExpectType _ (CtxCheck _)                         = Just tBool
+ctxExpectType _ (CtxRuleL rel _ i)                   = let args = relArgs rel in
+                                                       if' (i < length args) (Just $ fieldType $ args !! i) Nothing
+ctxExpectType _ (CtxRuleR _ _)                       = Just tBool
+ctxExpectType _ (CtxBuiltin _ _ _)                   = Nothing -- TODO: add expectType hook to Builtins
+ctxExpectType r (CtxApply (EApply _ f _) _ i)        = let args = funcArgs $ getFunc r f in
+                                                       if' (i < length args) (Just $ fieldType $ args !! i) Nothing
+ctxExpectType _ (CtxField (EField _ _ _) _)          = Nothing
+ctxExpectType r (CtxLocation (ELocation _ p _ _) _)  = Just $ relRecordType $ getRelation r $ portRel $ getPort r p
+ctxExpectType r (CtxStruct (EStruct _ c _) _ i)      = let args = consArgs $ getConstructor r c in
+                                                       if' (i < length args) (Just $ typ $ args !! i) Nothing
+ctxExpectType r (CtxTuple _ ctx i)                   = case ctxExpectType r ctx of 
+                                                            Just t -> case typ' r t of
+                                                                           TTuple _ fs -> if' (i < length fs) (Just $ fs !! i) Nothing
+                                                                           _           -> Nothing
+                                                            Nothing -> Nothing
+ctxExpectType _ (CtxSlice _ _)                       = Nothing
+ctxExpectType _ (CtxMatchExpr _ _)                   = Nothing
+ctxExpectType r (CtxMatchPat e ctx _)                = exprTypeMaybe r (CtxMatchExpr e ctx) $ exprMatchExpr e
+ctxExpectType r (CtxMatchVal _ ctx _)                = ctxExpectType r ctx
+ctxExpectType _ (CtxSeq1 _ _)                        = Nothing
+ctxExpectType r (CtxSeq2 _ ctx)                      = ctxExpectType r ctx
+ctxExpectType _ (CtxPar1 _ _)                        = Just tSink
+ctxExpectType _ (CtxPar2 _ _)                        = Just tSink
+ctxExpectType _ (CtxITEIf _ _)                       = Just tBool
+ctxExpectType r (CtxITEThen _ ctx)                   = ctxExpectType r ctx
+ctxExpectType r (CtxITEElse _ ctx)                   = ctxExpectType r ctx
+ctxExpectType r (CtxSetL e@(ESet _ _ rhs) ctx)       = exprTypeMaybe r (CtxSetR e ctx) rhs
+ctxExpectType r (CtxSetR (ESet _ lhs _) ctx)         = exprTypeMaybe r ctx lhs -- avoid infinite recursion by evaluating lhs standalone
+ctxExpectType _ (CtxSend _ _)                        = Just $ tLocation
+ctxExpectType r (CtxBinOpL e ctx)                    = case exprBOp e of
+                                                            Eq     -> trhs
+                                                            Neq    -> trhs
+                                                            Lt     -> trhs
+                                                            Gt     -> trhs
+                                                            Lte    -> trhs
+                                                            Gte    -> trhs
+                                                            And    -> Just tBool
+                                                            Or     -> Just tBool
+                                                            Impl   -> Just tBool
+                                                            Plus   -> trhs
+                                                            Minus  -> trhs
+                                                            ShiftR -> Nothing
+                                                            ShiftL -> Nothing
+                                                            Mod    -> Nothing
+                                                            Concat -> Nothing
     where trhs = exprTypeMaybe r ctx $ exprRight e
-ctxExpectType r (CtxBinOpR e ctx)                  = case exprBOp e of
-                                                          Eq     -> tlhs
-                                                          Neq    -> tlhs
-                                                          Lt     -> tlhs
-                                                          Gt     -> tlhs
-                                                          Lte    -> tlhs
-                                                          Gte    -> tlhs
-                                                          And    -> Just tBool
-                                                          Or     -> Just tBool
-                                                          Impl   -> Just tBool
-                                                          Plus   -> tlhs
-                                                          Minus  -> tlhs
-                                                          ShiftR -> Nothing
-                                                          ShiftL -> Nothing
-                                                          Mod    -> Nothing
-                                                          Concat -> Nothing
+ctxExpectType r (CtxBinOpR e ctx)                    = case exprBOp e of
+                                                            Eq     -> tlhs
+                                                            Neq    -> tlhs
+                                                            Lt     -> tlhs
+                                                            Gt     -> tlhs
+                                                            Lte    -> tlhs
+                                                            Gte    -> tlhs
+                                                            And    -> Just tBool
+                                                            Or     -> Just tBool
+                                                            Impl   -> Just tBool
+                                                            Plus   -> tlhs
+                                                            Minus  -> tlhs
+                                                            ShiftR -> Nothing
+                                                            ShiftL -> Nothing
+                                                            Mod    -> Nothing
+                                                            Concat -> Nothing
     where tlhs = exprTypeMaybe r ctx $ exprLeft e
-ctxExpectType _ (CtxUnOp (EUnOp _ Not _) _)        = Just tBool
-ctxExpectType _ (CtxForkCond _ _)                  = Just tBool
-ctxExpectType _ (CtxForkBody _ _)                  = Just tSink
-ctxExpectType _ (CtxForCond _ _)                   = Just tBool
-ctxExpectType _ (CtxForBody _ _)                   = Just $ tTuple []
-ctxExpectType _ (CtxWithCond _ _)                  = Just tBool
-ctxExpectType r (CtxWithBody _ ctx)                = ctxExpectType r ctx
-ctxExpectType r (CtxWithDef _ ctx)                 = ctxExpectType r ctx
-ctxExpectType _ (CtxAnyCond _ _)                   = Just tBool
-ctxExpectType r (CtxAnyBody _ ctx)                 = ctxExpectType r ctx
-ctxExpectType r (CtxAnyDef _ ctx)                  = ctxExpectType r ctx
-ctxExpectType _ (CtxTyped (ETyped _ _ t) _)        = Just t
-ctxExpectType r (CtxRelPred e _ i)                 = let args = relArgs $ getRelation r $ exprRel e in
-                                                     if' (i < length args) (Just $ fieldType $ args !! i) Nothing
-ctxExpectType r (CtxPut (EPut _ rel _) _)          = Just $ relRecordType $ getRelation r rel
-ctxExpectType _ (CtxDelete _ _)                    = Just tBool
-ctxExpectType _ ctx                                = error $ "ctxExpectType " ++ show ctx
+ctxExpectType _ (CtxUnOp (EUnOp _ Not _) _)          = Just tBool
+ctxExpectType _ (CtxForkCond _ _)                    = Just tBool
+ctxExpectType _ (CtxForkBody _ _)                    = Just tSink
+ctxExpectType _ (CtxForCond _ _)                     = Just tBool
+ctxExpectType _ (CtxForBody _ _)                     = Just $ tTuple []
+ctxExpectType _ (CtxWithCond _ _)                    = Just tBool
+ctxExpectType r (CtxWithBody _ ctx)                  = ctxExpectType r ctx
+ctxExpectType r (CtxWithDef _ ctx)                   = ctxExpectType r ctx
+ctxExpectType _ (CtxAnyCond _ _)                     = Just tBool
+ctxExpectType r (CtxAnyBody _ ctx)                   = ctxExpectType r ctx
+ctxExpectType r (CtxAnyDef _ ctx)                    = ctxExpectType r ctx
+ctxExpectType _ (CtxTyped (ETyped _ _ t) _)          = Just t
+ctxExpectType r (CtxRelPred e _ i)                   = let args = relArgs $ getRelation r $ exprRel e in
+                                                       if' (i < length args) (Just $ fieldType $ args !! i) Nothing
+ctxExpectType r (CtxPut (EPut _ rel _) _)            = Just $ relRecordType $ getRelation r rel
+ctxExpectType _ (CtxDelete _ _)                      = Just tBool
+ctxExpectType _ ctx                                  = error $ "ctxExpectType " ++ show ctx

@@ -45,7 +45,8 @@ import Parse
 import Validate
 import Relation
 import Refine
-import Role
+import Port
+import Switch
 import NS
 import Backend
 import qualified SQL
@@ -332,19 +333,19 @@ sync = do
     (delta, dlfacts) <- readDelta
     -- enabled switch removed from desired or marked as disabled:
     --  * reset switch to clean state if reachable
-    mapM_ (\rel -> do let deleted = filter (\(pol,f) -> not pol && (not $ DL.factSwitchFailed ctlRefine f)) $ dlfacts M.! name rel
-                      mapM_ (\(_,f) -> ((backendResetSwitch ctlBackend) ctlWorkDir ctlRefine f `catch` (\(SomeException _) -> return ()))) deleted)
-          $ refineSwitchRels ctlRefine
+    mapM_ (\sw -> do let deleted = filter (\(pol,f) -> not pol && (not $ DL.factSwitchFailed ctlRefine f)) $ dlfacts M.! switchRel sw
+                     mapM_ (\(_,f) -> ((backendResetSwitch ctlBackend) ctlWorkDir ctlRefine sw f `catch` (\(SomeException _) -> return ()))) deleted)
+          $ refineSwitches ctlRefine
     -- relations for which switches have been enabled or created
-    let newSwRels = filter (not . null . (dlfacts M.!) . name)
-                    $ refineSwitchRels ctlRefine
+    let newSwitches = filter (not . null . (dlfacts M.!) . switchRel)
+                      $ refineSwitches ctlRefine
     -- read realized tables needed to initialize new switches
     let realized = nub
-                   $ concatMap (\rel -> if null $ filter fst $ dlfacts M.! name rel
-                                           then []
-                                           else let ports = relSwitchPorts ctlRefine rel in
-                                                concatMap (roleUsesRels ctlRefine . getRole ctlRefine . fst . annotRoles . fromJust . relAnnotation) ports)
-                   newSwRels
+                   $ concatMap (\sw -> if null $ filter fst $ dlfacts M.! switchRel sw
+                                          then []
+                                          else let ports = switchPorts ctlRefine $ name sw in
+                                               concatMap (portUsesRels ctlRefine . getPort ctlRefine) ports)
+                   newSwitches
     reldb <- readRealized realized
     _ <- _commit ?s
 
@@ -354,27 +355,27 @@ sync = do
     --  * (switch's table 0 is empty at this point, as new ports are not in realized state yet)
     --  * send commands to the switch via ovs-ofctl (starting with resetting to clean state)
     failed <- liftM (map fst . filter (not . snd) . concat)
-              $ mapM (\rel -> mapM (\f -> let swid = DL.factSwitchId ctlRefine (name rel) f in
-                                          (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine f ctlIR reldb
-                                              return ((name rel, swid), True))
-                                          `catch` (\(SomeException e) -> do putStrLn $ "Failed to initialize switch " ++ name rel ++ "(switch id:" ++ show swid ++ "): " ++ show e
-                                                                            return ((name rel, swid), False)))
-                              $ filter (not . DL.factSwitchFailed ctlRefine)
-                              $ map snd $ filter fst
-                              $ dlfacts M.! (name rel))
-                     newSwRels
+              $ mapM (\sw -> mapM (\f -> let swid = DL.factSwitchId ctlRefine (switchRel sw) f in
+                                         (do (backendBuildSwitch ctlBackend) ctlWorkDir ctlRefine sw f ctlIR reldb
+                                             return ((name sw, swid), True))
+                                         `catch` (\(SomeException e) -> do putStrLn $ "Failed to initialize switch " ++ name sw ++ "(switch id:" ++ show swid ++ "): " ++ show e
+                                                                           return ((name sw, swid), False)))
+                             $ filter (not . DL.factSwitchFailed ctlRefine)
+                             $ map snd $ filter fst
+                             $ dlfacts M.! (switchRel sw))
+                     newSwitches
     -- updateSwitch on all enabled switches using the delta DB
     --  * (new switches' table 0 is now populated)
     --  * If any of the updates fail, remember the failed switch
     failed' <- liftM ((failed ++) . map fst . filter (not . snd) . concat)
-               $ mapM (\rel -> do swfacts <- liftM (map (\f -> (DL.factSwitchId ctlRefine (name rel) f, f))) $ DL.enumRelation ctlDL (name rel) 
-                                  let swfacts' = filter (\(swid, _) -> isNothing $ find (==(name rel, swid)) failed) swfacts
-                                  mapM (\(swid, f) -> do (backendUpdateSwitch ctlBackend) ctlWorkDir ctlRefine f ctlIR delta
-                                                         return ((name rel, swid), True)
-                                                      `catch` (\(SomeException e) -> do putStrLn $ "Failed to update switch " ++ name rel ++ " (switch id:" ++ show swid ++ "): " ++ show e
-                                                                                        return ((name rel,swid), False)))
-                                        swfacts')
-               $ refineSwitchRels ctlRefine
+               $ mapM (\sw -> do swfacts <- liftM (map (\f -> (DL.factSwitchId ctlRefine (switchRel sw) f, f))) $ DL.enumRelation ctlDL (switchRel sw) 
+                                 let swfacts' = filter (\(swid, _) -> isNothing $ find (==(name sw, swid)) failed) swfacts
+                                 mapM (\(swid, f) -> do (backendUpdateSwitch ctlBackend) ctlWorkDir ctlRefine sw f ctlIR delta
+                                                        return ((name sw, swid), True)
+                                                     `catch` (\(SomeException e) -> do putStrLn $ "Failed to update switch " ++ name sw ++ " (switch id:" ++ show swid ++ "): " ++ show e
+                                                                                       return ((name sw,swid), False)))
+                                      swfacts')
+               $ refineSwitches ctlRefine
     -- Reconfiguration finished; update the DB (in one transaction):
     --  * add Delta to realized
     --  * mark failed switches in desired (note: only
@@ -385,11 +386,11 @@ sync = do
                                            f = DL.Fact rel' args in
                                        if pol then DL.addFact ctlDL f else DL.removeFact ctlDL f) 
           $ concat $ M.elems dlfacts
-    mapM_ (\rel -> do switches <- DL.enumRelation ctlDL (name rel)
-                      mapM (\f -> let swid = DL.factSwitchId ctlRefine (name rel) f
-                                      f' = DL.factSetSwitchFailed ctlRefine (name rel) f True in
-                                  when (elem (name rel, swid) failed') $ do {DL.removeFact ctlDL f; DL.addFact ctlDL f'}) switches)
-          $ refineSwitchRels ctlRefine
+    mapM_ (\sw -> do switches <- DL.enumRelation ctlDL (switchRel sw)
+                     mapM (\f -> let swid = DL.factSwitchId ctlRefine (switchRel sw) f
+                                     f' = DL.factSetSwitchFailed ctlRefine (switchRel sw) f True in
+                                 when (elem (name sw, swid) failed') $ do {DL.removeFact ctlDL f; DL.addFact ctlDL f'}) switches)
+          $ refineSwitches ctlRefine
     _ <- _commit ?s
     if not $ null failed'
        then do putStrLn $ "failed': " ++ show failed'
@@ -400,8 +401,8 @@ sync = do
 readDelta :: (?s::ControllerState p) => IO (IR.Delta, M.Map String [(Bool, DL.Fact)])
 readDelta = do
    let ControllerConnected{..} = ?s
-   let used = refineRelsUsedInRoles ctlRefine
-       usedandsw = nub $ used ++ (map name $ refineSwitchRels ctlRefine)
+   let used = refineRelsUsedInPorts ctlRefine
+       usedandsw = nub $ used ++ (map switchRel $ refineSwitches ctlRefine)
    ofdelta <- (liftM M.fromList) $ mapM (\rname -> do facts <- DL.enumRelation ctlDL $ relDeltaName rname
                                                       let facts' = map (\(DL.Fact _ ((SMT.EBool p):as)) -> (p, DL.Fact rname as)) facts
                                                       return (rname, facts')) usedandsw

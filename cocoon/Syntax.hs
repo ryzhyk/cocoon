@@ -22,10 +22,10 @@ module Syntax( pktVar
              , Refine(..)
              , errR, assertR
              , Field(..)
-             , Role(..)
+             , Switch(..)
+             , SwitchPort(..)
              , Relation(..)
              , relIsView
-             , RelAnnotation(..)
              , Constraint(..), isPrimaryKey, isForeignKey, isUnique, isCheck
              , Constructor(..)
              , consType
@@ -40,6 +40,8 @@ module Syntax( pktVar
              , UOp(..)
              , ExprNode(..)
              , ENode
+             , Direction(..)
+             , DirPort(..)
              , Expr(..)
              , enode
              , eVar, ePacket, eApply, eBuiltin, eField, eLocation, eBool, eTrue, eFalse, eInt, eString, eBit, eStruct, eTuple
@@ -54,7 +56,6 @@ module Syntax( pktVar
              , ctxIsMatchPat, ctxInMatchPat, ctxInMatchPat'
              , ctxIsSetL, ctxInSetL
              , ctxIsSeq1, ctxInSeq1
-             , ctxIsRole, ctxInRole
              , ctxIsTyped
              , ctxIsDelete, ctxInDelete
              , conj
@@ -85,7 +86,8 @@ data Refine = Refine { refinePos       :: Pos
                      , refineFuncs     :: [Function]
                      , refineRels      :: [Relation]
                      , refineAssumes   :: [Assume]
-                     , refineRoles     :: [Role]
+                     , refineSwitches  :: [Switch]
+                     , refinePorts     :: [SwitchPort]
                      }
 
 instance WithPos Refine where
@@ -105,7 +107,9 @@ instance PP Refine where
                              $$
                              (vcat $ map pp refineAssumes)
                              $$
-                             (vcat $ map pp refineRoles))
+                             (vcat $ map pp refineSwitches)
+                             $$
+                             (vcat $ map pp refinePorts))
                     $$
                     rbrace
 
@@ -139,28 +143,44 @@ instance PP Field where
 instance Show Field where
     show = render . pp
 
-data Role = Role { rolePos       :: Pos
-                 , roleName      :: String
-                 , roleKey       :: String
-                 , roleTable     :: String
-                 , roleCond      :: Expr
-                 , rolePktGuard  :: Expr
-                 , roleBody      :: Expr
-                 }
+data Switch = Switch { switchPos  :: Pos
+                     , switchName :: String
+                     , switchRel  :: String
+                     }
 
-instance WithPos Role where
-    pos = rolePos
-    atPos r p = r{rolePos = p}
+instance WithPos Switch where
+    pos = switchPos
+    atPos s p = s{switchPos = p}
 
-instance WithName Role where
-    name = roleName
+instance WithName Switch where
+    name = switchName
 
-instance PP Role where
-    pp Role{..} = ("role" <+> pp roleName <+> (brackets $ pp roleKey <+> "in" <+> pp roleTable <+> "|" <+> pp roleCond <+> "/" <+> pp rolePktGuard <+> "="))
-                  $$
-                  (nest' $ pp roleBody)
+instance PP Switch where
+    pp Switch{..} = "switch" <+> pp switchName <> (brackets $ pp switchRel)
 
-instance Show Role where
+instance Show Switch where
+    show = render . pp
+
+data SwitchPort = SwitchPort { portPos    :: Pos
+                             , portName   :: String
+                             , portRel    :: String
+                             , portSource :: Bool
+                             , portIn     :: String
+                             , portOut    :: Maybe String}
+
+
+instance WithPos SwitchPort where
+    pos = portPos
+    atPos sp p = sp{portPos = p}
+
+instance WithName SwitchPort where
+    name = portName
+
+instance PP SwitchPort where
+    pp SwitchPort{..} = "port" <+> pp portName <> (brackets $ pp portRel) <> (parens $ (if portSource then "source" else empty) <+> pp portIn <> 
+                                                                                              comma <+> maybe "sink" (pp . id) portOut)
+
+instance Show SwitchPort where
     show = render . pp
 
 data Constraint = PrimaryKey {constrPos :: Pos, constrFields :: [Expr]}
@@ -199,26 +219,11 @@ instance PP Constraint where
 instance Show Constraint where
     show = render . pp
 
-data RelAnnotation = RelPort   {annotPos :: Pos, annotRoles :: (String, String)}
-                   | RelSwitch {annotPos :: Pos}
-
-instance WithPos RelAnnotation where
-    pos = annotPos
-    atPos a p = a{annotPos = p}
-
-instance PP RelAnnotation where
-    pp (RelPort _ (inport, outport)) = "#switch_port" <> (parens $ pp inport <> comma <> pp outport)
-    pp (RelSwitch _)                 = "#switch"
-
-instance Show RelAnnotation where
-    show = render . pp
-
 data Relation = Relation { relPos         :: Pos
                          , relMutable     :: Bool
                          , relName        :: String
                          , relArgs        :: [Field]
                          , relConstraints :: [Constraint]
-                         , relAnnotation  :: Maybe RelAnnotation
                          , relDef         :: Maybe [Rule]}
 
 instance WithPos Relation where
@@ -229,8 +234,7 @@ instance WithName Relation where
     name = relName
 
 instance PP Relation where
-    pp Relation{..} = (maybe empty pp relAnnotation) $$
-                      (if' relMutable ("state") empty <+>
+    pp Relation{..} = (if' relMutable ("state") empty <+>
                        (maybe ("table") (\_ -> "view") relDef) <+> pp relName <+> "(") $$ 
                       (nest' $ (vcat $ punctuate comma $ map pp relArgs ++ map pp relConstraints) <> ")") $$
                       (maybe empty (vcat . map (ppRule relName)) relDef)
@@ -420,12 +424,26 @@ instance Show TypeDef where
 instance Eq TypeDef where
     (==) t1 t2 = name t1 == name t2 && tdefType t1 == tdefType t2
 
+data Direction = DirIn | DirOut deriving (Eq)
+
+instance PP Direction where
+    pp DirIn  = "in"
+    pp DirOut = "out"
+
+instance Show Direction where
+    show = render . pp
+
+data DirPort = DirPort String Direction deriving (Eq)
+
+instance Show DirPort where
+    show (DirPort p d) = p ++ "." ++ show d
+
 data ExprNode e = EVar      {exprPos :: Pos, exprVar :: String}
                 | EPacket   {exprPos :: Pos}
                 | EApply    {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
                 | EBuiltin  {exprPos :: Pos, exprFunc :: String, exprArgs :: [e]}
                 | EField    {exprPos :: Pos, exprStruct :: e, exprField :: String}
-                | ELocation {exprPos :: Pos, exprRole :: String, exprKey :: e}
+                | ELocation {exprPos :: Pos, exprPort :: String, exprKey :: e, exprDir :: Direction}
                 | EBool     {exprPos :: Pos, exprBVal :: Bool}
                 | EInt      {exprPos :: Pos, exprIVal :: Integer}
                 | EString   {exprPos :: Pos, exprString :: String}
@@ -460,7 +478,7 @@ instance Eq e => Eq (ExprNode e) where
     (==) (EApply _ f1 as1)        (EApply _ f2 as2)          = f1 == f2 && as1 == as2
     (==) (EBuiltin _ f1 as1)      (EBuiltin _ f2 as2)        = f1 == f2 && as1 == as2
     (==) (EField _ s1 f1)         (EField _ s2 f2)           = s1 == s2 && f1 == f2
-    (==) (ELocation _ r1 k1)      (ELocation _ r2 k2)        = r1 == r2 && k1 == k2
+    (==) (ELocation _ r1 k1 d1)   (ELocation _ r2 k2 d2)     = r1 == r2 && k1 == k2 && d1 == d2
     (==) (EBool _ b1)             (EBool _ b2)               = b1 == b2
     (==) (EInt _ i1)              (EInt _ i2)                = i1 == i2
     (==) (EString _ s1)           (EString _ s2)             = s1 == s2
@@ -500,7 +518,7 @@ instance PP e => PP (ExprNode e) where
     pp (EApply _ f as)     = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EBuiltin _ f as)   = pp f <> (parens $ hsep $ punctuate comma $ map pp as)
     pp (EField _ s f)      = pp s <> char '.' <> pp f
-    pp (ELocation _ r k)   = pp r <> (brackets $ pp k)
+    pp (ELocation _ r k d) = pp r <> (brackets $ pp k) <> char '.' <> pp d
     pp (EBool _ True)      = "true"
     pp (EBool _ False)     = "false"
     pp (EInt _ v)          = pp v
@@ -567,7 +585,7 @@ ePacket             = E $ EPacket   nopos
 eApply f as         = E $ EApply    nopos f as
 eBuiltin f as       = E $ EBuiltin  nopos f as
 eField e f          = E $ EField    nopos e f
-eLocation r k       = E $ ELocation nopos r k
+eLocation r k d     = E $ ELocation nopos r k d
 eBool b             = E $ EBool     nopos b
 eTrue               = eBool True
 eFalse              = eBool False
@@ -627,9 +645,6 @@ exprSequence (e:es) = eSeq e (exprSequence es)
 
 data ECtx = CtxRefine
           | CtxCLI
-          | CtxRole      {ctxRole::Role}
-          | CtxRoleGuard {ctxRole::Role}
-          | CtxPktGuard  {ctxRole::Role}
           | CtxFunc      {ctxFunc::Function, ctxPar::ECtx}
           | CtxAssume    {ctxAssume::Assume}
           | CtxRelKey    {ctxRel::Relation}
@@ -680,7 +695,6 @@ instance PP ECtx where
     pp ctx = (pp $ ctxParent ctx) $$ ctx'
         where
         relname = pp $ name $ ctxRel ctx
-        rolename = pp $ name $ ctxRole ctx
         epar = short $ ctxParExpr ctx
         rule = short $ ppRule (name $ ctxRel ctx) $ ctxRule ctx
         mlen = 100
@@ -688,9 +702,6 @@ instance PP ECtx where
         short = pp . (\x -> if' (length x < mlen) x (take (mlen - 3) x ++ "...")) . replace "\n" " " . render . pp
         ctx' = case ctx of
                     CtxCLI            -> "CtxCLI       "
-                    CtxRole{..}       -> "CtxRole      " <+> rolename
-                    CtxRoleGuard{..}  -> "CtxRoleGuard " <+> rolename
-                    CtxPktGuard{..}   -> "CtxPktGuard  " <+> rolename
                     CtxAssume{..}     -> "CtxAssume    " <+> short ctxAssume
                     CtxRelKey{..}     -> "CtxRelKey    " <+> relname
                     CtxRelForeign{..} -> "CtxRelForeign" <+> relname <+> short ctxConstr
@@ -741,10 +752,7 @@ instance Show ECtx where
     show = render . pp
 
 ctxParent :: ECtx -> ECtx
-ctxParent (CtxRole _)         = CtxRefine     
 ctxParent CtxCLI              = CtxRefine
-ctxParent (CtxRoleGuard _)    = CtxRefine     
-ctxParent (CtxPktGuard _)     = CtxRefine     
 ctxParent (CtxAssume _)       = CtxRefine
 ctxParent (CtxRelKey _)       = CtxRefine
 ctxParent (CtxRelForeign _ _) = CtxRefine
@@ -801,13 +809,6 @@ ctxIsSeq1 _         = False
 
 ctxInSeq1 :: ECtx -> Bool
 ctxInSeq1 ctx = any ctxIsSeq1 $ ctxAncestors ctx
-
-ctxIsRole :: ECtx -> Bool
-ctxIsRole CtxRole{} = True
-ctxIsRole _         = False
-
-ctxInRole :: ECtx -> Bool
-ctxInRole ctx = any ctxIsRole $ ctxAncestors ctx
 
 ctxIsTyped :: ECtx -> Bool
 ctxIsTyped CtxTyped{} = True

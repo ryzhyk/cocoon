@@ -61,6 +61,7 @@ reservedNames = ["_",
                  "sink",
                  "not",
                  "or",
+                 "out",
                  "pkt",
                  "primary",
                  "procedure",
@@ -68,8 +69,8 @@ reservedNames = ["_",
                  "delete",
                  "references",
                  "refine",
-                 "role",
                  "send",
+                 "source",
                  "state",
                  "string",
                  "table",
@@ -125,11 +126,12 @@ dot          = T.dot lexer
 stringLit    = T.stringLiteral lexer
 --charLit    = T.charLiteral lexer
 
-roleIdent = ucIdentifier
-consIdent = ucIdentifier
-relIdent  = ucIdentifier
-varIdent  = lcIdentifier
-funcIdent = lcIdentifier
+consIdent   = ucIdentifier
+relIdent    = ucIdentifier
+switchIdent = ucIdentifier
+portIdent   = ucIdentifier
+varIdent    = lcIdentifier
+funcIdent   = lcIdentifier
 
 removeTabs = do s <- getInput
                 let s' = map (\c -> if c == '\t' then ' ' else c ) s 
@@ -143,20 +145,23 @@ data SpecItem = SpType         TypeDef
               | SpRelation     Relation
               | SpAssume       Assume
               | SpFunc         Function
-              | SpRole         Role
+              | SpSwitch       Switch
+              | SpPort         SwitchPort
 
 
-cocoonGrammar = Spec <$ removeTabs <*> ((optional whiteSpace) *> spec <* eof)
+cocoonGrammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 cmdGrammar = removeTabs *> ((optional whiteSpace) *> cmd <* eof)
 cfgGrammar = removeTabs *> ((optional whiteSpace) *> (many relation) <* eof)
 
 cmd =  (Left  <$ reservedOp ":" <*> many1 identifier)
    <|> (Right <$> expr)
 
-spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
+spec = withPos $ mkRefine [] <$> (many decl)
+
+--spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types state funcs relations assumes roles
+mkRefine targets items = Refine nopos targets types state funcs relations assumes switches ports
     where relations = mapMaybe (\i -> case i of 
                                            SpRelation r -> Just r
                                            _            -> Nothing) items
@@ -172,27 +177,30 @@ mkRefine targets items = Refine nopos targets types state funcs relations assume
           funcs = mapMaybe (\i -> case i of 
                                        SpFunc f -> Just f
                                        _        -> Nothing) items
-          roles = mapMaybe (\i -> case i of 
-                                       SpRole r -> Just r
+          switches = mapMaybe (\i -> case i of 
+                                          SpSwitch s -> Just s
+                                          _          -> Nothing) items
+          ports = mapMaybe (\i -> case i of 
+                                       SpPort p -> Just p
                                        _        -> Nothing) items
           assumes = mapMaybe (\i -> case i of 
                                        SpAssume a -> Just a
                                        _          -> Nothing) items
 
+{-
 refine = withPos $ mkRefine <$  reserved "refine" 
                             <*> (commaSep roleIdent)
                             <*> (braces $ many decl)
+-}
 
 decl =  (SpType         <$> typeDef)
     <|> (SpRelation     <$> relation)
     <|> (SpState        <$> stateVar)
     <|> (SpFunc         <$> func)
     <|> (SpFunc         <$> proc)
-    <|> (SpRole         <$> role)
+    <|> (SpSwitch       <$> switch)
+    <|> (SpPort         <$> port)
     <|> (SpAssume       <$> assume)
---    <|> (SpNode         <$> node)
-
-
 
 typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (optionMaybe $ reservedOp "=" *> typeSpec)
 
@@ -210,20 +218,19 @@ proc = withPos $ Function nopos False <$  reserved "procedure"
                                       <*> (colon *> (typeSpecSimple <|> (withPos $ tSink <$ reserved "sink")))
                                       <*> (Just <$ reservedOp "=" <*> expr)
 
-relannot = withPos $
-           ((try $ lookAhead $ reservedOp "#" *> symbol "switch_port") *> reservedOp "#" *>
-            (RelPort   nopos <$ symbol "switch_port" <*> ((,) <$> (symbol "(" *> roleIdent) <*> (comma *> roleIdent <* symbol ")"))))
-         <|> 
-           ((try $ lookAhead $ reservedOp "#" *> symbol "switch") *> reservedOp "#" *>
-            (RelSwitch nopos <$ symbol "switch"))
+switch = withPos $ Switch nopos <$ symbol "switch" <*> switchIdent <*> (brackets relIdent)
 
-relation = do annot <- optionMaybe relannot
-              withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
+port = withPos $ SwitchPort nopos <$ symbol "port" <*> portIdent <*> (brackets relIdent) <*>
+                                     (symbol "(" *> option False (True <$ reserved "source")) <*> funcIdent <*>
+                                     (comma *> ( (Nothing <$ reserved "sink")
+                                              <|>(Just <$> funcIdent))) <* symbol ")"
+
+relation = do withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
                                       <|>
                                       (False <$ reserved "table")
                            n <- relIdent
                            (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
-                           return $ Relation nopos mutable n as cs annot Nothing
+                           return $ Relation nopos mutable n as cs Nothing
                     <|> do reserved "view" 
                            n <- relIdent
                            (as, cs) <- liftM partitionEithers $ parens $ commaSep argOrConstraint
@@ -235,7 +242,7 @@ relation = do annot <- optionMaybe relannot
                                          reservedOp ":-"
                                          rhs <- commaSep $ (withPos erelpred) <|> rexpr
                                          return $ Rule nopos rargs rhs
-                           return $ Relation nopos False n as cs annot $ Just rs
+                           return $ Relation nopos False n as cs $ Just rs
 
 argOrConstraint =  (Right <$> constraint)
                <|> (Left  <$> arg)
@@ -245,17 +252,6 @@ constraint = withPos $  (PrimaryKey nopos <$ reserved "primary" <*> (reserved "k
                                           <*> (reserved "references" *> relIdent) <*> (parens $ commaSep fexpr))
                     <|> (Unique     nopos <$ reserved "unique" <*> (parens $ commaSep fexpr))
                     <|> (Check      nopos <$ reserved "check" <*> expr)
-
-
-role = withPos $ (\n (k, t, c, pc) b -> Role nopos n k t c pc b) 
-               <$  reserved "role" 
-               <*> roleIdent 
-               <*> (brackets $ (,,,)
-                           <$> varIdent
-                           <*> (reserved "in" *> relIdent)
-                           <*> (option eTrue (reservedOp "|" *> expr))
-                           <*> (option eTrue (reservedOp "/" *> expr)))
-               <*> (reservedOp "=" *> expr)
 
 assume = withPos $ Assume nopos <$ reserved "assume" <*> (option [] $ parens $ commaSep arg) <*> expr
 
@@ -342,8 +338,8 @@ ebuiltin = eBuiltin <$ isbuiltin <*> funcIdent <*> (parens $ commaSep expr)
                         when (notElem f (map name builtins)) parserZero
                         symbol "("
 
-eloc = eLocation <$ isloc <*> roleIdent <*> (brackets expr)
-    where isloc = try $ lookAhead $ roleIdent *> (brackets expr)
+eloc = eLocation <$ isloc <*> portIdent <*> (brackets expr) <*> (reservedOp "." *> ((DirIn <$ reserved "in") <|> (DirOut <$ reserved "out"))) 
+    where isloc = try $ lookAhead $ portIdent *> (brackets expr)
 ebool = eBool <$> ((True <$ reserved "true") <|> (False <$ reserved "false"))
 epacket = ePacket <$ reserved "pkt"
 evar = eVar <$> varIdent

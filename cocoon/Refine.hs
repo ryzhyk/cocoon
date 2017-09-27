@@ -17,13 +17,10 @@ limitations under the License.
 
 module Refine( funcGraph
              , refineStructs
-             , refineIsMulticast
-             , refineIsDeterministic
+             --, refineIsMulticast
+             --, refineIsDeterministic
              , refineRelsSorted
-             , refinePortRels
-             , refineRelsUsedInRoles
-             , refineSwitchRels
-             , refinePortRoles
+             , refineRelsUsedInPorts
              , refineAddDelta) where
 
 import Data.List
@@ -31,10 +28,10 @@ import Data.Maybe
 import qualified Data.Graph.Inductive as G
 
 import Relation
+import Port
 import Expr
 import Syntax
 import Name
-import Role
 import NS
 
 funcGraph :: Refine -> G.Gr String ()
@@ -51,39 +48,26 @@ refineStructs r = concatMap (\t -> case t of
                                         TypeDef _ _ (Just t'@(TStruct _ _)) -> [t']
                                         _                                   -> []) $ refineTypes r
 
+{-
 refineIsMulticast :: Maybe Refine -> Refine -> String -> Bool
 refineIsMulticast mra rc rlname = any (exprIsMulticast rc . roleBody . getRole rc) roles
     where new = maybe [] (\ra -> (map name (refineRoles rc) \\ map name (refineRoles ra))) mra
           roles = rlname : intersect new (roleSendsToRolesRec rc new rlname)
-    
+-}
+
+{-    
 refineIsDeterministic :: Maybe Refine -> Refine -> String -> Bool
 refineIsDeterministic mra rc rlname = any (exprIsDeterministic rc . roleBody . getRole rc) roles
     where new = maybe [] (\ra -> (map name (refineRoles rc) \\ map name (refineRoles ra))) mra
           roles = rlname : intersect new (roleSendsToRolesRec rc new rlname)
-
+-}
 
 refineRelsSorted :: Refine -> [Relation]
 refineRelsSorted r = map (getRelation r) $ reverse $ G.topsort' $ relGraph r
 
-refinePortRels :: Refine -> [Relation]
-refinePortRels r = filter ((\case
-                             Just RelPort{} -> True
-                             _              -> False) . relAnnotation) $ refineRels r
-
--- relations with switch annotation
-refineSwitchRels :: Refine -> [Relation]
-refineSwitchRels r = filter ((\case
-                             Just RelSwitch{..} -> True
-                             _                  -> False) . relAnnotation) $ refineRels r 
-
-refinePortRoles :: Refine -> [(Role, Role, Relation)]
-refinePortRoles r = map (\rel@Relation{relAnnotation = Just (RelPort _ (inp, outp))} -> (getRole r inp, getRole r outp, rel))
-                    $ refinePortRels r
-
-
 -- relations referenced in roles
-refineRelsUsedInRoles :: Refine -> [String]
-refineRelsUsedInRoles r = nub $ concatMap (roleUsesRels r) $ refineRoles r
+refineRelsUsedInPorts :: Refine -> [String]
+refineRelsUsedInPorts r = nub $ concatMap (portUsesRels r) $ refinePorts r
 
 -- for every relation referenced in a role (whether a table or a view), add
 -- 1. Realized-state _table_ with the same columns as the primary relation, but
@@ -93,6 +77,4 @@ refineRelsUsedInRoles r = nub $ concatMap (roleUsesRels r) $ refineRoles r
 refineAddDelta :: Refine -> Refine
 refineAddDelta r = foldl' (\r' rname -> let (realized, delta) = relMkDelta $ getRelation r' rname
                                         in r'{refineRels = refineRels r' ++ [realized,delta]}) 
-                   r $ nub $ refineRelsUsedInRoles r ++ (map name $ refineSwitchRels r)
-
-
+                   r $ nub $ refineRelsUsedInPorts r ++ (map switchRel $ refineSwitches r)
