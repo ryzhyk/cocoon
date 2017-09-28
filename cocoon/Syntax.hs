@@ -24,12 +24,16 @@ module Syntax( pktVar
              , Field(..)
              , Switch(..)
              , SwitchPort(..)
+             , TimeUnits(..)
+             , Duration(..)
+             , Task(..)
              , Relation(..)
              , relIsView
              , Constraint(..), isPrimaryKey, isForeignKey, isUnique, isCheck
              , Constructor(..)
              , consType
              , Rule(..)
+             , FuncAnnotation(..)
              , Function(..)
              , Assume(..)
              , Type(..)
@@ -88,6 +92,7 @@ data Refine = Refine { refinePos       :: Pos
                      , refineAssumes   :: [Assume]
                      , refineSwitches  :: [Switch]
                      , refinePorts     :: [SwitchPort]
+                     , refineTasks     :: [Task]
                      }
 
 instance WithPos Refine where
@@ -183,6 +188,47 @@ instance PP SwitchPort where
 instance Show SwitchPort where
     show = render . pp
 
+data TimeUnits = Second
+               | Millisecond
+               deriving (Eq)
+
+instance PP TimeUnits where
+    pp Second      = "s"
+    pp Millisecond = "ms"
+
+instance Show TimeUnits where
+    show = render . pp
+
+data Duration = Duration { durValue :: Integer 
+                         , durUnits :: TimeUnits} 
+                         deriving (Eq)
+
+instance PP Duration where
+    pp (Duration v u) = pp v <> pp u
+
+instance Show Duration where
+    show = render . pp
+
+data Task = Task { taskPos    :: Pos
+                 , taskName   :: String
+                 , taskRel    :: String
+                 , taskFunc   :: String
+                 , taskPeriod :: Duration
+                 }
+
+instance WithPos Task where
+    pos = taskPos
+    atPos t p = t{taskPos = p}
+
+instance WithName Task where
+    name = taskName
+
+instance PP Task where
+    pp Task{..} = "task" <+> pp taskName <> (brackets $ pp taskRel) <> (parens $ pp taskFunc) <+> "@" <+> pp taskPeriod
+
+instance Show Task where
+    show = render . pp
+
 data Constraint = PrimaryKey {constrPos :: Pos, constrFields :: [Expr]}
                 | ForeignKey {constrPos :: Pos, constrFields :: [Expr], constrForeign :: String, constrFArgs :: [Expr]}
                 | Unique     {constrPos :: Pos, constrFields :: [Expr]}
@@ -274,12 +320,28 @@ instance PP Assume where
 instance Show Assume where
     show = render . pp
 
-data Function = Function { funcPos  :: Pos
-                         , funcPure :: Bool
-                         , funcName :: String
-                         , funcArgs :: [Field]
-                         , funcType :: Type
-                         , funcDef  :: Maybe Expr
+data FuncAnnotation = AnnotController{fannotPos :: Pos} 
+
+instance Eq FuncAnnotation where
+   (==) (AnnotController _) (AnnotController _) = True
+
+instance WithPos FuncAnnotation where
+    pos = fannotPos
+    atPos a p = a{fannotPos = p}
+
+instance PP FuncAnnotation where
+    pp AnnotController{} = "#controller"
+
+instance Show FuncAnnotation where
+    show = render . pp
+
+data Function = Function { funcPos   :: Pos
+                         , funcAnnot :: [FuncAnnotation]
+                         , funcPure  :: Bool
+                         , funcName  :: String
+                         , funcArgs  :: [Field]
+                         , funcType  :: Type
+                         , funcDef   :: Maybe Expr
                          }
 
 instance WithPos Function where
@@ -290,7 +352,9 @@ instance WithName Function where
     name = funcName
 
 instance PP Function where
-    pp Function{..} = ((if' funcPure ("function") ("procedure")) <+> pp funcName 
+    pp Function{..} = (vcat $ map pp funcAnnot)
+                      $$
+                      ((if' funcPure ("function") ("procedure")) <+> pp funcName 
                        <+> (parens $ hcat $ punctuate comma $ map pp funcArgs) 
                        <> colon <+> pp funcType 
                        <+> (maybe empty (\_ -> "=") funcDef))

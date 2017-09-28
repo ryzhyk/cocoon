@@ -16,10 +16,10 @@ syn region ccnCommentL  start="//" skip="\\$" end="$" keepend contains=ccnTodo
 
 syn match  ccnDelimiter         "->"
 syn match  ccnDelimiter         ":-"
-syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.]"
+syn match  ccnDelimiter	        "[\[\]!?@#\~&|\^=<>%+-,;\:\.@]"
 
 "Regular keywords
-syn keyword ccnStatement        and bool fork function procedure assume host not or pkt refine send primary table view foreign key check unique references match state drop in out any the var switch port
+syn keyword ccnStatement        and bool fork function procedure assume host not or pkt refine send primary table view foreign key check unique references match state drop in out any the var switch port task
 
 syn keyword ccnTodo             contained TODO FIXME XXX
 

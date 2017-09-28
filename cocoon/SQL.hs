@@ -373,7 +373,7 @@ mkConstraint rel (Check _ cond) i              = (mkFun func, "check" <> parens 
     where fname    = "check" ++ name rel ++ "$" ++ show i
           fields   = exprVars (CtxCheck rel) cond
           fargs    = map (\(v, ctx) -> Field nopos v (exprType ?r ctx (eVar v))) fields
-          func     = Function nopos True fname fargs tBool (Just cond)
+          func     = Function nopos [] True fname fargs tBool (Just cond)
           callargs = map (gather . (\f -> (eVar $ name f, typ f))) fargs
           gather (e, t) = case typ' ?r t of
                                TStruct _ cs -> parens $ commaSep 

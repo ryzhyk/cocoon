@@ -52,6 +52,7 @@ module Expr ( exprMapM
             , exprIsStatement
             , exprVarSubst
             , exprVarRename
+            , exprMutatorsNonRec
             --, exprScalars
             --, exprDeps
             --, exprSubst
@@ -625,4 +626,12 @@ exprVarRename f e = exprFold g e
     where g (EVar pos v) = E $ EVar pos $ f v
           g e'           = E e'
 
-
+-- Returns subexpressions that mutate state, if any
+exprMutatorsNonRec :: Expr -> [Expr]
+exprMutatorsNonRec e = nub $ execState
+    (exprFoldM (\e' -> do case e' of
+                              EPut{}    -> modify (E e':)
+                              EDelete{} -> modify (E e':)
+                              _         -> return ()
+                          return $ E e') e) 
+    []

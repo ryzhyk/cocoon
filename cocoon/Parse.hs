@@ -37,7 +37,7 @@ import Util
 import Builtins
 import Name
 
-reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#"]
+reservedOpNames = [":", "?", "!", "|", "==", "=", ":-", "%", "+", "-", ".", "->", "=>", "<=", "<=>", ">=", "<", ">", "!=", ">>", "<<", "#", "@"]
 reservedNames = ["_",
                  "and",
                  "any",
@@ -130,6 +130,7 @@ consIdent   = ucIdentifier
 relIdent    = ucIdentifier
 switchIdent = ucIdentifier
 portIdent   = ucIdentifier
+taskIdent   = ucIdentifier
 varIdent    = lcIdentifier
 funcIdent   = lcIdentifier
 
@@ -147,7 +148,7 @@ data SpecItem = SpType         TypeDef
               | SpFunc         Function
               | SpSwitch       Switch
               | SpPort         SwitchPort
-
+              | SpTask         Task
 
 cocoonGrammar = removeTabs *> ((optional whiteSpace) *> spec <* eof)
 cmdGrammar = removeTabs *> ((optional whiteSpace) *> cmd <* eof)
@@ -161,7 +162,7 @@ spec = withPos $ mkRefine [] <$> (many decl)
 --spec = (\r rs -> r:rs) <$> (withPos $ mkRefine [] <$> (many decl)) <*> (many refine)
 
 mkRefine :: [String] -> [SpecItem] -> Refine
-mkRefine targets items = Refine nopos targets types state funcs relations assumes switches ports
+mkRefine targets items = Refine nopos targets types state funcs relations assumes switches ports tasks
     where relations = mapMaybe (\i -> case i of 
                                            SpRelation r -> Just r
                                            _            -> Nothing) items
@@ -186,6 +187,9 @@ mkRefine targets items = Refine nopos targets types state funcs relations assume
           assumes = mapMaybe (\i -> case i of 
                                        SpAssume a -> Just a
                                        _          -> Nothing) items
+          tasks = mapMaybe (\i -> case i of 
+                                       SpTask t -> Just t
+                                       _        -> Nothing) items
 
 {-
 refine = withPos $ mkRefine <$  reserved "refine" 
@@ -201,22 +205,27 @@ decl =  (SpType         <$> typeDef)
     <|> (SpSwitch       <$> switch)
     <|> (SpPort         <$> port)
     <|> (SpAssume       <$> assume)
+    <|> (SpTask         <$> task)
 
 typeDef = withPos $ (TypeDef nopos) <$ reserved "typedef" <*> identifier <*> (optionMaybe $ reservedOp "=" *> typeSpec)
 
 stateVar = withPos $ reserved "state" *> arg
 
-func = withPos $ Function nopos True <$  reserved "function"
-                                     <*> funcIdent
-                                     <*> (parens $ commaSep arg) 
-                                     <*> (colon *> typeSpecSimple)
-                                     <*> (optionMaybe $ reservedOp "=" *> expr)
+func = withPos $ Function nopos [] <$> (True <$ reserved "function")
+                                   <*> funcIdent
+                                   <*> (parens $ commaSep arg) 
+                                   <*> (colon *> typeSpecSimple)
+                                   <*> (optionMaybe $ reservedOp "=" *> expr)
 
-proc = withPos $ Function nopos False <$  reserved "procedure"
-                                      <*> funcIdent
-                                      <*> (parens $ commaSep arg) 
-                                      <*> (colon *> (typeSpecSimple <|> (withPos $ tSink <$ reserved "sink")))
-                                      <*> (Just <$ reservedOp "=" <*> expr)
+fannot = withPos $
+           ((try $ lookAhead $ reservedOp "#" *> symbol "controller") *> reservedOp "#" *>
+            (AnnotController nopos <$ symbol "controller"))
+
+proc = withPos $ Function nopos <$> many fannot
+                                <*> (False <$ reserved "procedure") <*> funcIdent
+                                <*> (parens $ commaSep arg) 
+                                <*> (colon *> (typeSpecSimple <|> (withPos $ tSink <$ reserved "sink")))
+                                <*> (Just <$ reservedOp "=" <*> expr)
 
 switch = withPos $ Switch nopos <$ symbol "switch" <*> switchIdent <*> (brackets relIdent)
 
@@ -224,6 +233,10 @@ port = withPos $ SwitchPort nopos <$ symbol "port" <*> portIdent <*> (brackets r
                                      (symbol "(" *> option False (True <$ reserved "source")) <*> funcIdent <*>
                                      (comma *> ( (Nothing <$ reserved "sink")
                                               <|>(Just <$> funcIdent))) <* symbol ")"
+
+task = withPos $ Task nopos <$ symbol "task" <*> taskIdent <*> (brackets relIdent) <*> (parens funcIdent) <*> (reservedOp "@" *> duration)
+
+duration = Duration <$> parseDec <*> ((Millisecond <$ (try $ symbol "ms")) <|> (Second <$ (try $ symbol "s")))
 
 relation = do withPos $ do mutable <- (True <$ ((try $ lookAhead $ reserved "state" *> reserved "table") *> (reserved "state" *> reserved "table")))
                                       <|>

@@ -208,6 +208,10 @@ port PHypervisorTunPort[HypervisorTunPort](hypervisorTunPortIn, sink)
 port PHypervisorPort[HypervisorPort](source hypervisorPortIn, sink)
 
 
-//task Advertise[Router](advertise) @ 120 ms
+/*task Advertise[Hypervisor](advertise) @ 120ms
 
-//procedure advertise(router: Router): sink
+procedure advertise(r: Hypervisor): () = ()
+
+#controller
+procedure update(): sink = drop
+*/

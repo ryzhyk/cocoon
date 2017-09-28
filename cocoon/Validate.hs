@@ -93,6 +93,7 @@ validate :: (MonadError String me) => Refine -> me ()
 validate r@Refine{..} = do
     uniqNames (\n -> "Multiple definitions of switch " ++ n) refineSwitches
     uniqNames (\n -> "Multiple definitions of port " ++ n) refinePorts
+    uniqNames (\n -> "Multiple definitions of task " ++ n) refineTasks
     uniqNames (\n -> "Multiple definitions of type " ++ n) refineTypes
     assertR r (isJust $ find ((==packetTypeName) . tdefName) refineTypes) (pos r) $ packetTypeName ++ " is undefined"
     uniqNames (\n -> "Multiple definitions of function " ++ n) refineFuncs
@@ -112,6 +113,7 @@ validate r@Refine{..} = do
     mapM_ (funcValidate2 r)  refineFuncs
     mapM_ (switchValidate r) refineSwitches
     mapM_ (portValidate r)   refinePorts
+    mapM_ (taskValidate r)   refineTasks
     mapM_ (assumeValidate r) refineAssumes
     mapM_ (relValidate3 r)   refineRels
     -- TODO: check for cycles in the locations graph
@@ -161,6 +163,9 @@ funcValidate1 r Function{..} = do
     uniqNames (\a -> "Multiple definitions of argument " ++ a) funcArgs
     mapM_ (typeValidate r . fieldType) funcArgs
     typeValidate r funcType
+    when (any (== (AnnotController nopos)) funcAnnot) $ do
+        assertR r (funcType == tSink) funcPos "Procedure with #controller annotation must return sink"
+        assertR r (null funcArgs) funcPos "Procedure with #controller annotation cannot take arguments"
 
 funcValidate2 :: (MonadError String me) => Refine -> Function -> me ()
 funcValidate2 r f@Function{..} = do
@@ -201,61 +206,71 @@ switchValidate r Switch{..} = do
 
 portValidate :: (MonadError String me) => Refine -> SwitchPort -> me ()
 portValidate r SwitchPort{..} = do 
-     rel@Relation{..} <- checkRelation portPos r CtxRefine portRel
-     infunc  <- checkFunc portPos r portIn
-     moutfunc <- maybe (return Nothing) (liftM Just . checkFunc portPos r) portOut
+    rel@Relation{..} <- checkRelation portPos r CtxRefine portRel
+    infunc  <- checkFunc portPos r portIn
+    moutfunc <- maybe (return Nothing) (liftM Just . checkFunc portPos r) portOut
 
-     assertR r (isJust $ funcDef infunc) portPos 
-               $ "Method " ++ name infunc ++ " used as input port handler must be defined"
-     maybe (return())
-           (\f -> assertR r (isJust $ funcDef f) portPos 
-                          $ "Method " ++ name f ++ " used as output port handler must be defined")
-           moutfunc
+    assertR r (isJust $ funcDef infunc) portPos 
+              $ "Method " ++ name infunc ++ " used as input port handler must be defined"
+    maybe (return())
+          (\f -> assertR r (isJust $ funcDef f) portPos 
+                         $ "Method " ++ name f ++ " used as output port handler must be defined")
+          moutfunc
 
-     assertR r (not $ funcPure infunc) portPos 
-               $ "Method " ++ name infunc ++ " used as input port handler must be declared as procedure"
-     maybe (return ())
-           (\f -> assertR r (not $ funcPure f) portPos 
-                          $ "Method " ++ name f ++ " used as output port handler must be declared as procedure")
-           moutfunc
-     assertR r ((1 == length (funcArgs infunc)) && 
-                (relRecordType rel == (fieldType $ head (funcArgs infunc)))) portPos 
-               $ "Method " ++ name infunc ++ " must take a single argument of type " ++ show (relRecordType rel)
-     maybe (return ())
-           (\f -> assertR r ((1 == length (funcArgs f)) && 
-                             (relRecordType rel == (fieldType $ head (funcArgs f)))) portPos 
-                            $ "Method " ++ name f ++ " must take a single argument of type " ++ show (relRecordType rel))
-           moutfunc
-     assertR r (tSink == funcType infunc) portPos 
-               $ "Method " ++ name infunc ++ " used as input port handler must be declared as sink"
-     maybe (return ())
-           (\f -> assertR r (tSink == funcType f) portPos 
-                          $ "Method " ++ name f ++ " used as output port handler must be declared as sink")
-           moutfunc
-     --assertR r (roleTable inrole == relName) p $ "Role " ++ inp ++ " is not indexed by the " ++ relName ++ " relation" 
-     --assertR r (roleTable outrole == relName) p $ "Role " ++ outp ++ " is not indexed by the " ++ relName ++ " relation" 
-     --assertR r (roleCond inrole == eTrue) p 
-     --        $ "Role " ++ inp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
-     --assertR r (roleCond outrole == eTrue) p 
-     --        $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
-     assertR r (isJust $ find ((== "switch") . name) relArgs) relPos
-             $ "Port relation " ++ relName ++ " must have a column named \"switch\""
-     maybe (errR r relPos "The \"switch\" column must be declared as foreign key")
-           (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
-                                         assertR r (relIsSwitch r rel') p' 
-                                                 "The \"switch\" column must refer to a switch relation")
-           $ find (\case 
-                    ForeignKey _ [f] _ _ -> f == eVar "switch"
-                    _                    -> False) relConstraints
-     portnum <- maybe (errR r relPos $ "Port relation " ++ relName ++ " must have a column named \"portnum\"")
-                      return
-                      (find ((== "portnum") . name) relArgs) 
-     assertR r (isBit r portnum) relPos "The portnum column must be of type bit<N>"
-     assertR r (isJust $ find (\case
-                                Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
-                                _                -> False) relConstraints) relPos
-               $ "The following constraint is required in port relation " ++ relName ++ " unique (switch,portnum)"
+    assertR r (not $ funcPure infunc) portPos 
+              $ "Method " ++ name infunc ++ " used as input port handler must be declared as procedure"
+    maybe (return ())
+          (\f -> assertR r (not $ funcPure f) portPos 
+                         $ "Method " ++ name f ++ " used as output port handler must be declared as procedure")
+          moutfunc
+    assertR r ((1 == length (funcArgs infunc)) && 
+               (relRecordType rel == (fieldType $ head (funcArgs infunc)))) portPos 
+              $ "Method " ++ name infunc ++ " must take a single argument of type " ++ show (relRecordType rel)
+    maybe (return ())
+          (\f -> assertR r ((1 == length (funcArgs f)) && 
+                            (relRecordType rel == (fieldType $ head (funcArgs f)))) portPos 
+                           $ "Method " ++ name f ++ " must take a single argument of type " ++ show (relRecordType rel))
+          moutfunc
+    assertR r (tSink == funcType infunc) portPos 
+              $ "Method " ++ name infunc ++ " used as input port handler must be declared as sink"
+    maybe (return ())
+          (\f -> assertR r (tSink == funcType f) portPos 
+                         $ "Method " ++ name f ++ " used as output port handler must be declared as sink")
+          moutfunc
+    --assertR r (roleTable inrole == relName) p $ "Role " ++ inp ++ " is not indexed by the " ++ relName ++ " relation" 
+    --assertR r (roleTable outrole == relName) p $ "Role " ++ outp ++ " is not indexed by the " ++ relName ++ " relation" 
+    --assertR r (roleCond inrole == eTrue) p 
+    --        $ "Role " ++ inp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
+    --assertR r (roleCond outrole == eTrue) p 
+    --        $ "Role " ++ outp ++ " declared as switch port should not have a guard condition, but there is one specified at " ++ (show $ pos $ roleCond inrole)
+    assertR r (isJust $ find ((== "switch") . name) relArgs) relPos
+            $ "Port relation " ++ relName ++ " must have a column named \"switch\""
+    maybe (errR r relPos "The \"switch\" column must be declared as foreign key")
+          (\(ForeignKey p' _ n _) -> do let rel' = getRelation r n
+                                        assertR r (relIsSwitch r rel') p' 
+                                                "The \"switch\" column must refer to a switch relation")
+          $ find (\case 
+                   ForeignKey _ [f] _ _ -> f == eVar "switch"
+                   _                    -> False) relConstraints
+    portnum <- maybe (errR r relPos $ "Port relation " ++ relName ++ " must have a column named \"portnum\"")
+                     return
+                     (find ((== "portnum") . name) relArgs) 
+    assertR r (isBit r portnum) relPos "The portnum column must be of type bit<N>"
+    assertR r (isJust $ find (\case
+                               Unique _ [f1,f2] -> f1 == eVar "switch" && f2 == eVar "portnum"
+                               _                -> False) relConstraints) relPos
+              $ "The following constraint is required in port relation " ++ relName ++ " unique (switch,portnum)"
     
+
+taskValidate :: (MonadError String me) => Refine -> Task -> me ()
+taskValidate r Task{..} = do
+    rel <- checkRelation taskPos r CtxRefine taskRel
+    fun <- checkFunc taskPos r taskFunc
+    assertR r ((1 == length (funcArgs fun)) && 
+               (relRecordType rel == (fieldType $ head (funcArgs fun)))) taskPos 
+              $ "Method " ++ name fun ++ " must take a single argument of type " ++ show (relRecordType rel)
+    
+
 relTypeValidate :: (MonadError String me) => Refine -> Relation -> Pos -> Type -> me ()
 relTypeValidate r rel p   TArray{}  = errR r p $ "Arrays are not allowed in relations (in relation " ++ name rel ++ ")"
 relTypeValidate r rel p   TTuple{}  = errR r p $ "Tuples are not allowed in relations (in relation " ++ name rel ++ ")"
@@ -346,7 +361,8 @@ roleValidate r rl@Role{..} = do checkNoVar rolePos r CtxRefine roleKey
 
 portValidateFinal :: (MonadError String me) => Refine -> SwitchPort -> me ()
 portValidateFinal r port@SwitchPort{..} = do
-    let def = fromJust $ funcDef $ getFunc r portIn
+    let infunc = getFunc r portIn
+    let def = fromJust $ funcDef infunc
     assert (exprIsDeterministic r def) (pos def) "Cannot synthesize non-deterministic behavior"
     mapM_ (\dp@(DirPort p dir) -> do 
              assertR r (dir == DirOut) portPos $ "Input port " ++ portName ++ " sends to another input port " ++ show dp
@@ -358,8 +374,24 @@ portValidateFinal r port@SwitchPort{..} = do
                        mapM_ (\dp@(DirPort _ dir) -> do assertR r (dir == DirIn) portPos $ "Output port function " ++ name pout ++ " sends to another outputport " ++ show dp)
                              $ exprSendsToPorts r def')
         portOut
+    checkFuncRunsOnSwitch r portName [] portIn 
     return ()
 
+checkFuncRunsOnSwitch :: (MonadError String me) => Refine -> String -> [String] -> String -> me ()
+checkFuncRunsOnSwitch r pname stack fname = do
+    let f = getFunc r fname
+    let location = (intercalate ("\ninvoked from") $ (fname : stack)) ++ "\ninvoked by port " ++ pname
+    assertR r (isJust $ funcDef f) (pos f) $ "Methods executed inside a switch must be defined.  Method " ++ location ++ " is undefined"
+    let fdef = fromJust $ funcDef f
+    case exprMutatorsNonRec fdef of
+         [] -> return ()
+         ms -> errR r (pos f) $ 
+                    "Code executing inside a switch cannot modify relations.  The following expressions in method " ++ location ++
+                    "modify relations:\n" ++ (intercalate "\n" $ map (\e -> show e ++ " at " ++ (show $ pos e)) ms)
+    mapM_ (checkFuncRunsOnSwitch r pname (fname:stack))
+          $ filter (elem (AnnotController nopos) . funcAnnot . getFunc r)
+          $ exprFuncs fdef   
+         
 
 assumeValidate :: (MonadError String me) => Refine -> Assume -> me ()
 assumeValidate r a@Assume{..} = exprValidate r (CtxAssume a) assExpr
