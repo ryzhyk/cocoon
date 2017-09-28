@@ -174,7 +174,6 @@ mkBB pl val (I.BB as n) = map (mkAction val) as ++ [mkNext pl val n]
 
 mkAction :: I.Record -> I.Action -> O.Action
 mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
-mkAction _   a              = error $ "not implemented: IR2OF.mkAction" ++ show a
 
 mkExpr :: I.Record -> I.Expr -> O.Expr
 mkExpr val e = 
@@ -285,9 +284,10 @@ mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
     slice2mask msl = fmap (uncurry bitRange) msl
 
 mkNext :: I.Pipeline -> I.Record -> I.Next -> O.Action
-mkNext pl _ (I.Goto nd) = mkGoto pl nd
-mkNext _  r (I.Send e)  = O.ActionOutput $ mkExpr r e
-mkNext _  _ I.Drop      = O.ActionDrop
+mkNext pl _ (I.Goto nd)      = mkGoto pl nd
+mkNext _  r (I.Send e)       = O.ActionOutput $ mkExpr r e
+mkNext _  _ I.Drop           = O.ActionDrop
+mkNext _  _ (I.Controller x) = O.ActionController x
 
 mkGoto :: I.Pipeline -> I.NodeId -> O.Action
 mkGoto pl nd = 

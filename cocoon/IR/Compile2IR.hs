@@ -89,9 +89,10 @@ compilePort' :: (?s::StructReify, ?r::Refine) => SwitchPort -> CompileState ()
 compilePort' SwitchPort{..} = do 
     entrynd <- allocNode
     setEntryNode entrynd
-    let f@Function{..} = getFunc ?r portIn
-    let key = name $ head funcArgs
-    let inlined = exprInline ?r (CtxFunc f CtxRefine) $ fromJust funcDef
+    let f = getFunc ?r portIn
+    let key = name $ head $ funcArgs f
+    let skip = map name $ filter (elem (AnnotController nopos) . funcAnnot) $ refineFuncs ?r
+    let inlined = exprInline ?r skip (CtxFunc f CtxRefine) $ fromJust $ funcDef f
     let e = {-trace ("inlined spec:\n\n" ++ show inlined) $-} evalState (expr2Statement ?r (CtxFunc f CtxRefine) inlined) 0
     case exprValidate ?r (CtxFunc f CtxRefine) e of
          Left er  -> error $ "Compile2IR.compilePort': failed to validate transformed expression: " ++ er
@@ -114,6 +115,10 @@ compileExpr vars ctx exitnd e = do
     return (entrynd, vars')
 
 compileExprAt :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
+compileExprAt vars _ entrynd _ (E (EApply _ f _)) = do
+    updateNode entrynd (I.Par [I.BB [] $ I.Controller $ fromIntegral $ fromJust $ findIndex ((==f) . name) $ refineFuncs ?r]) []
+    return vars
+
 compileExprAt vars ctx entrynd exitnd (E e@(ESeq _ e1 e2)) = do
     entrynd2 <- allocNode
     vars' <- compileExprAt vars (CtxSeq1 e ctx) entrynd (Just entrynd2) e1
@@ -193,6 +198,7 @@ compileExprAt vars _   entrynd exitnd (E (ETyped _ (E (EVarDecl _ v)) t)) = do
     updateNode entrynd (I.Par [I.BB [] $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
     return vars'
 
+{-
 compileExprAt vars ctx entrynd exitnd (E e@(EPut _ t v)) = do
     let v' = mkExpr vars (CtxPut e ctx) v
     updateNode entrynd (I.Par [I.BB [I.APut t v'] $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
@@ -202,6 +208,7 @@ compileExprAt vars ctx entrynd exitnd (E e@(EDelete _ t c)) = do
     let c' = mkScalarExpr vars (CtxDelete e ctx) c
     updateNode entrynd (I.Par [I.BB [I.ADelete t c'] $ maybe I.Drop I.Goto exitnd]) $ maybeToList exitnd
     return vars
+-}
  
 compileExprAt vars ctx entrynd exitnd (E e@(EMatch _ m cs)) = do
     let csext = cs ++ if (fst (last cs) == ePHolder) then [] else [(ePHolder, eDrop)]

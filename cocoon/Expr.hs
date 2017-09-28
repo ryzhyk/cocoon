@@ -358,8 +358,8 @@ isLRel :: Refine -> ECtx -> String -> Bool
 isLRel r ctx rel = isJust $ find ((== rel) . name) $ fst $ ctxRels r ctx
 
 -- Inline method bodies
-exprInline :: Refine -> ECtx -> Expr -> Expr
-exprInline r ctx e = exprFoldCtx (exprInline' r) ctx e'
+exprInline :: Refine -> [String] -> ECtx -> Expr -> Expr
+exprInline r skip ctx e = exprFoldCtx (exprInline' r skip) ctx e'
     where e' = evalState (exprFoldM (exprPrecomputeArgs r) e) 0
 
 -- compute arguments ahead of function invocations
@@ -388,17 +388,18 @@ allocArg :: State Int String
 allocArg = do modify (1+)
               liftM (("a#"++) . show) get
 
-exprInline' :: Refine -> ECtx -> ENode -> Expr
-exprInline' r ctx e@(EApply _ f as) | isJust funcDef = exprVarSubst subst vsubst body
-                                    | otherwise      = E e
+exprInline' :: Refine -> [String] -> ECtx -> ENode -> Expr
+exprInline' r skip ctx e@(EApply _ f as) | elem f skip    = E e
+                                         | isJust funcDef = exprVarSubst subst vsubst body
+                                         | otherwise      = E e
     where func@Function{..} = getFunc r f
-          body = exprInline r (CtxFunc func ctx) $ fromJust funcDef
+          body = exprInline r skip (CtxFunc func ctx) $ fromJust funcDef
           -- rename local vars; substitute arguments
           subst v = case findIndex ((==v) . name) funcArgs of
                          Just i  -> as !! i
                          Nothing -> eVar $ f ++ ":" ++ v
           vsubst v = f ++ ":" ++ v
-exprInline' _ _   e                                  = E e
+exprInline' _ _ _   e                                     = E e
 
 -- every variable must be declared in a separate statement, e.g.,
 -- (x, var y) = ...  ===> var y: Type; (x,y) = ...

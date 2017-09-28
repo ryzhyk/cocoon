@@ -196,9 +196,9 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                          Par bs                -> Par bs
         f :: CFG -> CFGCtx -> Maybe Action
         f cfg ctx = case ctxAction cfg ctx of
-                         ASet    l r  -> Just $ ASet (rename l) (rename r)
-                         APut    t as -> Just $ APut t (map rename as)
-                         ADelete t c  -> Just $ ADelete t (rename c)
+                         ASet    l r   -> Just $ ASet (rename l) (rename r)
+                         --APut    t as -> Just $ APut t (map rename as)
+                         --ADelete t c  -> Just $ ADelete t (rename c)
         h :: CFG -> CFGCtx -> Next
         h cfg ctx = case bbNext $ ctxGetBB cfg ctx of
                          Send x -> Send $ rename x

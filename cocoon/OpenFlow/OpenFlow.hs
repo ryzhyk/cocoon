@@ -77,11 +77,12 @@ type HTable  = Int
 type Prio    = Int
 type GroupId = Int
 
-data Action = ActionOutput {actPort :: Expr}
-            | ActionGroup  {actGroup :: GroupId}
+data Action = ActionOutput     {actPort :: Expr}
+            | ActionGroup      {actGroup :: GroupId}
             | ActionDrop
-            | ActionSet    {actLHS :: Expr, actRHS :: Expr}
-            | ActionGoto   {actGotoTable :: HTable}
+            | ActionSet        {actLHS :: Expr, actRHS :: Expr}
+            | ActionGoto       {actGotoTable :: HTable}
+            | ActionController {actUserData :: Integer}
 
 data Flow = Flow { flowPriority :: Prio
                  , flowMatch    :: [Match]

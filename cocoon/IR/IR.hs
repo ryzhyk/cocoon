@@ -169,8 +169,8 @@ cfgSubstVar v e cfg = cfgMapCtx g f h cfg
     f :: CFGCtx -> Maybe Action
     f ctx = case ctxAction cfg ctx of
                  ASet     l r  -> Just $ ASet (exprSubstVar v e l) (exprSubstVar v e r)
-                 APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
-                 ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
+                 --APut     t es -> Just $ APut t (map (exprSubstVar v e) es)
+                 --ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
     h :: CFGCtx -> Next
     h ctx = case bbNext $ ctxGetBB cfg ctx of 
                  Send x -> Send $ exprSubstVar v e x
@@ -204,39 +204,41 @@ type Delta = M.Map RelName [(Bool, Record)]
 -- Database snapshot
 type DB    = M.Map RelName [Record]
 
-data Action = ASet     Expr Expr
-            | APut     String [Expr]
-            | ADelete  String Expr
+data Action = ASet        Expr Expr
+            -- | APut        String [Expr]
+            -- | ADelete     String Expr
             {-| ABuiltin String [Expr] -}
 
 instance PP Action where
-    pp (ASet e1 e2)  = pp e1 <+> ":=" <+> pp e2
-    pp (APut t vs)   = pp t <> ".put" <> (parens $ hsep $ punctuate comma $ map pp vs)
-    pp (ADelete t c) = pp t <> ".delete" <> (parens $ pp c)
+    pp (ASet e1 e2)    = pp e1 <+> ":=" <+> pp e2
+--    pp (APut t vs)   = pp t <> ".put" <> (parens $ hsep $ punctuate comma $ map pp vs)
+--    pp (ADelete t c) = pp t <> ".delete" <> (parens $ pp c)
 
 instance Show Action where
     show = render . pp
 
 actionVars :: Action -> [VarName]
 actionVars (ASet e1 e2)  = nub $ exprVars e1 ++ exprVars e2
-actionVars (APut _ vs)   = nub $ concatMap exprVars vs
-actionVars (ADelete _ e) = exprVars e
+--actionVars (APut _ vs)   = nub $ concatMap exprVars vs
+--actionVars (ADelete _ e) = exprVars e
 
 actionRHSVars :: Action -> [VarName]
 actionRHSVars (ASet _ e2)   = exprVars e2
-actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
-actionRHSVars (ADelete _ c) = exprVars c
+--actionRHSVars (APut _ vs)   = nub $ concatMap exprVars vs
+--actionRHSVars (ADelete _ c) = exprVars c
 
 -- Next action descriptor
 data Next = Goto NodeId
           | Send Expr
           | Drop
+          | Controller Integer
           deriving(Eq)
 
 instance PP Next where
-    pp (Goto nid) = "goto" <+> pp nid
-    pp (Send p)   = "send" <+> pp p
-    pp Drop       = "drop"
+    pp (Goto nid)     = "goto" <+> pp nid
+    pp (Send p)       = "send" <+> pp p
+    pp Drop           = "drop"
+    pp (Controller x) = "controller" <+> pp x
 
 instance Show Next where
     show = render . pp

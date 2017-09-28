@@ -101,7 +101,6 @@ optUnusedAssigns pl = do
                   match ctx' = elem v $ ctxRHSVars (plCFG pl) ctx' 
                   abort ctx' = ctxAssignsFullVar (plCFG pl) v ctx'
                   used = not $ null $ ctxSearchForward (plCFG pl) ctx match abort
-        f' _ a                              = return $ Just a
     cfg' <- cfgMapCtxM (\_ node -> return node) f (return . bbNext . ctxGetBB (plCFG pl)) (plCFG pl)
     return pl{plCFG = cfg'}
 
@@ -155,9 +154,9 @@ varSubstAction cfg ctx = do
         act' = foldl' (\act_ (v, e) -> 
                         --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         in action " ++ show act) $
                         case act_ of
-                             ASet     l r  -> ASet l $ exprSubstVar v e r
-                             APut     t es -> APut t $ map (exprSubstVar v e) es
-                             ADelete  t c  -> ADelete t $ exprSubstVar v e c)
+                             ASet     l r  -> ASet l $ exprSubstVar v e r)
+                             --APut     t es -> APut t $ map (exprSubstVar v e) es
+                             --ADelete  t c  -> ADelete t $ exprSubstVar v e c
                        act substs
     when (not $ null substs) $ put True
     return $ Just act'
@@ -237,8 +236,7 @@ optMergeCond pl@Pipeline{..} = do
 
 bbLHSAtoms :: BB -> [Expr]
 bbLHSAtoms b = nub $ concatMap (\case
-                                 ASet l _ -> exprAtoms l
-                                 _        -> []) $ bbActions b
+                                 ASet l _ -> exprAtoms l) $ bbActions b
 
 mergeCond :: CFG -> NodeId -> NodeId -> CFG
 mergeCond cfg nto n = (pre', nto, Cond csto', suc' ++ suc) G.& cfg2 

@@ -462,6 +462,7 @@ mkAction OF.ActionDrop                = "drop"
 mkAction (OF.ActionSet l r@OF.EVal{}) = "load:" <> mkExprA r <> "->" <> mkExprA l
 mkAction (OF.ActionSet l r)           = "move:" <> mkExprA r <> "->" <> mkExprA l
 mkAction (OF.ActionGoto t)            = "goto_table:" <> pp t
+mkAction (OF.ActionController u)      = "controller(userdata=" <> (pp $ showHex u "") <> ")"
 
 mkBucket :: OF.Bucket -> Doc
 mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid
