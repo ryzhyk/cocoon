@@ -115,8 +115,9 @@ compileExpr vars ctx exitnd e = do
     return (entrynd, vars')
 
 compileExprAt :: (?s::StructReify, ?r::Refine) => VMap -> ECtx -> I.NodeId -> Maybe I.NodeId -> Expr -> CompileState VMap
-compileExprAt vars _ entrynd _ (E (EApply _ f _)) = do
-    updateNode entrynd (I.Par [I.BB [] $ I.Controller $ fromIntegral $ fromJust $ findIndex ((==f) . name) $ refineFuncs ?r]) []
+compileExprAt vars ctx entrynd _ (E e@(EApply _ f as)) = do
+    let as' = mapIdx (\a i -> mkScalarExpr vars (CtxApply e ctx i) a) as
+    updateNode entrynd (I.Par [I.BB [] $ I.Controller f as']) []
     return vars
 
 compileExprAt vars ctx entrynd exitnd (E e@(ESeq _ e1 e2)) = do

@@ -27,6 +27,11 @@ import System.Exit
 import Control.Monad
 import Control.Monad.Except
 import Data.List
+import Control.Concurrent
+import Data.IORef
+
+import qualified Network.Data.OF13.Message as OFP
+import qualified Network.Data.OF13.Server  as OFP
 
 import Util
 import Name
@@ -45,9 +50,11 @@ ovsBackend :: Backend OF.IRSwitches
 ovsBackend = Backend { backendStructs      = ovsStructReify
                      , backendValidate     = error "backendValidate not implemented"
                      , backendPrecompile   = ovsPrecompile
+                     , backendStart        = ovsStart
                      , backendBuildSwitch  = ovsBuildSwitch
                      , backendUpdateSwitch = ovsUpdateSwitch
                      , backendResetSwitch  = ovsResetSwitch
+                     , backendStop         = ovsStop
                      }
 
 ovsPrecompile :: (MonadError String me) => FilePath -> Refine -> me OF.IRSwitches
@@ -61,6 +68,36 @@ ovsBuildSwitch workdir r sw f@(DL.Fact rname _) ir db = do
         cmds = OF.buildSwitch r (ir M.! name sw) db swid
     ovsResetSwitch workdir r sw f
     sendCmds workdir rname swid swaddr swname cmds
+
+ovsStart :: IO ()
+ovsStart = do
+    _ <- forkIO $ OFP.runServer 6633 factory
+    putStrLn "OF controller is running on 6633"
+
+data SwitchCtx = SwitchCtx { swSw  :: OFP.Switch
+                           , swId  :: OFP.SwitchID
+                           }
+
+factory :: OFP.Switch -> IO (Maybe OFP.Message -> IO ())
+factory sw = do
+    putStrLn "OF Connecting"
+    OFP.sendMessage sw [ OFP.Hello { xid = 0, len = 8 }
+                       , OFP.FeatureRequest { xid = 1 }]
+    r <- newIORef $ SwitchCtx sw 0
+    return (messageHandler r)
+
+messageHandler :: IORef SwitchCtx -> Maybe OFP.Message -> IO ()
+messageHandler _ Nothing = putStrLn "OF Disconnecting"
+messageHandler r (Just msg) = do
+    c@SwitchCtx{..} <- readIORef r
+    putStrLn $ "OF message from " ++ show swId ++ ": " ++ show msg -- >> sendMessage sw [FeatureRequest 1]
+    case msg of 
+         OFP.EchoRequest{..}  -> OFP.sendMessage swSw [OFP.EchoReply xid body]
+         OFP.FeatureReply{..} -> writeIORef r $ c {swId = sid}
+         _                    -> return ()
+
+ovsStop :: IO ()
+ovsStop = return ()
 
 ovsUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> OF.IRSwitches -> IR.Delta -> IO ()
 ovsUpdateSwitch workdir r sw f@(DL.Fact rname _) ir delta = do
@@ -401,7 +438,8 @@ sendCmds workdir swrel swid swaddr swname cmds = do
    when (code /= ExitSuccess) $ error $ "ovs-ofctl failed with exit code " ++ show code ++ 
                                         "\ncommand line: ovs-ofctl " ++ (intercalate " " args) ++
                                         "\noutput: " ++ stdo ++
-                                        "\nstd error: " ++ stde
+                                        "\nstd error: " ++ stde ++
+                                        "\nOF commands:\n" ++ ofcmds
 
 commaCat = hcat . punctuate comma . filter (not . (==empty))
 
@@ -462,7 +500,7 @@ mkAction OF.ActionDrop                = "drop"
 mkAction (OF.ActionSet l r@OF.EVal{}) = "load:" <> mkExprA r <> "->" <> mkExprA l
 mkAction (OF.ActionSet l r)           = "move:" <> mkExprA r <> "->" <> mkExprA l
 mkAction (OF.ActionGoto t)            = "goto_table:" <> pp t
-mkAction (OF.ActionController u)      = "controller(userdata=" <> (pp $ showHex u "") <> ")"
+mkAction (OF.ActionController u)      = "controller(userdata=" <> (hcat $ punctuate "." $ map (pp . (\w -> (printf "%02x" w) :: String)) u) <> ")"
 
 mkBucket :: OF.Bucket -> Doc
 mkBucket (OF.Bucket mid as) = commaCat [ maybe empty (("bucket=" <>) . pp) mid

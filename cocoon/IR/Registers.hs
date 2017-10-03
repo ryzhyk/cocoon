@@ -201,7 +201,8 @@ allocVarsToRegisters pl rf@(RegisterFile regs) = do
                          --ADelete t c  -> Just $ ADelete t (rename c)
         h :: CFG -> CFGCtx -> Next
         h cfg ctx = case bbNext $ ctxGetBB cfg ctx of
-                         Send x -> Send $ rename x
+                         Send x          -> Send $ rename x
+                         Controller u xs -> Controller u $ map rename xs
                          n      -> n
     let cfg' = cfgMapCtx g (f $ plCFG pl) (h $ plCFG pl) $ plCFG pl
     return {-$ trace ("register allocation:\n" ++ 

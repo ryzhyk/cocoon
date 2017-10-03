@@ -134,8 +134,12 @@ HPortTun(srchport, dstmac, lsw, dsthv != srchv, dsthport, dsttunip) :- Hyperviso
                                                                      , HypervisorTunPort(_, _, dsthv, dsttunip)
                                                                      , dsthv != srchv
 
-procedure hypervisorPortIn(port: HypervisorPort): sink = {
-    the (tun in HPortTun | tun.srchport == port.id and tun.dstmac == pkt.dst) {
+procedure hypervisorPortIn(port: HypervisorPort): sink =
+doHypervisorPortIn(port.id, port.switch)
+
+#controller
+procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
+    the (tun in HPortTun | tun.srchport == port and tun.dstmac == pkt.dst) {
         if (not tun.tun) {
             the (hp in HypervisorPort | hp.id == tun.dsthport) {
                 send PHypervisorPort[hp].out
@@ -143,7 +147,7 @@ procedure hypervisorPortIn(port: HypervisorPort): sink = {
         } else {
             pkt.vxlan.tun_dst = tun.dsttunip;
             pkt.vxlan.tun_id  = tun.lswitch;
-            the (tp in HypervisorTunPort | tp.switch == port.switch) {
+            the (tp in HypervisorTunPort | tp.switch == hswitch) {
                 send PHypervisorTunPort[tp].out
             }
         }

@@ -197,15 +197,18 @@ connect ControllerDisconnected{..} = do
             tsem  <- MV.newEmptyMVar
             let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
             populateDB
-            syncThr <- T.forkIO $ syncThread ?s
-            let s = ?s{ctlSyncThread = syncThr}
-            return (s, "Connected"))
+            backendStart ctlBackend
+            (do syncThr <- T.forkIO $ syncThread ?s
+                let s = ?s{ctlSyncThread = syncThr}
+                return (s, "Connected")
+             `catch` \e -> do backendStop ctlBackend
+                              throw (e::SomeException))
          `catch` \e -> do
              closeDLSession dl
              throw (e::SomeException))
      `catch` \e -> do 
          PG.close db
-         throw (e::SomeException)
+         throw (e::SomeException))
 connect ControllerConnected{} = throw $ AssertionFailed "already connected"
 
 -- This is the only way to transition to disconnected state.

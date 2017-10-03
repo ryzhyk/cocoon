@@ -31,10 +31,12 @@ data StructReify = StructReify { reifyWidth :: M.Map String Int
                                , reifyCons  :: M.Map String Integer
                                }
 
-data Backend p = Backend { backendStructs      :: StructReify 
+data Backend p = Backend { backendStructs      :: StructReify
                          , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()
                          , backendPrecompile   :: forall me . (MonadError String me) => FilePath -> Refine -> me p
+                         , backendStart        :: IO ()
                          , backendBuildSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.DB -> IO ()
                          , backendUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.Delta -> IO ()
                          , backendResetSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()
+                         , backendStop         :: IO ()
                          }

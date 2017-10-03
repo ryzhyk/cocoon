@@ -165,15 +165,17 @@ varSubstNext :: CFG -> CFGCtx -> State Bool Next
 varSubstNext cfg ctx = do
     let nxt = bbNext $ ctxGetBB cfg ctx
         vars = case nxt of
-                    Send x -> exprVars x
+                    Send x          -> exprVars x
+                    Controller _ xs -> nub $ concatMap exprVars xs
                     _      -> []
         substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) vars
         -- apply substitutions
         nxt' = foldl' (\nxt_ (v, e) -> 
                         --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         in action " ++ show act) $
                         case nxt_ of
-                             Send x -> Send $ exprSubstVar v e x
-                             _      -> nxt_)
+                             Send x          -> Send $ exprSubstVar v e x
+                             Controller u xs -> Controller u $ map (exprSubstVar v e) xs
+                             _               -> nxt_)
                        nxt substs
     when (not $ null substs) $ put True
     return nxt'

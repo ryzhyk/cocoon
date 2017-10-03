@@ -173,8 +173,9 @@ cfgSubstVar v e cfg = cfgMapCtx g f h cfg
                  --ADelete  t c  -> Just $ ADelete t $ exprSubstVar v e c
     h :: CFGCtx -> Next
     h ctx = case bbNext $ ctxGetBB cfg ctx of 
-                 Send x -> Send $ exprSubstVar v e x
-                 n      -> n
+                 Send x          -> Send $ exprSubstVar v e x
+                 Controller u xs -> Controller u $ map (exprSubstVar v e) xs
+                 n               -> n
 
 plSubstVar :: VarName -> Expr -> Pipeline -> Pipeline
 plSubstVar v e pl = pl{plCFG = cfgSubstVar v e (plCFG pl)}
@@ -231,14 +232,14 @@ actionRHSVars (ASet _ e2)   = exprVars e2
 data Next = Goto NodeId
           | Send Expr
           | Drop
-          | Controller Integer
+          | Controller String [Expr]
           deriving(Eq)
 
 instance PP Next where
-    pp (Goto nid)     = "goto" <+> pp nid
-    pp (Send p)       = "send" <+> pp p
-    pp Drop           = "drop"
-    pp (Controller x) = "controller" <+> pp x
+    pp (Goto nid)        = "goto" <+> pp nid
+    pp (Send p)          = "send" <+> pp p
+    pp Drop              = "drop"
+    pp (Controller f xs) = "controller" <+> pp f <+> (hcat $ punctuate "," $ map pp xs)
 
 instance Show Next where
     show = render . pp
@@ -469,8 +470,9 @@ ctxRHSVars cfg (CtxNode nd) =
      where node = fromJust $ G.lab cfg nd
 ctxRHSVars cfg ctx | isActCtx ctx = actionRHSVars $ ctxAction cfg ctx
                    | otherwise    = case bbNext $ ctxGetBB cfg ctx of
-                                         Send x -> exprVars x
-                                         _      -> []
+                                         Send x          -> exprVars x
+                                         Controller _ xs -> nub $ concatMap exprVars xs
+                                         _               -> []
 
 ctxAssignsFullVar :: CFG -> VarName -> CFGCtx -> Bool
 ctxAssignsFullVar cfg v ctx | isActCtx ctx   = 

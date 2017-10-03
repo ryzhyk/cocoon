@@ -74,13 +74,15 @@ class VNet (Mininet):
         s = self.addSwitch(hostname)
         s.start([])
         vxportname = hostname + "-vx"
-        s.cmd(["ovs-vsctl", "set", "bridge", hostname, "protocols=OpenFlow15"])
+        s.cmd(["ovs-vsctl", "set", "bridge", hostname, "protocols=OpenFlow15,OpenFlow13"])
+        s.cmd(["ovs-vsctl", "set-controller", hostname, "tcp:127.0.0.1:6633"])
+        dp_id = int(s.cmd(["ovs-vsctl", "get", "Bridge", hostname, "datapath_id"]).strip('\"\r\n'),16)
         s.cmd(["ovs-vsctl", "add-port", hostname, vxportname, "--", "set", "interface", vxportname, "type=vxlan", "options:remote_ip=flow", "options:local_ip="+hostip, "options:key=flow"])
         portnum = s.cmd(["ovs-vsctl", "get", "Interface", vxportname, "ofport"])
         #self.addLink(s, self.get("r0"), intfName1="vx", intfName2="r0-"+hostname, params2={'ip': hostip+"/32"})
-        cocoon("Hypervisor.put(Hypervisor{" + str(hostid) + ", false, \"" + hostname + "\", \"\"})")
-        cocoon("HypervisorTunPort.put(HypervisorTunPort{" + str(hostid) + ", " + str(int(portnum)) + ", " + str(hostid) + ", " + str(int(netaddr.IPAddress(hostip))) + "})")
-        return
+        cocoon("Hypervisor.put(Hypervisor{" + str(dp_id) + ", false, \"" + hostname + "\", \"\"})")
+        cocoon("HypervisorTunPort.put(HypervisorTunPort{" + str(dp_id) + ", " + str(int(portnum)) + ", " + str(dp_id) + ", " + str(int(netaddr.IPAddress(hostip))) + "})")
+        return dp_id
 
     def delHost(self, hostid):
         return
@@ -129,14 +131,14 @@ def main():
     cocoon("LogicalSwitch.put(LogicalSwitch{123})")
 
     subprocess.check_call(["ifconfig", "dummy0", "10.10.10.101"])
-    net.addHV(1, "10.10.10.101")
+    dp_id1 = net.addHV(1, "10.10.10.101")
     subprocess.check_call(["ifconfig", "dummy1", "10.10.10.102"])
-    net.addHV(2, "10.10.10.102")
+    dp_id2 = net.addHV(2, "10.10.10.102")
 
-    net.addVM(1, 1, '11:22:33:44:55:66', "192.168.0.1")
+    net.addVM(1, dp_id1, '11:22:33:44:55:66', "192.168.0.1")
     cocoon("LogicalPort.put(LogicalPort{0,123,1,48'h112233445566})")
 
-    net.addVM(2, 2, '11:22:33:44:55:77', "192.168.0.2")
+    net.addVM(2, dp_id2, '11:22:33:44:55:77', "192.168.0.2")
     cocoon("LogicalPort.put(LogicalPort{1,123,2,48'h112233445577})")
 
     CLI(net)
