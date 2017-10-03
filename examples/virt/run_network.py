@@ -42,19 +42,6 @@ parser.add_argument('--topology', help='MiniEdit topology file',
 
 args = parser.parse_args()
 
-#class LinuxRouter( Node ):
-#    "A Node with IP forwarding enabled."
-#
-#    def config( self, **params ):
-#        super( LinuxRouter, self).config( **params )
-#        # Enable forwarding on the router
-#        self.cmd( 'sysctl net.ipv4.ip_forward=1' )
-#
-#    def terminate( self ):
-#        self.cmd( 'sysctl net.ipv4.ip_forward=0' )
-#        super( LinuxRouter, self ).terminate()
-
-
 def cocoon(cmd):
     ccn_cmd = [cocoon_path, "-i", "virt.ccn", "--action=cmd"]
     print " ".join(ccn_cmd) + " " + cmd

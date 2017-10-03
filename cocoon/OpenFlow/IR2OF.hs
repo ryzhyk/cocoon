@@ -48,7 +48,6 @@ import qualified Relation          as C
 import qualified NS                as C
 
 -- Uniquely identify an instance of the switch:
--- (SwitchRelation, primary key)
 type SwitchId = Integer
 
 type IRSwitch = [(String, I.Pipeline)]

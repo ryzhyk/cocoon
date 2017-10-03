@@ -45,4 +45,4 @@ set -e
 sudo psql postgres -f $workdir/$specname.schema
 
 (set +x; echo Starting Cocoon controller)
-sudo $COCOON_PATH -i $1 --action=controller +RTS -xc -RTS
+sudo $COCOON_PATH -i $1 --action=controller

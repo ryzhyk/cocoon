@@ -165,7 +165,7 @@ funcValidate1 r Function{..} = do
     typeValidate r funcType
     when (any (== (AnnotController nopos)) funcAnnot) $ do
         assertR r (funcType == tSink) funcPos "Procedure with #controller annotation must return sink"
-        assertR r (all (isBit r) funcArgs) funcPos "Procedure with #controller annotation can take bitvector arguments only"
+        assertR r (all (isBit r) funcArgs) funcPos "Procedure with #controller annotation must take bitvector arguments only"
 
 funcValidate2 :: (MonadError String me) => Refine -> Function -> me ()
 funcValidate2 r f@Function{..} = do
