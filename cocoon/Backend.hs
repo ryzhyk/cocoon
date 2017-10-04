@@ -20,6 +20,7 @@ module Backend where
 
 import qualified Data.Map as M
 import Control.Monad.Except
+import qualified Data.ByteString as B
 
 import Syntax
 import qualified IR.IR as IR
@@ -31,10 +32,12 @@ data StructReify = StructReify { reifyWidth :: M.Map String Int
                                , reifyCons  :: M.Map String Integer
                                }
 
+type PktCB = String -> [Expr] -> B.ByteString -> IO [(B.ByteString, Int)]
+
 data Backend p = Backend { backendStructs      :: StructReify
                          , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()
                          , backendPrecompile   :: forall me . (MonadError String me) => FilePath -> Refine -> me p
-                         , backendStart        :: IO ()
+                         , backendStart        :: Refine -> p -> PktCB -> IO ()
                          , backendBuildSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.DB -> IO ()
                          , backendUpdateSwitch :: FilePath -> Refine -> Switch -> DL.Fact -> p -> IR.Delta -> IO ()
                          , backendResetSwitch  :: FilePath -> Refine -> Switch -> DL.Fact -> IO ()

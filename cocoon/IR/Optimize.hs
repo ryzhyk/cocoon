@@ -164,11 +164,14 @@ varSubstAction cfg ctx = do
 varSubstNext :: CFG -> CFGCtx -> State Bool Next
 varSubstNext cfg ctx = do
     let nxt = bbNext $ ctxGetBB cfg ctx
-        vars = case nxt of
-                    Send x          -> exprVars x
-                    Controller _ xs -> nub $ concatMap exprVars xs
-                    _      -> []
-        substs = mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) vars
+        substs = case nxt of
+                      Send x          -> mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) $ exprVars x
+                      Controller _ xs -> -- don't substitute column names in packet-in actions
+                                         filter (not . any isCol . exprAtoms . snd)
+                                                $ mapMaybe (\v -> fmap (v,) $ findSubstitution cfg ctx v) $ nub $ concatMap exprVars xs
+                                         where isCol ECol{} = True
+                                               isCol _      = False
+                      _               -> []
         -- apply substitutions
         nxt' = foldl' (\nxt_ (v, e) -> 
                         --trace ("substitute " ++ v ++  " with " ++ show e ++ "\n         in action " ++ show act) $

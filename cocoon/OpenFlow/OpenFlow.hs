@@ -22,7 +22,6 @@ module OpenFlow.OpenFlow where
 
 import Numeric
 import Text.PrettyPrint
-import Data.Word
 
 import Util
 import Name
@@ -83,7 +82,7 @@ data Action = ActionOutput     {actPort :: Expr}
             | ActionDrop
             | ActionSet        {actLHS :: Expr, actRHS :: Expr}
             | ActionGoto       {actGotoTable :: HTable}
-            | ActionController {actUserData :: [Word8]}
+            | ActionController
 
 data Flow = Flow { flowPriority :: Prio
                  , flowMatch    :: [Match]

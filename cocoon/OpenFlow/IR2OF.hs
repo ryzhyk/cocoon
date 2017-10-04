@@ -99,39 +99,39 @@ buildSwitch r ports db swid = table0 : (staticcmds ++ updcmds)
     where
     table0 = O.AddFlow 0 $ O.Flow 0 [] [O.ActionDrop]
     -- Configure static part of the pipeline
-    staticcmds = concatMap (\(_, pl) -> concatMap (mkNode pl) $ G.labNodes $ I.plCFG pl) ports
+    staticcmds = let ?r = r in concatMap (\(pname, pl) -> concatMap (mkNode pname pl) $ G.labNodes $ I.plCFG pl) ports
     -- Configure dynamic part from primary tables
-    updcmds = updateSwitch r ports swid (M.map (map (True,)) db)
+    updcmds = let ?r = r in updateSwitch r ports swid (M.map (map (True,)) db)
 
 updateSwitch :: C.Refine -> IRSwitch -> SwitchId -> I.Delta -> [O.Command]
 updateSwitch r ports swid db = portcmds ++ nodecmds
     where
     -- update table0 if ports have been added or removed
-    portcmds = concatMap (\(pname, pl) -> updatePort r (pname,pl) swid db) ports
+    portcmds = let ?r = r in concatMap (\(pname, pl) -> updatePort pname pl swid db) ports
     -- update pipeline nodes
-    nodecmds = concatMap (\(_, pl) -> concatMap (updateNode r db pl swid) $ G.labNodes $ I.plCFG pl) ports
+    nodecmds = let ?r = r in concatMap (\(pname, pl) -> concatMap (updateNode db pname pl swid) $ G.labNodes $ I.plCFG pl) ports
 
-updatePort :: C.Refine -> (String, I.Pipeline) -> SwitchId -> I.Delta -> [O.Command]
-updatePort r (pname, pl) i db = delcmd ++ addcmd
+updatePort :: (?r::C.Refine) =>  String -> I.Pipeline -> SwitchId -> I.Delta -> [O.Command]
+updatePort pname pl i db = delcmd ++ addcmd
     where
-    prel = name $ C.portRel $ C.getPort r pname
+    prel = name $ C.portRel $ C.getPort ?r pname
     (add, del) = partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == i) $ db M.! prel
     match f = let pnum = f M.! "portnum" in
              mkSimpleCond M.empty $ I.EBinOp Eq (I.EPktField "portnum" $ I.TBit $ I.exprWidth pnum) pnum
     delcmd = concatMap (\(_,f) -> map (O.DelFlow 0 1) $ match f) del
     addcmd = concatMap (\(_,f) -> map (\m -> O.AddFlow 0 $ O.Flow 1 m [mkGoto pl $ I.plEntryNode pl]) $ match f) add
 
-mkNode :: I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
-mkNode pl (nd, node) = 
+mkNode :: (?r::C.Refine) => String -> I.Pipeline -> (I.NodeId, I.Node) -> [O.Command]
+mkNode pname pl (nd, node) = 
     case node of
-         I.Par bs            -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pl nd i b) bs 
+         I.Par bs            -> [ O.AddGroup $ O.Group nd O.GroupAll $ mapIdx (\b i -> O.Bucket Nothing $ mkStaticBB pname pl nd i b) bs 
                                 , O.AddFlow nd $ O.Flow 0 [] [O.ActionGroup nd] ]
-         I.Cond cs           -> map (\(m, a) -> O.AddFlow nd $ O.Flow 0 m a) $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pl nd i b)) cs
-         I.Lookup _ _ _ _ el -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pl nd 1 el]
+         I.Cond cs           -> map (\(m, a) -> O.AddFlow nd $ O.Flow 0 m a) $ mkCond $ mapIdx (\(c,b) i -> (c, mkStaticBB pname pl nd i b)) cs
+         I.Lookup _ _ _ _ el -> [O.AddFlow nd $ O.Flow 0 [] $ mkStaticBB pname pl nd 1 el]
          I.Fork{}            -> [O.AddGroup $ O.Group nd O.GroupAll []]
 
-updateNode :: C.Refine -> I.Delta -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> [O.Command]
-updateNode r db portpl swid (nd, node) = 
+updateNode :: (?r::C.Refine) => I.Delta -> String -> I.Pipeline -> SwitchId -> (I.NodeId, I.Node) -> [O.Command]
+updateNode db pname portpl swid (nd, node) = 
     case node of
          I.Par _              -> []
          I.Cond _             -> []
@@ -141,19 +141,19 @@ updateNode r db portpl swid (nd, node) =
                                                      then partition fst $ filter (\(_, f) -> I.exprIntVal (f M.! "switch") == swid) $ (db M.! t)
                                                      else partition fst (db M.! t) 
                                      delcmd = concatMap (\(_,f) -> map (\O.Flow{..} -> O.DelFlow nd flowPriority flowMatch) 
-                                                                       $ mkLookupFlow portpl nd f pl th) del
-                                     addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow portpl nd f pl th) add
+                                                                       $ mkLookupFlow pname portpl nd f pl th) del
+                                     addcmd = concatMap (\(_,f) -> map (O.AddFlow nd) $ mkLookupFlow pname portpl nd f pl th) add
                                  in delcmd ++ addcmd
          I.Fork t _ _ b       -> -- create a bucket for each table row
                                  let (add, del) = partition fst (db M.! t) 
-                                     delcmd = map (\(_,f) -> O.DelBucket nd $ getBucketId r t f) del
-                                     addcmd = map (\(_,f) -> O.AddBucket nd $ O.Bucket (Just $ getBucketId r t f) $ mkBB portpl nd 0 f b) add
+                                     delcmd = map (\(_,f) -> O.DelBucket nd $ getBucketId t f) del
+                                     addcmd = map (\(_,f) -> O.AddBucket nd $ O.Bucket (Just $ getBucketId t f) $ mkBB pname portpl nd 0 f b) add
                                  in delcmd ++ addcmd
 
-getBucketId :: C.Refine -> String -> I.Record -> O.BucketId
-getBucketId r rname f = fromInteger pkey
+getBucketId :: (?r::C.Refine) => String -> I.Record -> O.BucketId
+getBucketId rname f = fromInteger pkey
     where   
-    rel = C.getRelation r rname
+    rel = C.getRelation ?r rname
     Just [key] = C.relPrimaryKey rel
     I.EBit _ pkey = recordField f key
 
@@ -165,11 +165,11 @@ recordField rec fexpr = rec M.! fname
     mkname (C.E (C.EField _ e fl)) = mkname e I..+ fl
     mkname e                       = error $ "IR2OF.mkname " ++ show e
 
-mkStaticBB :: I.Pipeline -> I.NodeId -> Int -> I.BB -> [O.Action]
-mkStaticBB pl nd i b = mkBB pl nd i (error "IR2OF.mkStaticBB requesting field value") b
+mkStaticBB :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> Int -> I.BB -> [O.Action]
+mkStaticBB pname pl nd i b = mkBB pname pl nd i (error "IR2OF.mkStaticBB requesting field value") b
 
-mkBB :: I.Pipeline -> I.NodeId -> Int -> I.Record -> I.BB -> [O.Action]
-mkBB pl nd i val (I.BB as n) = map (mkAction val) as ++ [mkNext pl nd i val n]
+mkBB :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> Int -> I.Record -> I.BB -> [O.Action]
+mkBB pname pl nd i val (I.BB as n) = map (mkAction val) as ++ mkNext pname pl nd i val n
 
 mkAction :: I.Record -> I.Action -> O.Action
 mkAction val (I.ASet e1 e2) = O.ActionSet (mkExpr val e1) (mkExpr val e2)
@@ -193,11 +193,11 @@ slice (O.EField f Nothing)       h l = O.EField f $ Just (h, l)
 slice (O.EField f (Just (_,l0))) h l = O.EField f $ Just (l0+h, l0+l)
 slice (O.EVal (O.Value _ v))     h l = O.EVal $ O.Value (h-l) $ bitSlice v h l
 
-mkLookupFlow :: I.Pipeline -> I.NodeId -> I.Record -> I.Pipeline -> I.BB -> [O.Flow]
-mkLookupFlow pl nd val lpl b = map (\m -> O.Flow 1 m as) matches
+mkLookupFlow :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> I.Record -> I.Pipeline -> I.BB -> [O.Flow]
+mkLookupFlow pname pl nd val lpl b = map (\m -> O.Flow 1 m as) matches
     where
     matches = mkPLMatch lpl val
-    as = mkBB pl nd 0 val b
+    as = mkBB pname pl nd 0 val b
     
 mkCond :: [(I.Expr, [O.Action])] -> [([O.Match], [O.Action])]
 mkCond []          = [([], [O.ActionDrop])]
@@ -282,13 +282,15 @@ mkMatch e1 e2 | const1 && const2 && v1 == v2 = [[]]
     slice2mask :: Maybe (Int, Int) -> Maybe O.Mask
     slice2mask msl = fmap (uncurry bitRange) msl
 
-mkNext :: I.Pipeline -> I.NodeId -> Int -> I.Record -> I.Next -> O.Action
-mkNext pl _  _ _ (I.Goto nd)        = mkGoto pl nd
-mkNext _  _  _ r (I.Send e)         = O.ActionOutput $ mkExpr r e
-mkNext _  _  _ _ I.Drop             = O.ActionDrop
-mkNext _  nd i _ (I.Controller _ _) = O.ActionController (toWords nd ++ toWords i)
-    where
-    toWords x = [fromIntegral $ bitSlice x 7 0, fromIntegral $ bitSlice x 15 8, fromIntegral $ bitSlice x 23 16, fromIntegral $ bitSlice x 31 24]
+mkNext :: (?r::C.Refine) => String -> I.Pipeline -> I.NodeId -> Int -> I.Record -> I.Next -> [O.Action]
+mkNext _ pl _  _ _ (I.Goto nd)        = [mkGoto pl nd]
+mkNext _ _  _  _ r (I.Send e)         = [O.ActionOutput $ mkExpr r e]
+mkNext _ _  _  _ _ I.Drop             = [O.ActionDrop]
+mkNext n _  nd i _ (I.Controller _ _) = [ O.ActionSet (O.EField (O.Field "metadata" 64) Nothing) 
+                                                      (O.EVal $ O.Value 64 $ ((toInteger portnum) `shiftL` 48) + ((toInteger nd) `shiftL` 16) + toInteger i)
+                                        , O.ActionController]
+    where portnum = fromJust $ findIndex ((== n) . name) $ C.refinePorts ?r
+    
 
 mkGoto :: I.Pipeline -> I.NodeId -> O.Action
 mkGoto pl nd = 

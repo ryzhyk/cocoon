@@ -197,7 +197,7 @@ connect ControllerDisconnected{..} = do
             tsem  <- MV.newEmptyMVar
             let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
             populateDB
-            backendStart ctlBackend
+            (backendStart ctlBackend) ctlRefine ctlIR (\_ _ _ -> return [])
             (do syncThr <- T.forkIO $ syncThread ?s
                 let s = ?s{ctlSyncThread = syncThr}
                 return (s, "Connected")
