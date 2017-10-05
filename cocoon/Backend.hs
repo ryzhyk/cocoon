@@ -20,7 +20,6 @@ module Backend where
 
 import qualified Data.Map as M
 import Control.Monad.Except
-import qualified Data.ByteString as B
 
 import Syntax
 import qualified IR.IR as IR
@@ -32,7 +31,7 @@ data StructReify = StructReify { reifyWidth :: M.Map String Int
                                , reifyCons  :: M.Map String Integer
                                }
 
-type PktCB = String -> [Expr] -> B.ByteString -> IO [(B.ByteString, Int)]
+type PktCB = String -> [Expr] -> Expr -> IO [(Expr, Int)]
 
 data Backend p = Backend { backendStructs      :: StructReify
                          , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()

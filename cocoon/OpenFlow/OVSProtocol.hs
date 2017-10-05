@@ -28,11 +28,14 @@ import Control.Concurrent
 import Data.List
 import Data.IORef
 import Data.Maybe
-import Data.Word
 import Data.Bits
+import Data.Binary.Get
+import qualified Data.ByteString      as B
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Graph.Inductive as G 
 
 import Network.Data.OF13.Message 
+import Network.Data.Ethernet
 import qualified Network.Data.OF13.Server as OFP
 
 import Util
@@ -40,52 +43,11 @@ import Name
 import Backend
 import Syntax
 import Port
+import OpenFlow.OVSPacket
+import OpenFlow.OVSConst
 import qualified OpenFlow.IR2OF    as OF
 import qualified IR.IR             as IR
 
-data OXKey = OInPort
-           | OInPhyPort
-           | OMetadata
-           | OEthDst
-           | OEthSrc
-           | OEthType
-           | OIPv4Dst
-           | OIPv4Src
-           | ONiciraRegister Int
-           | OVLANID
-           | OVLANPCP
-           | OIPDSCP
-           | OIPECN
-           | OIPProto
-           | OTCPSrc
-           | OTCPDst
-           | OUDPSrc
-           | OUDPDst
-           | OSCTPSrc
-           | OSCTPDst
-           | OICMPv4_Type
-           | OICMPv4_Code
-           | OARP_OP
-           | OARP_SPA
-           | OARP_TPA
-           | OARP_SHA
-           | OARP_THA
-           | OIPv6Src
-           | OIPv6Dst
-           | OIPv6_FLabel
-           | OICMPv6_Type
-           | OICMPv6_Code
-           | OIPv6_ND_Target
-           | OIPv6_ND_SLL
-           | OIPv6_ND_TLL
-           | OMPLS_Label
-           | OMPLS_TC
-           | OMPLS_BOS
-           | OPBB_ISID
-           | OTunnelID
-           | OIPv6_EXTHDR
-           | OOXMOther Word16 Word8
-           deriving (Eq, Ord)
 
 
 -- index OXMs for convenient lookup
@@ -204,14 +166,29 @@ doPacketIn r msg@PacketIn{..} = (do
                     _                    -> error $ "invalid Next action: " ++ show nxt
     -- evaluate arguments
     let as' = map (eval oxmmap) as
+    -- parse packet
+    (pkt, rest) <- parsePkt oxmmap payload
     -- call swCB
-    outpkts <- swCB f as' payload
+    outpkts <- swCB f as' pkt 
     -- send packets
-    mapM_ (\(b,p) -> OFP.sendMessage swSw [PacketOut xid Nothing inpnum [Output (fromIntegral p) Nothing] b]) outpkts 
+    mapM_ (\(pkt',p) -> do let (b, acts) = unparsePkt pkt'
+                               acts' = acts ++ [Output (fromIntegral p) Nothing]
+                               b' = B.append b rest
+                           OFP.sendMessage swSw [PacketOut xid Nothing inpnum acts' b']) outpkts 
     ) `catch` (\(e::SomeException) -> do 
                             putStrLn $ "error handling packet-in message: " ++ show e ++ "\nmessage content: " ++ show msg
                             return ())
 doPacketIn _ _ = return ()
+
+parsePkt :: M.Map OXKey OXM -> B.ByteString -> IO (Expr, B.ByteString)
+parsePkt oxmmap buf = do
+    (pkt, rest) <- case runGetOrFail getEthernetFrame (BL.fromStrict buf) of
+                        Left  (_,_,e) -> error $ "failed to parse packet: " ++ e
+                        Right (r,_,p) -> return (p, BL.toStrict r)
+    return (packet2Expr oxmmap pkt, rest)
+
+unparsePkt :: Expr -> (B.ByteString, [Action])
+unparsePkt = undefined
 
 eval :: M.Map OXKey OXM -> IR.Expr -> Expr
 eval oxms e = 

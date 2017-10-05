@@ -137,7 +137,7 @@ HPortTun(srchport, dstmac, lsw, dsthv != srchv, dsthport, dsttunip) :- Hyperviso
 procedure hypervisorPortIn(port: HypervisorPort): sink =
 doHypervisorPortIn(port.id, port.switch)
 
-#controller
+//#controller
 procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
     the (tun in HPortTun | tun.srchport == port and tun.dstmac == pkt.dst) {
         if (not tun.tun) {
@@ -147,14 +147,20 @@ procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
         } else {
             pkt.vxlan.tun_dst = tun.dsttunip;
             pkt.vxlan.tun_id  = tun.lswitch;
-            the (tp in HypervisorTunPort | tp.switch == hswitch) {
-                send PHypervisorTunPort[tp].out
-            }
+            sendToTunnel(hswitch)
         }
     } default {
         drop
     }
 }
+
+#controller
+procedure sendToTunnel(hswitch : hyperv_id_t): sink = {
+    the (tp in HypervisorTunPort | tp.switch == hswitch) {
+        send PHypervisorTunPort[tp].out
+    }
+}
+
 
 
 //role HypervisorPortIn[port in HypervisorPort] = {
@@ -192,8 +198,10 @@ procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
 
 //role HypervisorPortOut[port in HypervisorPort] = drop
 
+procedure hypervisorTunPortIn(port: HypervisorTunPort): sink =
+doHypervisorTunPortIn()
 
-procedure hypervisorTunPortIn(port: HypervisorTunPort): sink = {
+procedure doHypervisorTunPortIn(): sink = {
     the (lp in LogicalPort | lp.lswitch == pkt.vxlan.tun_id and lp.mac == pkt.dst) {
         the (hp in HypervisorPort | hp.id == lp.hport) {
             send PHypervisorPort[hp].out

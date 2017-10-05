@@ -17,6 +17,7 @@ limitations under the License.
 module OpenFlow.OVSConst where
 
 import qualified Data.Map as M
+import Data.Word
 
 import IR.Registers
 import Backend
@@ -311,3 +312,48 @@ matchAttributes = M.fromList
                   , ("icmp_type"  , Attributes False Dec)
                   , ("icmp_code"  , Attributes False Dec)
                   ]
+
+
+data OXKey = OInPort
+           | OInPhyPort
+           | OMetadata
+           | OEthDst
+           | OEthSrc
+           | OEthType
+           | OIPv4Dst
+           | OIPv4Src
+           | ONiciraRegister Int
+           | OVLANID
+           | OVLANPCP
+           | OIPDSCP
+           | OIPECN
+           | OIPProto
+           | OTCPSrc
+           | OTCPDst
+           | OUDPSrc
+           | OUDPDst
+           | OSCTPSrc
+           | OSCTPDst
+           | OICMPv4_Type
+           | OICMPv4_Code
+           | OARP_OP
+           | OARP_SPA
+           | OARP_TPA
+           | OARP_SHA
+           | OARP_THA
+           | OIPv6Src
+           | OIPv6Dst
+           | OIPv6_FLabel
+           | OICMPv6_Type
+           | OICMPv6_Code
+           | OIPv6_ND_Target
+           | OIPv6_ND_SLL
+           | OIPv6_ND_TLL
+           | OMPLS_Label
+           | OMPLS_TC
+           | OMPLS_BOS
+           | OPBB_ISID
+           | OTunnelID
+           | OIPv6_EXTHDR
+           | OOXMOther Word16 Word8
+           deriving (Eq, Ord)

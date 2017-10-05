@@ -48,7 +48,12 @@ executable cocoon
                        vector >= 0.12, 
                        attoparsec >= 0.13,
                        graphviz >= 2999.19,
-                       openflow >= 0.3.1
+                       binary >= 0.8,
+                       bimap >= 0.2.4,
+                       deepseq >= 1.4,
+                       deepseq-generics >= 0.1.1.2,
+                       hashable >= 1.2.1.0,
+                       network >= 2.6.0.2
   -- hs-source-dirs:      
   default-language:    Haskell2010
   ghc-options:         -Wall -fno-warn-missing-signatures
