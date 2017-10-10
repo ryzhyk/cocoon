@@ -16,7 +16,6 @@ module Network.Data.Ethernet.EthernetFrame (
   , UnknownFrame(..)
   , MagellanP4Packet(..)
 
-  , lldpFrame
   , typeCode
   , ethTypeVLAN
   , ethTypeIP
@@ -41,14 +40,14 @@ module Network.Data.Ethernet.EthernetFrame (
     
   ) where
 
-import Data.Binary.Get (Get, getWord8, getWord16be)
+import Data.Binary.Get (Get, getWord16be)
 import Data.Binary.Put (Put, putWord8, putWord16be, putByteString)
 import Data.Bits (shiftL, shiftR, testBit, setBit, (.&.))
 import qualified Data.ByteString as S
 import Data.Word (Word8, Word16)
 import Network.Data.Ethernet.AddressResolutionProtocol
-import Network.Data.Ethernet.EthernetAddress (EthernetAddress, getEthernetAddress, putEthernetAddress, broadcastAddress, ethernetAddress64)
-import Network.Data.Ethernet.LLDP
+import Network.Data.Ethernet.EthernetAddress (EthernetAddress, getEthernetAddress, putEthernetAddress, broadcastAddress)
+--import Network.Data.Ethernet.LLDP
 import Network.Data.IPv4.IPAddress
 import Network.Data.IPv4.IPPacket
 import Text.Printf (printf)
@@ -76,8 +75,8 @@ type VLANPriority     = Word8
 
 data EthernetBody   = IPInEthernet !IPPacket
                     | ARPInEthernet !ARPPacket
-                    | LLDPInEthernet !LLDPDU
-                    | MagellanP4Packet MagellanP4Packet
+                    -- | LLDPInEthernet !LLDPDU
+                    -- | MagellanP4Packet MagellanP4Packet
                     | OtherEthernetBody UnknownFrame
                    deriving (Show,Eq,Generic,NFData)
 
@@ -112,6 +111,7 @@ instance IsEthernetBody MagellanP4Packet where
       Right mcgroup -> putWord8 0 >> putWord16be mcgroup
     putEthFrame frame
 
+{-
 getMagellanP4Packet :: Get MagellanP4Packet
 getMagellanP4Packet = do
   typ <- getWord8
@@ -127,21 +127,24 @@ getMagellanP4Packet = do
                         else Right mc
               in return $ MagellanP4PacketOut out frame
          else error $ "unexpected MagellanP4 packet type: " ++ show typ
+-}
 
 unknownFrameParser :: EthernetHeader -> EthernetTypeCode -> Get UnknownFrame
 unknownFrameParser _ tcode = return (UnknownFrame tcode S.empty)
 {-# INLINE unknownFrameParser #-}
 
 -- Internal
-ethernetFrame :: EthernetHeader -> EthernetBody -> EthernetFrame
-ethernetFrame hdr body = (hdr, body)
+--ethernetFrame :: EthernetHeader -> EthernetBody -> EthernetFrame
+--ethernetFrame hdr body = (hdr, body)
 
 -- | Make an LLDP frame
+{-
 lldpFrame :: EthernetAddress -> LLDPDU -> EthernetFrame
 lldpFrame src lldp = ethernetFrame hdr (LLDPInEthernet lldp)
   where
     multicastAddr = ethernetAddress64 0x0180c2000000
     hdr = EthernetHeader { etherDst = multicastAddr, etherSrc = src }
+-}
 
 arpQuery :: EthernetAddress   -- ^ source hardware address
             -> IPAddress      -- ^ source IP address
@@ -181,10 +184,10 @@ getEthernetFrame = do
                                case mArpPacket of
                                  Just arpPacket -> return (hdr, ARPInEthernet arpPacket)
                                  Nothing        -> error "failed parsing ARP packet"
-      | tc == ethTypeLLDP -> do lldp <- getLLDPDU
-                                return (hdr, LLDPInEthernet lldp)
-      | tc == ethTypeMagellanP4 -> do p <- getMagellanP4Packet
-                                      return (hdr, MagellanP4Packet p)
+      -- | tc == ethTypeLLDP -> do lldp <- getLLDPDU
+      --                           return (hdr, LLDPInEthernet lldp)
+      -- | tc == ethTypeMagellanP4 -> do p <- getMagellanP4Packet
+      --                                 return (hdr, MagellanP4Packet p)
       | otherwise -> do a <- getOther hdr tc
                         return (hdr, OtherEthernetBody a)
 {-# INLINE getEthernetFrame #-}
@@ -227,10 +230,10 @@ putEthHeader (Ethernet8021Q dstAddr srcAddr pcp cfi vid) tcode =
  
 putEthFrame :: EthernetFrame -> Put
 putEthFrame (hdr, body) = case body of
-  IPInEthernet ip      -> putEthHeader hdr ethTypeIP >> putIP ip
+  IPInEthernet ip      -> putEthHeader hdr ethTypeIP >> putIPPacket ip
   ARPInEthernet arpPacket -> putEthHeader hdr ethTypeARP >> putARPPacket arpPacket
-  LLDPInEthernet lldp -> putEthHeader hdr ethTypeLLDP >> putLLDPDU lldp
-  MagellanP4Packet a -> putEthHeader hdr (etherTypeCode a) >> putEtherBody a  
+  -- LLDPInEthernet lldp -> putEthHeader hdr ethTypeLLDP >> putLLDPDU lldp
+  -- MagellanP4Packet a -> putEthHeader hdr (etherTypeCode a) >> putEtherBody a  
   OtherEthernetBody a -> putEthHeader hdr (etherTypeCode a) >> putEtherBody a
 
 ethTypeIP, ethTypeIPv6, ethType8021X, ethTypeARP, ethTypeLLDP, ethTypeVLAN, typeEth2Cutoff, ethTypeMagellanP4 :: EthernetTypeCode
@@ -247,6 +250,6 @@ ethTypeMagellanP4 = 0x9999
 typeCode :: EthernetBody -> EthernetTypeCode
 typeCode (IPInEthernet _)      = ethTypeIP
 typeCode (ARPInEthernet _)     = ethTypeARP
-typeCode (LLDPInEthernet _)    = ethTypeLLDP
-typeCode (MagellanP4Packet _ ) = ethTypeMagellanP4
+--typeCode (LLDPInEthernet _)    = ethTypeLLDP
+--typeCode (MagellanP4Packet _ ) = ethTypeMagellanP4
 typeCode (OtherEthernetBody a) = etherTypeCode a

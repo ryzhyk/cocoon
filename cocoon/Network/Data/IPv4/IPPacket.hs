@@ -46,15 +46,17 @@ module Network.Data.IPv4.IPPacket (
   , ICMPHeader
   , ICMPType
   , ICMPCode
-  , getICMP
+  , ICMPPacket
+  , getICMPPacket
   , TCPHeader
   , TCPPortNumber
   , getTCPHeader
-  , UDPHeader
+  , UDPPacket
   , UDPPortNumber
-  , getUDPHeader
-  , putIP
-  , csum16
+  , getUDPPacket
+  , putIPPacket
+  , putIPHeader
+  , putICMPPacket
   ) where
 
 import Network.Data.IPv4.IPAddress
@@ -65,10 +67,10 @@ import Data.Word
 import Data.Binary.Get
 import Data.Binary.Put
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as L
 import Control.Exception (assert)
 import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
+import Data.Tuple.Select
 
 -- | An IP packet consists of a header and a body.
 type IPPacket = (IPHeader, IPBody)
@@ -97,9 +99,9 @@ type TransportPort   = Word16
 
 ipProtocol :: IPBody -> IPProtocol
 --ipProtocol (TCPInIP _ _) = ipTypeTcp
-ipProtocol (UDPInIP _ _) = ipTypeUdp
-ipProtocol (ICMPInIP _ _ _) = ipTypeIcmp
-ipProtocol (UninterpretedIPBody proto) = proto
+ipProtocol UDPInIP{}                     = ipTypeUdp
+ipProtocol ICMPInIP{}                    = ipTypeIcmp
+ipProtocol (UninterpretedIPBody proto _) = proto
 {-# INLINE ipProtocol #-}
 
 ipBodyLength :: IPHeader -> Int
@@ -116,9 +118,9 @@ ipTypeIcmp = 1
 -- | The body of an IP packet can be either a TCP, UDP, ICMP or other packet. 
 -- Packets other than TCP, UDP, ICMP are represented as unparsed @ByteString@ values.
 data IPBody   = -- TCPInIP !TCPPortNumber !TCPPortNumber
-                UDPInIP !UDPPortNumber !UDPPortNumber 
-              | ICMPInIP !ICMPHeader B.ByteString Word16
-              | UninterpretedIPBody !IPProtocol
+                UDPInIP !UDPPacket
+              | ICMPInIP !ICMPPacket
+              | UninterpretedIPBody !IPProtocol B.ByteString
               deriving (Show,Eq,Generic,NFData)
 
 
@@ -164,18 +166,18 @@ getIPBody :: IPHeader -> Get IPPacket
 getIPBody hdr@(IPHeader {..})
   -- | nwproto == ipTypeTcp  = do (s,d) <- getTCPHeader (ipBodyLength hdr)
   --                              return (hdr, TCPInIP s d)
-  | nwproto == ipTypeUdp  = do (s,d) <- getUDPHeader
-                               skip $ ipBodyLength hdr - 4
-                               let bdy = UDPInIP s d
-                               return (hdr, bdy)
-  | nwproto == ipTypeIcmp = do (icmpHdr, bs, check) <- getICMP (ipBodyLength hdr)
-                               return (hdr, ICMPInIP icmpHdr bs check)
-  | otherwise             = return (hdr, UninterpretedIPBody nwproto)
+  | nwproto == ipTypeUdp  = do udp <- getUDPPacket $ ipBodyLength hdr
+                               return (hdr, UDPInIP udp)
+  | nwproto == ipTypeIcmp = do icmp <- getICMPPacket $ ipBodyLength hdr
+                               return (hdr, ICMPInIP icmp)
+  | otherwise             = do pl <- getByteString $ ipBodyLength hdr
+                               return (hdr, UninterpretedIPBody nwproto pl)
 {-# INLINE getIPBody #-}
 
 -- ipChecksum_ :: IPHeader -> Word8 -> Word16
 -- ipChecksum_ hdr nwproto = csum16 $ runPut $ putIPHeader hdr nwproto 0
 
+{-
 csum16 :: L.ByteString -> Word16
 csum16 bs = complement $ x + y
   where
@@ -186,9 +188,10 @@ csum16 bs = complement $ x + y
     z = foldl (+) 0 ws
     ws :: [Word32]
     ws = runGet (sequence $ replicate (fromIntegral (L.length bs) `div` 4) getWord32be) bs
+-}
 
-putIP :: IPPacket -> Put
-putIP (hdr, body) = do
+putIPPacket :: IPPacket -> Put
+putIPPacket (hdr, body) = do
   putIPHeader hdr $ ipChecksum hdr --(ipChecksum hdr nwproto)
   putIPBody (ipBodyLength hdr) body
 
@@ -213,30 +216,31 @@ vERSION_4 :: Word8
 vERSION_4 = 4
 
 putIPBody :: Int -> IPBody -> Put
-putIPBody _ (ICMPInIP (icmpType, icmpCode) bs check) = do
-  putWord8 icmpType
-  putWord8 icmpCode
-  putWord16be check -- $ csum16 $ L.fromStrict bs to L.pack [icmpType, icmpCode]
-  -- putWord16be $ csum16 $ L.append (L.pack [icmpType, icmpCode]) (L.fromStrict bs)
-
---    L.fromStrict bs to L.pack [icmpType, icmpCode]
-  putByteString bs
-putIPBody _ body = error $ "putIPBody: not yet handling IP body: " ++ show body
+putIPBody _ (ICMPInIP icmp)           = putICMPPacket icmp $ sel3 $ fst icmp
+putIPBody _ (UDPInIP p)               = putUDPPacket p
+putIPBody _ (UninterpretedIPBody _ b) = putByteString b
 
 -- Transport Header
-type ICMPHeader = (ICMPType, ICMPCode)
+type ICMPHeader = (ICMPType, ICMPCode, Word16)
+type ICMPPacket = (ICMPHeader, B.ByteString)
 type ICMPType = Word8
 type ICMPCode = Word8
 
-getICMP :: Int -> Get (ICMPHeader, B.ByteString, Word16)
-getICMP len = do 
+getICMPPacket :: Int -> Get ICMPPacket
+getICMPPacket len = do
   icmp_type <- getWord8
   icmp_code <- getWord8
   check <- getWord16be
   bs <- getByteString $ len - 4
-  return ((icmp_type, icmp_code), bs, check)
-{-# INLINE getICMP #-}  
+  return ((icmp_type, icmp_code, check), bs)
+{-# INLINE getICMPPacket #-}
 
+putICMPPacket :: ICMPPacket -> Word16 -> Put
+putICMPPacket ((t, c, _), bs) check = do
+    putWord8 t
+    putWord8 c
+    putWord16be check 
+    putByteString bs
 
 type TCPHeader  = (TCPPortNumber, TCPPortNumber)
 type TCPPortNumber = Word16

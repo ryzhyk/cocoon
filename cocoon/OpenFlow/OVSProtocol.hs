@@ -30,6 +30,7 @@ import Data.IORef
 import Data.Maybe
 import Data.Bits
 import Data.Binary.Get
+import Data.Binary.Put
 import qualified Data.ByteString      as B
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Graph.Inductive as G 
@@ -171,10 +172,9 @@ doPacketIn r msg@PacketIn{..} = (do
     -- call swCB
     outpkts <- swCB f as' pkt 
     -- send packets
-    mapM_ (\(pkt',p) -> do let (b, acts) = unparsePkt pkt'
+    mapM_ (\(pkt',p) -> do let (b, acts) = unparsePkt pkt' rest
                                acts' = acts ++ [Output (fromIntegral p) Nothing]
-                               b' = B.append b rest
-                           OFP.sendMessage swSw [PacketOut xid Nothing inpnum acts' b']) outpkts 
+                           OFP.sendMessage swSw [PacketOut xid Nothing inpnum acts' b]) outpkts 
     ) `catch` (\(e::SomeException) -> do 
                             putStrLn $ "error handling packet-in message: " ++ show e ++ "\nmessage content: " ++ show msg
                             return ())
@@ -182,13 +182,15 @@ doPacketIn _ _ = return ()
 
 parsePkt :: M.Map OXKey OXM -> B.ByteString -> IO (Expr, B.ByteString)
 parsePkt oxmmap buf = do
-    (pkt, rest) <- case runGetOrFail getEthernetFrame (BL.fromStrict buf) of
-                        Left  (_,_,e) -> error $ "failed to parse packet: " ++ e
-                        Right (r,_,p) -> return (p, BL.toStrict r)
-    return (packet2Expr oxmmap pkt, rest)
+    pkt <- case runGetOrFail getEthernetFrame (BL.fromStrict buf) of
+                Left  (_,_,e) -> error $ "failed to parse packet: " ++ e
+                Right (_,_,p) -> return p
+    return $ packet2Expr oxmmap pkt
 
-unparsePkt :: Expr -> (B.ByteString, [Action])
-unparsePkt = undefined
+unparsePkt :: Expr -> B.ByteString -> (B.ByteString, [Action])
+unparsePkt e pl = (BL.toStrict $ runPut $ putEthFrame pkt, if tunid == 0 then [] else [SetField $ OXM (TunnelID tunid 0xffffffffffffffff) True])
+    where 
+    (pkt, tunid) = expr2Packet e pl
 
 eval :: M.Map OXKey OXM -> IR.Expr -> Expr
 eval oxms e = 

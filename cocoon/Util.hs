@@ -23,7 +23,10 @@ import Control.Monad.Except
 import Data.List
 import Data.Maybe
 import Data.Bits
+import Data.Word
+import Data.Binary.Get
 import qualified Data.Map as M
+import qualified Data.ByteString.Lazy as BL
 
 import Pos
 import Name 
@@ -140,3 +143,17 @@ allComb [] = [[]]
 --allComb ([]:xs) = allComb xs
 allComb (x:xs) = concatMap (h (allComb xs)) x
     where h xs' x' = map (x' :) xs'
+
+checksum16 :: [Word16] -> Word16
+checksum16 ws = let total = sum (map fromIntegral ws) :: Word32
+                    total' = (total .&. 0xffff) + (total `shiftR` 16)
+                    total'' = (total' .&. 0xffff) + (total' `shiftR` 16)
+                in complement $ fromIntegral total''
+
+
+checksum16BS :: BL.ByteString -> Word16
+checksum16BS bs | l `mod` 2 == 0 = checksum16 $ runGet (sequence $ replicate (l `div` 2) getWord16be) bs
+                | otherwise      = checksum16 $ runGet (sequence $ replicate ((l `div` 2) + 1)  getWord16be) $ BL.snoc bs 0
+    where l = fromIntegral $ BL.length bs
+
+
