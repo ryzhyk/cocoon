@@ -42,6 +42,7 @@ import qualified Network.Data.OF13.Server as OFP
 import Util
 import Name
 import Backend
+import Eval
 import Syntax
 import Port
 import OpenFlow.OVSPacket
@@ -68,6 +69,7 @@ mapOXMs oxms = foldl' addoxm M.empty oxms
                         IPv4Dst{}              -> OIPv4Dst
                         IPv4Src{}              -> OIPv4Src
                         NiciraRegister i _     -> ONiciraRegister i
+                        PacketRegister i _     -> OPacketRegister i
                         OXM VLANID{}         _ -> OVLANID        
                         OXM VLANPCP{}        _ -> OVLANPCP       
                         OXM IPDSCP{}         _ -> OIPDSCP        
@@ -98,6 +100,7 @@ mapOXMs oxms = foldl' addoxm M.empty oxms
                         OXM MPLS_TC{}        _ -> OMPLS_TC       
                         OXM MPLS_BOS{}       _ -> OMPLS_BOS      
                         OXM PBB_ISID{}       _ -> OPBB_ISID      
+                        OXM TunnelDst{}      _ -> OTunnelDst
                         OXM TunnelID{}       _ -> OTunnelID      
                         OXM IPv6_EXTHDR{}    _ -> OIPv6_EXTHDR) oxm m
 
@@ -114,11 +117,17 @@ data SwitchCtx = SwitchCtx { swSw     :: OFP.Switch
                            , swCB     :: PktCB
                            }
 
+sendMessage :: OFP.Switch -> [Message] -> IO ()
+sendMessage sw ms = do 
+    mapM_ (\m -> putStrLn $ "->OF message: " ++ show m) ms
+    OFP.sendMessage sw ms
+    putStrLn "sendMessage completed"
+
 factory :: Refine -> OF.IRSwitches -> PktCB -> OFP.Switch -> IO (Maybe Message -> IO ())
 factory r ir cb sw = do
     putStrLn "OF Connecting"
-    OFP.sendMessage sw [ Hello { xid = 0, len = 8 }
-                       , FeatureRequest { xid = 1 }]
+    sendMessage sw [ Hello { xid = 0, len = 8 }
+                   , FeatureRequest { xid = 1 }]
     ref <- newIORef $ SwitchCtx sw "" 0 r ir cb
     return (messageHandler ref)
 
@@ -126,12 +135,12 @@ messageHandler :: IORef SwitchCtx -> Maybe Message -> IO ()
 messageHandler _ Nothing = putStrLn "OF Disconnecting"
 messageHandler r (Just msg) = do
     c@SwitchCtx{..} <- readIORef r
-    putStrLn $ "OF message from " ++ swName ++ "(" ++ show swId ++ "): " ++ show msg
+    putStrLn $ "<-OF message from " ++ swName ++ "(" ++ show swId ++ "): " ++ show msg
     case msg of 
-         EchoRequest{..}  -> OFP.sendMessage swSw [EchoReply xid body]
+         EchoRequest{..}  -> sendMessage swSw [EchoReply xid body]
          FeatureReply{..} -> writeIORef r $ c {swId = sid}
          PacketIn{..}     -> doPacketIn r msg 
-         _                    -> return ()
+         _                -> return ()
 
 doPacketIn :: IORef SwitchCtx -> Message -> IO ()
 doPacketIn r msg@PacketIn{..} = (do
@@ -167,14 +176,20 @@ doPacketIn r msg@PacketIn{..} = (do
                     _                    -> error $ "invalid Next action: " ++ show nxt
     -- evaluate arguments
     let as' = map (eval oxmmap) as
+    putStrLn $ "action: " ++ f ++ "(" ++ (intercalate ", " $ map show as') ++ ")"
     -- parse packet
     (pkt, rest) <- parsePkt oxmmap payload
+    putStrLn $ "packet: " ++ show pkt
+    putStrLn $ "payload: " ++ show rest
     -- call swCB
     outpkts <- swCB f as' pkt 
     -- send packets
-    mapM_ (\(pkt',p) -> do let (b, acts) = unparsePkt pkt' rest
-                               acts' = acts ++ [Output (fromIntegral p) Nothing]
-                           OFP.sendMessage swSw [PacketOut xid Nothing inpnum acts' b]) outpkts 
+    mapM_ (\(pkt', E (ELocation _ _ key _)) -> do 
+                putStrLn $ "packet-out: " ++ show pkt'
+                let E (EBit _ _ pnum) = evalConstExpr swRefine $ eField key "portnum"
+                    (b, acts) = unparsePkt pkt' rest
+                    acts' = acts ++ [Output (fromInteger pnum) Nothing]
+                sendMessage swSw [PacketOut xid Nothing inpnum acts' b]) outpkts 
     ) `catch` (\(e::SomeException) -> do 
                             putStrLn $ "error handling packet-in message: " ++ show e ++ "\nmessage content: " ++ show msg
                             return ())
@@ -188,9 +203,13 @@ parsePkt oxmmap buf = do
     return $ packet2Expr oxmmap pkt
 
 unparsePkt :: Expr -> B.ByteString -> (B.ByteString, [Action])
-unparsePkt e pl = (BL.toStrict $ runPut $ putEthFrame pkt, if tunid == 0 then [] else [SetField $ OXM (TunnelID tunid 0xffffffffffffffff) True])
+unparsePkt e pl = ( BL.toStrict $ runPut $ putEthFrame pkt
+                  , if tunid == 0 
+                       then [] 
+                       else [ {-SetField $ OXM (TunnelDst tundst 0xffffffff) False
+                            , -}SetField $ OXM (TunnelID tunid 0xffffffffffffffff) False])
     where 
-    (pkt, tunid) = expr2Packet e pl
+    (pkt, tunid, tundst) = expr2Packet e pl
 
 eval :: M.Map OXKey OXM -> IR.Expr -> Expr
 eval oxms e = 
@@ -224,10 +243,17 @@ eval oxms e =
          IR.ESlice    x h l         -> eSlice (eval oxms x) h l
          IR.EBinOp    op x1 x2      -> eBinOp op (eval oxms x1) (eval oxms x2)
          IR.EUnOp     op x          -> eUnOp op $ eval oxms x
+         -- TODO: packet field -> return unevaluated
          _                          -> error $ "Not implemented: OVS.eval " ++ show e
     where
-    getreg i   = fromIntegral $ maybe 0 (\(NiciraRegister _ v) -> v) $ M.lookup (ONiciraRegister i) oxms
-    getxreg i  = (getreg (2*i+1) `shiftL` 32) + getreg (2*i)
+    getreg i   = case getofreg (i `div` 2) of
+                      Just v | testBit i 0 -> bitSlice v 31 0
+                             | otherwise   -> bitSlice v 63 32
+                      Nothing -> fromIntegral $ maybe 0 (\(NiciraRegister _ v) -> v) $ M.lookup (ONiciraRegister i) oxms
+    getofreg i = fmap (\(PacketRegister _ v) -> fromIntegral v) $ M.lookup (OPacketRegister i) oxms
+    getxreg i  = case getofreg i of
+                      Just v  -> v
+                      Nothing -> (getreg (2*i+1) `shiftL` 32) + getreg (2*i)
     getxxreg i = (getxreg (2*i+1) `shiftL` 64) + getxreg (2*i)
 
 ovsStop :: IO ()

@@ -63,27 +63,30 @@ import qualified IR.Compile2IR           as IR
 data Msg = MsgSync       -- database changed -- reconfigure the switches
          | MsgTerminate  -- disconnecting -- terminate
 
-data ControllerState p = ControllerDisconnected { ctlWorkDir      :: FilePath
-                                                , ctlBackend      :: Backend p
-                                                , ctlDBName       :: String
-                                                , ctlDFPath       :: FilePath
-                                                , ctlRefine       :: Refine
-                                                , ctlIR           :: p
+data ControllerState p = ControllerDisconnected { ctlWorkDir        :: FilePath
+                                                , ctlBackend        :: Backend p
+                                                , ctlDBName         :: String
+                                                , ctlDFPath         :: FilePath
+                                                , ctlRefine         :: Refine
+                                                , ctlIR             :: p
+                                                , ctlXactionLock    :: L.Lock
+                                                , ctlBackendRunning :: Bool
                                                 }
-                       | ControllerConnected    { ctlWorkDir      :: FilePath 
-                                                , ctlBackend      :: Backend p
-                                                , ctlDBName       :: String
-                                                , ctlDFPath       :: FilePath
-                                                , ctlRefine       :: Refine
-                                                , ctlIR           :: p
-                                                , ctlDL           :: DL.Session
-                                                , ctlConstraints  :: [(Relation, [DL.Relation])]
-                                                , ctlDB           :: PG.Connection
-                                                , ctlXaction      :: Bool
-                                                , ctlXactionLock  :: L.Lock
-                                                , ctlSyncSem      :: MV.MVar Msg
-                                                , ctlTermSem      :: MV.MVar ()
-                                                , ctlSyncThread   :: T.ThreadId
+                       | ControllerConnected    { ctlWorkDir        :: FilePath 
+                                                , ctlBackend        :: Backend p
+                                                , ctlDBName         :: String
+                                                , ctlDFPath         :: FilePath
+                                                , ctlRefine         :: Refine
+                                                , ctlIR             :: p
+                                                , ctlDL             :: DL.Session
+                                                , ctlConstraints    :: [(Relation, [DL.Relation])]
+                                                , ctlDB             :: PG.Connection
+                                                , ctlXaction        :: Bool
+                                                , ctlXactionLock    :: L.Lock
+                                                , ctlBackendRunning :: Bool
+                                                , ctlSyncSem        :: MV.MVar Msg
+                                                , ctlTermSem        :: MV.MVar ()
+                                                , ctlSyncThread     :: T.ThreadId
                                                 }
 
 type DaemonState p = (Maybe Handle, ControllerState p)
@@ -99,7 +102,8 @@ controllerStart workdir backend dbname dfpath logfile port r switches = do
                              , daemonPidFile        = InHome
                              , printOnDaemonStarted = True}
     lock <- L.new
-    ref <- newIORef (Nothing, ControllerDisconnected workdir backend dbname dfpath r switches)
+    xlock <- L.new
+    ref <- newIORef (Nothing, ControllerDisconnected workdir backend dbname dfpath r switches xlock False)
     ensureDaemonWithHandlerRunning "cocoon" dopts (controllerLoop lock ref logfile)
 
 controllerLoop :: L.Lock -> IORef (DaemonState p) -> FilePath -> Producer BS.ByteString IO () -> Consumer BS.ByteString IO () -> IO ()
@@ -114,59 +118,89 @@ controllerLoop lock ref logfile prod cons = do
                                    hSetBuffering stderr NoBuffering
                                    return h
                      Just h  -> return h
-        writeIORef ref (Just hlog, state)
+        when (not $ ctlBackendRunning state) $
+             backendStart (ctlBackend state) (ctlRefine state) (ctlIR state) (cb ref)
+        writeIORef ref (Just hlog, state{ctlBackendRunning = True})
         -- serializer and deserializer pipes below are necessary to avoid stalling the pipeline
         -- due to lazy reading
         runEffect (cons <-< serializer <-< commandHandler ref <-< deserializer <-< prod)
 
+-- start transaction
+cb :: IORef (DaemonState p) -> PktCB
+cb ref f as pkt = do
+    lock <- (ctlXactionLock . snd) <$> readIORef ref
+    L.acquire lock
+    -- read again, as it may have changed between after the previous and before
+    -- we acquired the lock
+    (_, s) <- readIORef ref
+    case s of
+         ControllerConnected{..} -> do
+             __start s
+             (do (Right pkts, _, _, _) <- evalExpr ctlRefine CtxRefine M.empty (Just pkt) ctlDL (eApply f as)
+                 _ <- _commit s
+                 return pkts
+              `catch` (\e -> do _rollback s
+                                throw (e::SomeException))) 
+         _ -> do L.release lock
+                 return []
+
+
 commandHandler :: IORef (DaemonState p) -> Pipe BS.ByteString BS.ByteString IO ()
 commandHandler ref = do
     cmdline <- await
-    (mh, state) <- lift $ readIORef ref
-    (state', response) <- lift $ (do
+    response <- lift $ (do
         cmd <- case parse cmdGrammar "" (BS.unpack cmdline) of
                     Left  e -> error $ show e
                     Right c -> return c
         case cmd of
-             Left c  -> execCommand c state
-             Right e -> execExpr e state)
-         `catch` (\e -> return (state, show (e::SomeException)))
+             Left c  -> execCommand c ref
+             Right e -> execExpr e ref)
+         `catch` (\e -> return $ show (e::SomeException))
     yield $ BS.pack response
-    lift $ writeIORef ref (mh, state')
 
 type Action p = ControllerState p -> IO (ControllerState p, String)
 
-execCommand :: [String] -> Action p
-execCommand ["connect"]          s       = connect s
-execCommand ("connect":_)        _       = error "connect does not take arguments" 
-execCommand ["disconnect"]       s       = disconnect s
-execCommand ("disconnect":_)     _       = error "disconnect does not take arguments"
-execCommand ["start"]            s       = start s
-execCommand ("start":_)          _       = error "start does not take arguments"
-execCommand ["rollback"]         s       = rollback s
-execCommand ("rollback":_)       _       = error "rollback does not take arguments"
-execCommand ["commit"]           s       = commit s
-execCommand ("commit":_)         _       = error "commit does not take arguments"
-execCommand _ ControllerDisconnected{}   = error "command not available in disconnected state"
-execCommand ("show":as)          s       = showcmd as s
-execCommand _                    _       = error "invalid command"
+execCommand :: [String] -> IORef (DaemonState p) -> IO String
+execCommand cmd ref = case cmd of
+                           ["connect"]      -> connect ref
+                           ["disconnect"]   -> disconnect ref
+                           _                -> do (mh, state) <- readIORef ref
+                                                  (state', resp) <- _execCommand cmd state
+                                                  writeIORef ref (mh, state')
+                                                  return resp
+                                                    
+_execCommand :: [String] -> Action p
+_execCommand ("connect":_)        _       = error "connect does not take arguments" 
+_execCommand ("disconnect":_)     _       = error "disconnect does not take arguments"
+_execCommand ["start"]            s       = start s
+_execCommand ("start":_)          _       = error "start does not take arguments"
+_execCommand ["rollback"]         s       = rollback s
+_execCommand ("rollback":_)       _       = error "rollback does not take arguments"
+_execCommand ["commit"]           s       = commit s
+_execCommand ("commit":_)         _       = error "commit does not take arguments"
+_execCommand _ ControllerDisconnected{}   = error "command not available in disconnected state"
+_execCommand ("show":as)          s       = showcmd as s
+_execCommand _                    _       = error "invalid command"
 
-execExpr :: Expr -> Action p
-execExpr e s@ControllerConnected{..} =
-    case exprValidate ctlRefine CtxCLI e of
-         Left er -> error er
-         Right _ -> if ctlXaction
-                       then do (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
-                               return (s, intercalate ",\n" $ map show val)
-                       else do _start s
-                               (val ,_) <- evalExpr ctlRefine CtxRefine M.empty ctlDL e
-                               (do _ <- _commitNotify s
-                                   return ()
-                                `catch` \ex -> do 
-                                    _rollback s
-                                    throw (ex::SomeException))
-                               return (s, intercalate ",\n" $ map show val)
-execExpr _ _ = error "execExpr called in disconnected state"
+execExpr :: Expr -> IORef (DaemonState p) -> IO String
+execExpr e ref = do 
+    (_, s) <- readIORef ref
+    case s of 
+        ControllerConnected{..} ->
+            case exprValidate ctlRefine CtxCLI e of
+                 Left er -> error er
+                 Right _ -> if ctlXaction
+                               then do (Left val, vals, _, _) <- evalExpr ctlRefine CtxRefine M.empty Nothing ctlDL e
+                                       return $ intercalate ",\n" $ map show $ vals ++ [val]
+                               else do _start s
+                                       (Left val, vals, _, _) <- evalExpr ctlRefine CtxRefine M.empty Nothing ctlDL e
+                                       (do _ <- _commitNotify s
+                                           return ()
+                                        `catch` \ex -> do 
+                                            _rollback s
+                                            throw (ex::SomeException))
+                                       return $ intercalate ",\n" $ map show $ vals ++ [val]
+        _ -> error "execExpr called in disconnected state"
                     
 
 showcmd :: [String] -> Action p
@@ -186,44 +220,52 @@ showcmd as s@ControllerConnected{..} = do
     (views, tables) = partition relIsView rels
 showcmd _ _ = error $ "Controller.showcmd called in disconnected state"
 
-connect :: Action p
-connect ControllerDisconnected{..} = do
-    let ?r = ctlRefine
-    db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
-    (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
-        (dl, constr) <- startDLSession ctlDFPath
-        (do xlock <- L.new
-            xsem  <- MV.newEmptyMVar
-            tsem  <- MV.newEmptyMVar
-            let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False xlock xsem tsem (error "Controller: unexpected access to ctlSyncThread")
-            populateDB
-            (backendStart ctlBackend) ctlRefine ctlIR (\_ _ _ -> return [])
-            (do syncThr <- T.forkIO $ syncThread ?s
-                let s = ?s{ctlSyncThread = syncThr}
-                return (s, "Connected")
-             `catch` \e -> do backendStop ctlBackend
-                              throw (e::SomeException))
-         `catch` \e -> do
-             closeDLSession dl
-             throw (e::SomeException))
-     `catch` \e -> do 
-         PG.close db
-         throw (e::SomeException))
-connect ControllerConnected{} = throw $ AssertionFailed "already connected"
+connect :: IORef (DaemonState p) -> IO String
+connect ref = do
+    (mh, s) <- readIORef ref
+    L.with (ctlXactionLock s) $ do
+        case s of 
+            ControllerDisconnected{..} -> do
+                let ?r = ctlRefine
+                db <- PG.connectPostgreSQL $ BS.pack $ "dbname=" ++ ctlDBName
+                (do --runEffect $ lift (return $ BS.pack "Connected to database") >~ cons
+                    (dl, constr) <- startDLSession ctlDFPath
+                    (do xsem  <- MV.newEmptyMVar
+                        tsem  <- MV.newEmptyMVar
+                        let ?s = ControllerConnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR dl constr db False ctlXactionLock ctlBackendRunning xsem tsem (error "Controller: unexpected access to ctlSyncThread")
+                        populateDB
+                        (do syncThr <- T.forkIO $ syncThread ?s
+                            let s' = ?s{ctlSyncThread = syncThr}
+                            writeIORef ref (mh, s')
+                            return "Connected"
+                         `catch` \e -> do backendStop ctlBackend
+                                          throw (e::SomeException))
+                     `catch` \e -> do
+                         closeDLSession dl
+                         throw (e::SomeException))
+                 `catch` \e -> do 
+                     PG.close db
+                     throw (e::SomeException))
+            _ -> throw $ AssertionFailed "already connected"
 
 -- This is the only way to transition to disconnected state.
 -- Performs correct cleanup
-disconnect :: Action p
-disconnect s@ControllerConnected{..} = do
-    (when ctlXaction $ _rollback s) `catch` \e -> error $ "Rollback failed: " ++ show (e :: SomeException)
-    --- send termination notification to sync thread; wait for it to terminate
-    _ <- MV.tryTakeMVar ctlSyncSem
-    MV.putMVar ctlSyncSem MsgTerminate
-    _ <- MV.takeMVar ctlTermSem
-    (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
-    PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
-    return $ (ControllerDisconnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR, "Disconnected")
-disconnect ControllerDisconnected{} = throw $ AssertionFailed "no active connection"
+disconnect :: IORef (DaemonState p) -> IO String
+disconnect ref = do
+    (mh, s) <- readIORef ref
+    case s of 
+        ControllerConnected{..} -> do
+            (when ctlXaction $ _rollback s) `catch` \e -> error $ "Rollback failed: " ++ show (e :: SomeException)
+            L.with ctlXactionLock $ do
+                --- send termination notification to sync thread; wait for it to terminate
+                _ <- MV.tryTakeMVar ctlSyncSem
+                MV.putMVar ctlSyncSem MsgTerminate
+                _ <- MV.takeMVar ctlTermSem
+                (closeDLSession ctlDL) `catch` \e -> error $ "failed to close Datalog session: " ++ show (e :: SomeException)
+                PG.close ctlDB `catch` \e -> error $ "DB disconnect error: " ++ show (e::SomeException)
+                writeIORef ref (mh, ControllerDisconnected ctlWorkDir ctlBackend ctlDBName ctlDFPath ctlRefine ctlIR ctlXactionLock ctlBackendRunning)
+                return "Disconnected"
+        _ -> throw $ AssertionFailed "no active connection"
 
 start :: Action p
 start s@ControllerConnected{..} | not ctlXaction = do
@@ -250,6 +292,12 @@ _start :: ControllerState p -> IO ()
 _start s = do 
     let ControllerConnected{..} = s
     L.acquire ctlXactionLock
+    DL.start ctlDL
+
+-- assumes we already hold transaction lock
+__start :: ControllerState p -> IO ()
+__start s = do 
+    let ControllerConnected{..} = s
     DL.start ctlDL
 
 _commit :: ControllerState p -> IO ([DL.Fact], [DL.Fact])

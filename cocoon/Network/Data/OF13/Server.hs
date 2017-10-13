@@ -97,4 +97,4 @@ sendMessage :: Binary a => Switch -> [a] -> IO ()
 sendMessage (Switch s) = mapM_ (sendMessage' s)
 
 sendMessage' :: Binary a => Socket -> a -> IO ()
-sendMessage' sock = mapM_ (sendAll sock) . L.toChunks . encode
+sendMessage' sock = sendAll sock . L.toStrict . encode

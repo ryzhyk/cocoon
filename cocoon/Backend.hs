@@ -31,7 +31,7 @@ data StructReify = StructReify { reifyWidth :: M.Map String Int
                                , reifyCons  :: M.Map String Integer
                                }
 
-type PktCB = String -> [Expr] -> Expr -> IO [(Expr, Int)]
+type PktCB = String -> [Expr] -> Expr -> IO [(Expr, Expr)]
 
 data Backend p = Backend { backendStructs      :: StructReify
                          , backendValidate     :: forall me . (MonadError String me) => Refine -> me ()

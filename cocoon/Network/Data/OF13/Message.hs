@@ -63,6 +63,7 @@ module Network.Data.OF13.Message (
 import Network.Data.Ethernet hiding
   (getEthernetAddress, putEthernetAddress)
 import Network.Data.IPv4.IPAddress hiding (getIPAddress, putIPAddress)
+import Debug.Trace
 
 import Control.Exception hiding (mask)
 import Control.Monad
@@ -466,7 +467,8 @@ data OXM = OXMOther { oxmClass   :: Word16
          | EthType { oxmEthType :: EthernetTypeCode }
          | IPv4Dst { oxmIPDst :: IPAddressPrefix }
          | IPv4Src { oxmIPSrc :: IPAddressPrefix }
-         | NiciraRegister { oxmRegisterIndex :: Int, oxmRegisterValue :: Word32 }
+         | NiciraRegister { oxmRegisterIndex :: Int, oxmRegisterValue32 :: Word32 }
+         | PacketRegister { oxmRegisterIndex :: Int, oxmRegisterValue64 :: Word64 }
          | OXM { oxmOFField :: OXMOFField
                , oxmHasMask :: Bool
                }
@@ -482,6 +484,7 @@ oxmHasMask' (EthType {}) = False
 oxmHasMask' (IPv4Dst {oxmIPDst}) = not $ prefixIsExact oxmIPDst
 oxmHasMask' (IPv4Src {oxmIPSrc}) = not $ prefixIsExact oxmIPSrc
 oxmHasMask' (NiciraRegister {}) = False
+oxmHasMask' (PacketRegister {}) = False
 oxmHasMask' (OXM {oxmHasMask}) = oxmHasMask
 oxmHasMask' (OXMOther {oxmHasMask}) = oxmHasMask
 
@@ -515,6 +518,7 @@ data OXMOFField = VLANID VLANMatch
                 | MPLS_TC Word8
                 | MPLS_BOS Word8
                 | PBB_ISID Word32 Word32
+                | TunnelDst Word32 Word32
                 | TunnelID Word64 Word64
                 | IPv6_EXTHDR Word16
                 deriving (Eq,Ord,Show,Generic,NFData)
@@ -716,8 +720,9 @@ switchCapabilityFields = [ (0, FlowStats)
                          ]
   
 instance Binary Message where
-  get = do hdr <- getHeader
-           getBody hdr
+  get = do hdr <- trace "reading message" $ getHeader
+           m <- trace "read header" $ getBody hdr
+           trace "read body" $ return m
 
   put (Hello { xid }) = 
     putHeader hello_type_code len_header xid
@@ -1261,7 +1266,8 @@ getBody hdr@(_, typ, len, xid)
                             }
 
   | typ == packet_in_type_code = 
-        do bufferID' <- getWord32be
+        do trace "packet-in" $ return () 
+           bufferID' <- getWord32be
            let bufferID = if bufferID' == -1 
                           then Nothing 
                           else Just bufferID'
@@ -1269,8 +1275,8 @@ getBody hdr@(_, typ, len, xid)
            reason   <- getWord8
            tableID <- getWord8
            cookie <- getWord64be
-           match <- getMatch
-           skip 2
+           match <- trace "before match" $ getMatch
+           trace "after match" $  skip 2
            readSoFar <- bytesRead
            rest <- getByteString $ fromIntegral $ fromIntegral len - readSoFar
            return $ PacketIn { xid = xid
@@ -1626,8 +1632,8 @@ putOXM oxmof = do
       IPProto a -> putWord8 a
       ARP_OP op -> putWord16be op
       ARP_TPA a _ -> putIPAddress a
-
-      
+      TunnelDst d _ -> putWord32be d
+      TunnelID i _ -> putWord64be i
 
 putIPAddress :: IPAddress -> Put
 putIPAddress (IPAddress a) = putWord32be a
@@ -1649,7 +1655,12 @@ fieldCode (OXM { oxmOFField = VLANID _})     = 6
 fieldCode (OXM { oxmOFField = VLANPCP _})    = 7
 fieldCode (OXM { oxmOFField = IPDSCP _})     = 8
 fieldCode (OXM { oxmOFField = ARP_OP _})     = 21
+fieldCode (OXM { oxmOFField = ARP_SPA _ _})  = 22
 fieldCode (OXM { oxmOFField = ARP_TPA _ _})  = 23
+fieldCode (OXM { oxmOFField = ARP_SHA _ _})  = 24
+fieldCode (OXM { oxmOFField = ARP_THA _ _})  = 25
+fieldCode (OXM { oxmOFField = TunnelDst _ _})  = 32
+fieldCode (OXM { oxmOFField = TunnelID _ _})  = 38
 fieldCode (IPv4Src {})  = 11
 fieldCode (IPv4Dst {})  = 12
 fieldCode oxm = error $ "fieldCode: not yet implemented for " ++ show oxm
@@ -1718,6 +1729,8 @@ oxmLen oxm =
     OXM (MPLS_BOS _) False -> 1
     OXM (PBB_ISID _ _ ) False -> 3
     OXM (PBB_ISID _ _ ) True  -> 3 * 2
+    OXM (TunnelDst _ _) False -> 4
+    OXM (TunnelDst _ _) True -> 4 * 2
     OXM (TunnelID _ _) False -> 8
     OXM (TunnelID _ _) True -> 8 * 2
     OXM (IPv6_EXTHDR _) False -> 2
@@ -1731,18 +1744,18 @@ tlv_header_len = 4
 getMatch :: Get Match
 getMatch = do 
   matchType <- getWord16be
-  matchLen  <- getWord16be
+  matchLen  <- trace ("matchType=" ++ show matchType) getWord16be
   assert (matchType /= 0) $ do
-    oxms <- getOXMs $ fromIntegral matchLen - 4
+    oxms <- trace ("matchLen=" ++ show matchLen) $ getOXMs $ fromIntegral matchLen - 4
     let remainder = (- (fromIntegral matchLen :: Int)) `mod` 8
-    skip remainder
+    trace ("oxms read:" ++ show oxms) $ skip remainder
     return $ MatchOXM { oxms = oxms }
 
 getOXMs :: Int -> Get [OXM]
 getOXMs len 
-  | len == 0 = return []
-  | len > 0  = do (oxmlen,oxm) <- getOXM
-                  oxms <- getOXMs (len - oxmlen)
+  | len == 0 = trace "len == 0" $ return []
+  | len > 0  = do (oxmlen,oxm) <- trace ("len = " ++ show len) $ getOXM
+                  oxms <- trace ("oxm:" ++ show oxm ++ ", oxmlen: " ++ show oxmlen) $ getOXMs (len - oxmlen)
                   return $ oxm:oxms
   | otherwise = error "Bad OXM length"
   
@@ -1753,19 +1766,24 @@ getOXM = do
   let oxmClass = fromIntegral (shiftR header 16)
       oxmField = clearBit (fromIntegral $ shiftR header 9) 7
       hasMask  = testBit header 8
-  oxm <-
+  oxm <- trace ("len: " ++ show len ++ ", class: " ++ show oxmClass ++ ", field: " ++ show oxmField ++ ", mask: " ++ show hasMask) $
     if oxmClass == 0x8000
     then do toField hasMask oxmField 
     else if oxmClass == 1
          then assert (len == 4) $ -- Don't yet support masked Nicira registers
               do val <- getWord32be
                  return $ NiciraRegister (fromIntegral oxmField) val
-         else do payload <- getByteString len
-                 return $ OXMOther { oxmBody = payload  
-                                   , oxmField = oxmField
-                                   , oxmClass = oxmClass
-                                   , oxmHasMask = testBit header 8
-                                   }
+         else if oxmClass == 0x8001
+              then do val <- getWord64be
+                      -- skip mask
+                      skip $ len - 8
+                      return $ PacketRegister (fromIntegral oxmField) val
+              else do payload <- getByteString len
+                      return $ OXMOther { oxmBody = payload  
+                                        , oxmField = oxmField
+                                        , oxmClass = oxmClass
+                                        , oxmHasMask = testBit header 8
+                                        }
   return (4 + len, oxm)
 
 toField :: Bool -> Word8 -> Get OXM
@@ -1832,6 +1850,10 @@ toField hasMask 26 =
 toField hasMask 27 = 
   (\x y -> OXM { oxmOFField = IPv6Dst x y, oxmHasMask = hasMask }) <$>
   getIPv6Address <*> if hasMask then getIPv6Address else return $ B.replicate 16 (-1)
+toField hasMask 32 = do
+  v <- getWord32be 
+  when hasMask $ void getWord32be
+  return $ OXM { oxmOFField = TunnelDst v (-1), oxmHasMask = hasMask }
 toField hasMask 38 = do
   v <- getWord64be 
   when hasMask $ void getWord64be

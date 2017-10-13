@@ -323,6 +323,7 @@ data OXKey = OInPort
            | OIPv4Dst
            | OIPv4Src
            | ONiciraRegister Int
+           | OPacketRegister Int
            | OVLANID
            | OVLANPCP
            | OIPDSCP
@@ -353,6 +354,7 @@ data OXKey = OInPort
            | OMPLS_TC
            | OMPLS_BOS
            | OPBB_ISID
+           | OTunnelDst
            | OTunnelID
            | OIPv6_EXTHDR
            | OOXMOther Word16 Word8

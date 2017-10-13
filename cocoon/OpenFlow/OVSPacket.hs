@@ -104,11 +104,11 @@ udpPkt2Expr :: UDPPacket -> (Expr, BS.ByteString)
 udpPkt2Expr ((sport, dport, len, _), pl) = 
     (eStruct "UDPPkt" [eBit 16 $ toInteger sport, eBit 16 $ toInteger dport, eBit 16 $ toInteger len] ,pl)
 
-expr2Packet :: Expr -> BS.ByteString -> (EthernetFrame, Word64)
-expr2Packet e payload = ((h,b), tunid)
+expr2Packet :: Expr -> BS.ByteString -> (EthernetFrame, Word64, Word32)
+expr2Packet e payload = ((h,b), tunid, tundst)
     where
     E (EStruct _ "EthPacket" 
-       [ E (EStruct _ "VXLAN" [_,E (EBit _ 64 tun_id)])
+       [ E (EStruct _ "VXLAN" [E (EBit _ 32 tun_dst) ,E (EBit _ 64 tun_id)])
        , E (EBit _ 16 _)
        , E (EBit _ 48 src)
        , E (EBit _ 48 dst)
@@ -118,6 +118,7 @@ expr2Packet e payload = ((h,b), tunid)
        [ E (EBit _ 3  pcp)
        , E (EBit _ 12 vid)]) = vlan
     tunid = fromInteger tun_id
+    tundst = fromInteger tun_dst
     h = case vid of
              0 -> EthernetHeader (fromInteger dst) (fromInteger src)
              _ -> Ethernet8021Q  (fromInteger dst) (fromInteger src) (fromInteger pcp) True (fromInteger vid)
@@ -142,7 +143,7 @@ expr2ARPPkt e = case op of
 
 
 expr2IP4Pkt :: Expr -> BS.ByteString -> IPPacket
-expr2IP4Pkt e payload = (h,b)
+expr2IP4Pkt e payload = (h{ipChecksum=csum},b)
     where
     E (EStruct _ "IP4Pkt" 
        [ E (EBit _ 4  ihl)
@@ -164,15 +165,15 @@ expr2IP4Pkt e payload = (h,b)
                  (fromInteger ecn)
                  (fromInteger ttl)
                  (fromInteger nwproto)
-                 csum
+                 0
                  (fromInteger ident)
                  (fromInteger flagsOff)
     csum = checksum16BS $ runPut $ putIPHeader h 0
     b = case pl of
              E (EStruct _ "UDPPkt" [E (EBit _ 16 sport), E (EBit _ 16 dport), E (EBit _ 16 len)]) 
                                                                         -> UDPInIP ((fromInteger sport, fromInteger dport, fromInteger len, 0), payload)
-             E (EStruct _ "ICMP4Pkt" [E (EBit _ 8 t), E (EBit _ 8 c)])  -> let icmp = ((fromInteger t, fromInteger c, cs), payload)
+             E (EStruct _ "ICMP4Pkt" [E (EBit _ 8 t), E (EBit _ 8 c)])  -> let icmp = ((fromInteger t, fromInteger c, 0), payload)
                                                                                cs = checksum16BS $ runPut $ putICMPPacket icmp 0
-                                                                           in ICMPInIP icmp
+                                                                           in ICMPInIP $ ((fromInteger t, fromInteger c, cs), payload)
              E (EStruct _ "IPOther" [E (EBit _ 8 proto)])               -> UninterpretedIPBody (fromInteger proto) payload
              _                                                          -> error "OVSPacket expr2IP4Pkt: invalid packet"
