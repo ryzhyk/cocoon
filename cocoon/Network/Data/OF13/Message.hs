@@ -720,9 +720,8 @@ switchCapabilityFields = [ (0, FlowStats)
                          ]
   
 instance Binary Message where
-  get = do hdr <- trace "reading message" $ getHeader
-           m <- trace "read header" $ getBody hdr
-           trace "read body" $ return m
+  get = do hdr <- getHeader
+           getBody hdr
 
   put (Hello { xid }) = 
     putHeader hello_type_code len_header xid
@@ -1266,8 +1265,7 @@ getBody hdr@(_, typ, len, xid)
                             }
 
   | typ == packet_in_type_code = 
-        do trace "packet-in" $ return () 
-           bufferID' <- getWord32be
+        do bufferID' <- getWord32be
            let bufferID = if bufferID' == -1 
                           then Nothing 
                           else Just bufferID'
@@ -1275,8 +1273,8 @@ getBody hdr@(_, typ, len, xid)
            reason   <- getWord8
            tableID <- getWord8
            cookie <- getWord64be
-           match <- trace "before match" $ getMatch
-           trace "after match" $  skip 2
+           match <- getMatch
+           skip 2
            readSoFar <- bytesRead
            rest <- getByteString $ fromIntegral $ fromIntegral len - readSoFar
            return $ PacketIn { xid = xid
@@ -1744,18 +1742,18 @@ tlv_header_len = 4
 getMatch :: Get Match
 getMatch = do 
   matchType <- getWord16be
-  matchLen  <- trace ("matchType=" ++ show matchType) getWord16be
+  matchLen  <- getWord16be
   assert (matchType /= 0) $ do
-    oxms <- trace ("matchLen=" ++ show matchLen) $ getOXMs $ fromIntegral matchLen - 4
+    oxms <- getOXMs $ fromIntegral matchLen - 4
     let remainder = (- (fromIntegral matchLen :: Int)) `mod` 8
-    trace ("oxms read:" ++ show oxms) $ skip remainder
+    skip remainder
     return $ MatchOXM { oxms = oxms }
 
 getOXMs :: Int -> Get [OXM]
 getOXMs len 
-  | len == 0 = trace "len == 0" $ return []
-  | len > 0  = do (oxmlen,oxm) <- trace ("len = " ++ show len) $ getOXM
-                  oxms <- trace ("oxm:" ++ show oxm ++ ", oxmlen: " ++ show oxmlen) $ getOXMs (len - oxmlen)
+  | len == 0 = return []
+  | len > 0  = do (oxmlen,oxm) <- getOXM
+                  oxms <- getOXMs (len - oxmlen)
                   return $ oxm:oxms
   | otherwise = error "Bad OXM length"
   
@@ -1766,7 +1764,7 @@ getOXM = do
   let oxmClass = fromIntegral (shiftR header 16)
       oxmField = clearBit (fromIntegral $ shiftR header 9) 7
       hasMask  = testBit header 8
-  oxm <- trace ("len: " ++ show len ++ ", class: " ++ show oxmClass ++ ", field: " ++ show oxmField ++ ", mask: " ++ show hasMask) $
+  oxm <-
     if oxmClass == 0x8000
     then do toField hasMask oxmField 
     else if oxmClass == 1

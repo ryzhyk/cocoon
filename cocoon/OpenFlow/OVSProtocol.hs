@@ -121,7 +121,6 @@ sendMessage :: OFP.Switch -> [Message] -> IO ()
 sendMessage sw ms = do 
     mapM_ (\m -> putStrLn $ "->OF message: " ++ show m) ms
     OFP.sendMessage sw ms
-    putStrLn "sendMessage completed"
 
 factory :: Refine -> OF.IRSwitches -> PktCB -> OFP.Switch -> IO (Maybe Message -> IO ())
 factory r ir cb sw = do
@@ -176,16 +175,16 @@ doPacketIn r msg@PacketIn{..} = (do
                     _                    -> error $ "invalid Next action: " ++ show nxt
     -- evaluate arguments
     let as' = map (eval oxmmap) as
-    putStrLn $ "action: " ++ f ++ "(" ++ (intercalate ", " $ map show as') ++ ")"
+    --putStrLn $ "action: " ++ f ++ "(" ++ (intercalate ", " $ map show as') ++ ")"
     -- parse packet
     (pkt, rest) <- parsePkt oxmmap payload
-    putStrLn $ "packet: " ++ show pkt
-    putStrLn $ "payload: " ++ show rest
+    --putStrLn $ "packet: " ++ show pkt
+    --putStrLn $ "payload: " ++ show rest
     -- call swCB
     outpkts <- swCB f as' pkt 
     -- send packets
     mapM_ (\(pkt', E (ELocation _ _ key _)) -> do 
-                putStrLn $ "packet-out: " ++ show pkt'
+                --putStrLn $ "packet-out: " ++ show pkt'
                 let E (EBit _ _ pnum) = evalConstExpr swRefine $ eField key "portnum"
                     (b, acts) = unparsePkt pkt' rest
                     acts' = acts ++ [Output (fromInteger pnum) Nothing]
