@@ -138,12 +138,14 @@ HPortTun(srchport, dstmac, lsw, dsthv != srchv, dsthport, dsttunip) :- Hyperviso
                                                                      , HypervisorPort   (dsthport, _, dsthv)
                                                                      , HypervisorTunPort(_, _, dsthv, dsttunip)
 
-procedure hypervisorPortIn(port: HypervisorPort): sink =
-doHypervisorPortIn(port.id, port.switch)
+switch SHypervisor[Hypervisor] 
 
-//#controller
-procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
-    the (tun in HPortTun | tun.srchport == port and tun.dstmac == pkt.dst) {
+port PHypervisorPort[HypervisorPort](source hypervisorPortIn, sink)
+port PHypervisorTunPort[HypervisorTunPort](hypervisorTunPortIn, sink)
+
+
+procedure hypervisorPortIn(port: HypervisorPort): sink = {
+    the (tun in HPortTun | tun.srchport == port.id and tun.dstmac == pkt.dst) {
         if (not tun.tun) {
             the (hp in HypervisorPort | hp.id == tun.dsthport) {
                 send PHypervisorPort[hp].out
@@ -151,54 +153,48 @@ procedure doHypervisorPortIn(port: hport_id_t, hswitch: hyperv_id_t): sink = {
         } else {
             pkt.vxlan.tun_dst = tun.dsttunip;
             pkt.vxlan.tun_id  = tun.lswitch;
-            sendToTunnel(hswitch)
+            the (tp in HypervisorTunPort | tp.switch == port.switch) {
+                send PHypervisorTunPort[tp].out
+            }
         }
     } default {
         drop
     }
 }
 
-//#controller
-procedure sendToTunnel(hswitch : hyperv_id_t): sink = {
-    the (tp in HypervisorTunPort | tp.switch == hswitch) {
-        send PHypervisorTunPort[tp].out
+/*
+procedure hypervisorPortIn(port: HypervisorPort): sink = {
+    var lport: LogicalPort;
+    the (lp in LogicalPort | lp.hport == port.id) {
+        lport = lp
+    } default {
+        drop
+    };
+
+    var dstlport: LogicalPort;
+    the (lp in LogicalPort | lp.lswitch == lport.lswitch and lp.mac == pkt.dst) {
+        dstlport = lp
+    } default {
+        drop
+    };
+
+    var dsthp: HypervisorPort;
+    the (hp in HypervisorPort | dstlport.hport == hp.id) {
+        dsthp = hp
+    } default {
+        drop
+    };
+
+    if (dsthp.switch == port.switch) {
+        send PHypervisorPort[dsthp].out
+    } else {
+        the (tp in HypervisorTunPort | tp.switch == port.switch) {
+            pkt.vxlan.tun_dst = tp.externalip;
+            pkt.vxlan.tun_id  = lport.lswitch;
+            send PHypervisorTunPort[tp].out
+        }
     }
-}
-
-
-
-//role HypervisorPortIn[port in HypervisorPort] = {
-//    var lport: LogicalPort;
-//    the (lp in LogicalPort | lp.hport == port.id) {
-//        lport = lp
-//    } default {
-//        drop
-//    };
-//
-//    var dstlport: LogicalPort;
-//    the (lp in LogicalPort | lp.lswitch == lport.lswitch and lp.mac == pkt.dst) {
-//        dstlport = lp
-//    } default {
-//        drop
-//    };
-//
-//    var dsthp: HypervisorPort;
-//    the (hp in HypervisorPort | dstlport.hport == hp.id) {
-//        dsthp = hp
-//    } default {
-//        drop
-//    }
-//
-//    if dsthp.switch == port.switch {
-//        send HypervisorPortOut[dsthp]
-//    } else {
-//        pkt.tun_dst = dsthp.addr;
-//        pkt.tun_id  = lport.switch;
-//        the (tp in HypervisorTunPort | tp.switch == port.switch) {
-//            send HypervisorTunPortOut[tp]
-//        }
-//    }
-//}
+}*/
 
 //role HypervisorPortOut[port in HypervisorPort] = drop
 
@@ -217,13 +213,6 @@ procedure doHypervisorTunPortIn(): sink = {
 }
 
 //role HypervisorTunPortOut[port in HypervisorTunPort] = drop
-
-switch SHypervisor[Hypervisor] 
-
-port PHypervisorTunPort[HypervisorTunPort](hypervisorTunPortIn, sink)
-
-port PHypervisorPort[HypervisorPort](source hypervisorPortIn, sink)
-
 
 /*task Advertise[Hypervisor](advertise) @ 120ms
 
